@@ -3,3 +3,13 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Agent session scratchpads (ephemeral, not for contributors)
+PROGRESS.md
+research/
+SCRATCHPAD.md
+TASKS.md
+TODO.md
+tmp/
+.claude/sessions/
+SESSION-HANDOFF.md
