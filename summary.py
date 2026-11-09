@@ -1,18 +1,72 @@
 """The summary card's rules: which readings lead, what to do and when, the needs row and the day chart's data.
+Also AirGradient's PM2.5 correction (corrected_pm), which the neighbors and the demo's public monitors share.
 
 Pure functions, no network or Flask: server.py and tools/replay.py gather the inputs and call build_summary.
-Spec: research/specs/summary-redesign-spec.md.
+Spec: internal/specs/summary-redesign-spec.md.
 """
 import math
 from datetime import datetime, timedelta
 
 import phrases
+from config import APPLIANCES as _APPLIANCES, DEFAULT_LIMITS, bearing_in
 
-LIMITS = {"co2": 800, "rh_damp": 60, "rh_dry": 30, "rh_stop": 55, "pm": 15, "pm_high": 35, "pollen": 3}
-HOUSEHOLD = {"equipment": {"dehumidifier", "ac_dry"}}   # Sacha, 8 Nov 2026: no humidifier, no purifier
-OUTLOOK_HOURS = 8
-ANCHOR_FADE = timedelta(hours=6)
-MAX_ITEMS = 3
+LIMITS = dict(DEFAULT_LIMITS)   # the server fills these from the config at import
+APPLIANCES = set(_APPLIANCES)   # what dries a damp room here ([home] appliances); the server fills it from the config
+OUTLOOK_HOURS = 8                  # hours of PM2.5 forecast the items and the runner look ahead
+ANCHOR_FADE = timedelta(hours=6)   # how long a gap between the monitor and CAMS takes to fade (anchor_forecast)
+MAX_ITEMS = 3                      # items shown on the card; the rest go on the Also line
+CALIBRATION_RANGE = (0.1, 3.0)     # bounds on the monitor/CAMS factor, so a few odd hours can't zero or triple the forecast
+DRIER_BY_C = 1                     # °C: outside counts as drier when its dew point is this much below the room's
+NIGHT = (22, 7)                    # hours: "last night" runs from 10 PM to 7 AM
+NIGHT_STALE, NIGHT_ALL = 0.5, 0.9  # share of last night over the CO₂ limit: "stale", and "all last night" (else "most of")
+COLD_C = 10                        # °C: "close it after ten minutes" when it gets this cold within COLD_AHEAD
+COLD_AHEAD = timedelta(hours=8)
+TONIGHT_FROM = 18                  # hour: a chart starting at or after 6 PM is headed "Tonight"
+
+# AirGradient's EPA correction for PM2.5 (the US EPA's correction for Plantower sensors, Barkjohn et al., extended to
+# high concentrations), as AirGradient writes it in its firmware (airgradienthq/arduino, src/PMS/PMS.cpp,
+# PMSBase::compensate) and its map backend (airgradienthq/airgradient-map, apps/api/src/utils/getEpaCorrectedPM.ts):
+#   raw < 30:        0.524·raw − 0.0862·RH + 5.75
+#   30 ≤ raw < 50:   blends the slope from 0.524 to 0.786 (f = raw/20 − 3/2)
+#   50 ≤ raw < 210:  0.786·raw − 0.0862·RH + 5.75
+#   210 ≤ raw < 260: blends to the high form (f = raw/50 − 21/5)
+#   raw ≥ 260:       2.966 + 0.69·raw + 8.84e-4·raw²
+# never below 0; a raw 0 stays 0. The world list gives the raw pm02; a home's API answer has pm02_corrected. Used for
+# the neighbors (server._fetch_nearby) and the demo's public monitors (demo/public.py), so every PM2.5 shares one basis.
+EPA_BANDS = (30, 50, 210, 260)   # µg/m³ raw: where the formula's pieces meet
+EPA_SLOPE_LOW, EPA_SLOPE_MID, EPA_SLOPE_HIGH = 0.524, 0.786, 0.69   # the raw PM2.5 slope below 30, 50–210, from 260
+EPA_RH = 0.0862   # µg/m³ per % relative humidity, subtracted
+EPA_OFFSET, EPA_OFFSET_HIGH = 5.75, 2.966   # µg/m³: the constant term below 210, and from 260
+EPA_SQUARE = 8.84e-4   # the raw² term from 260
+
+
+def corrected_pm(pm02, rhum):
+    """AirGradient's EPA-corrected PM2.5 (µg/m³, one decimal, as its map shows it) from a raw pm02 and the monitor's
+    relative humidity (%); None without both. The formula and its sources are above EPA_BANDS."""
+    try:
+        raw, rh = float(pm02), min(100.0, max(0.0, float(rhum)))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(raw) and math.isfinite(rh)):
+        return None
+    if raw == 0:
+        return 0.0
+    b30, b50, b210, b260 = EPA_BANDS
+    if raw < b30:
+        value = EPA_SLOPE_LOW * raw - EPA_RH * rh + EPA_OFFSET
+    elif raw < b50:
+        f = (raw - b30) / (b50 - b30)
+        value = (EPA_SLOPE_MID * f + EPA_SLOPE_LOW * (1 - f)) * raw - EPA_RH * rh + EPA_OFFSET
+    elif raw < b210:
+        value = EPA_SLOPE_MID * raw - EPA_RH * rh + EPA_OFFSET
+    elif raw < b260:
+        f = (raw - b210) / (b260 - b210)
+        value = ((EPA_SLOPE_HIGH * f + EPA_SLOPE_MID * (1 - f)) * raw - EPA_RH * rh * (1 - f) + EPA_OFFSET_HIGH * f
+                 + EPA_OFFSET * (1 - f) + EPA_SQUARE * raw ** 2 * f)
+    else:
+        value = EPA_OFFSET_HIGH + EPA_SLOPE_HIGH * raw + EPA_SQUARE * raw ** 2
+    value = round(value, 1)
+    return value if value > 0 else 0.0
 
 
 def clock(t):
@@ -22,7 +76,7 @@ def clock(t):
 
 
 def anchor_forecast(cams, measured_now, cams_now):
-    """CAMS works on a 45 km grid and misses the BQE, so keep its shape but start it from what the backyard
+    """CAMS works on a 45 km grid and misses a nearby road, so keep its shape but start it from what the backyard
     monitor reads now. Without a measurement (or a CAMS value for now) the raw values are used, flagged False."""
     pts = [(t, v) for t, v in cams if v is not None]
     if measured_now is None or cams_now is None:
@@ -50,7 +104,7 @@ def calibrate_forecast(cams, monitor_pts, now, min_hours=6):
         return None, None
     mid = len(ratios) // 2
     k = ratios[mid] if len(ratios) % 2 else (ratios[mid - 1] + ratios[mid]) / 2
-    k = min(max(k, 0.1), 3.0)
+    k = min(max(k, CALIBRATION_RANGE[0]), CALIBRATION_RANGE[1])
     return [(t, round(v * k, 1)) for t, v in cams if v is not None and t > now], k
 
 
@@ -124,21 +178,21 @@ def candidates(r, outlook, pollen_today, night=None):
 def _night_ctx(night):
     if not night or not night["stale"]:
         return ""
-    return f" · over {LIMITS['co2']} all last night" if night["share"] >= 0.9 else f" · over {LIMITS['co2']} most of last night"
+    return f" · over {LIMITS['co2']} all last night" if night["share"] >= NIGHT_ALL else f" · over {LIMITS['co2']} most of last night"
 
 
 def last_night(co2_pts, now):
     """Last night's CO2, 10 PM to 7 AM: {peak, share over 800, stale (over 800 at least half the night)}.
     Only from 7 AM to 10 PM: before 7 the night isn't over, after 10 a new one has started and the reading now counts."""
-    if not 7 <= now.hour < 22:
+    if not NIGHT[1] <= now.hour < NIGHT[0]:
         return None
-    end = now.replace(hour=7, minute=0, second=0, microsecond=0)
-    start = end - timedelta(hours=9)
+    end = now.replace(hour=NIGHT[1], minute=0, second=0, microsecond=0)
+    start = end - timedelta(hours=(NIGHT[1] - NIGHT[0]) % 24)
     vals = [v for t, v in co2_pts if v is not None and start <= t < end]
     if not vals:
         return None
     share = sum(v > LIMITS["co2"] for v in vals) / len(vals)
-    return {"peak": round(max(vals)), "share": round(share, 2), "stale": share >= 0.5}
+    return {"peak": round(max(vals)), "share": round(share, 2), "stale": share >= NIGHT_STALE}
 
 
 def select(cands, extra):
@@ -169,12 +223,15 @@ def dew_point(t, rh):
 
 def _drier_outside(r):
     d_in, d_out = dew_point(r.get("t_in"), r.get("rh")), dew_point(r.get("t_out"), r.get("rh_out"))
-    return d_in is not None and d_out is not None and d_out < d_in - 1
+    return d_in is not None and d_out is not None and d_out < d_in - DRIER_BY_C
 
 
 def _first_over(outlook, now):
     """The first PM2.5-over-15 stretch that hasn't ended."""
     return next(((a, b) for a, b in outlook.get("over") or [] if b > now), None)
+
+
+AC_DRY = "Run the AC’s dry mode"   # the damp-room action when the AC is the only appliance
 
 
 def action(item, r, outlook, rush, now):
@@ -195,9 +252,11 @@ def action(item, r, outlook, rush, now):
         if rh is not None and rh > LIMITS["rh_damp"]:
             if _drier_outside(r) and not stretch:
                 return act("Air the room for 10 min", "drier outside")
-            if "dehumidifier" in HOUSEHOLD["equipment"]:
+            if "dehumidifier" in APPLIANCES:
                 return act("Run the dehumidifier", f"until under {LIMITS['rh_stop']}%")
-            return act("Close the windows", f"until under {LIMITS['rh_stop']}%")
+            if "ac_dry" in APPLIANCES:
+                return act(AC_DRY, f"until under {LIMITS['rh_stop']}%")
+            return act("Keep the windows shut")   # nothing to lower it: no "until under"
         if _drier_outside(r):
             return act("Keep windows shut", "while it’s this dry outside")
         return act(None)
@@ -252,7 +311,7 @@ def needs_row(r, outlook, pollen_today, smoke, night, now):
     elif outlook.get("high"):
         run = (False, "Skip today")
     elif stretch and stretch[0] <= now:
-        run = (False, "Not clean now")
+        run = (False, f"Run after {clock(stretch[1])}")   # the action, with the time the dirty stretch ends
     elif stretch:
         run = (False, f"Avoid {fmt_range(*stretch)}")
     else:
@@ -269,8 +328,10 @@ def needs_row(r, outlook, pollen_today, smoke, night, now):
 
 
 # ── The day chart's data, and the whole card ──
-CHART_BEFORE = timedelta(hours=3.5)
-CHART_SPAN = timedelta(hours=15)
+CHART_BEFORE = timedelta(hours=3.5)   # how much of the past the day chart shows before now
+CHART_SPAN = timedelta(hours=15)      # the day chart's whole width
+RAIN_SHOWN = 30                       # %: the chart's 3-hourly row shows rain from this chance of precipitation
+STRONG_UV = 6                         # UV index from which the chart marks strong sun (WHO's "high")
 
 
 def _floor_hour(t):
@@ -281,9 +342,11 @@ def _iso(t):
     return t.isoformat()
 
 
-def timeline(now, co2_pts, rh_pts, pm_past, pm_fc_adj, hourly, sun, show_rh):
+def timeline(now, co2_pts, rh_pts, pm_past, pm_fc_adj, hourly, sun, show_rh, pm_past_model=False):
     """Everything the chart draws, with ISO times: measured CO₂ (and humidity when it's a damp item), PM2.5 measured
-    and forecast, the 3-hourly temperature and rain row, strong-sun stretches, sunrise/sunset and night."""
+    and forecast, the 3-hourly temperature and rain row, strong-sun stretches, sunrise/sunset and night.
+    pm_past_model: the past PM2.5 is the model's hours, not a monitor's (a public monitor without history), and the
+    series says so ("source": "model")."""
     t0 = _floor_hour(now - CHART_BEFORE)
     t1 = t0 + CHART_SPAN
     win = lambda ps, a, b: [[_iso(t), round(v, 1)] for t, v in ps if v is not None and a <= t <= b]
@@ -299,13 +362,13 @@ def timeline(now, co2_pts, rh_pts, pm_past, pm_fc_adj, hourly, sun, show_rh):
             pop = max((x.get("pop") or 0) for x in near) if near else 0
             mm = round(sum((x.get("mm") or 0) for x in near), 1)
             hours.append({"t": _iso(t), "temp": None if h.get("temp") is None else round(h["temp"]),
-                          "pop": pop if pop >= 30 else None, "mm": mm if pop >= 30 else None})
+                          "pop": pop if pop >= RAIN_SHOWN else None, "mm": mm if pop >= RAIN_SHOWN else None})
         t += timedelta(hours=3)
     uv, start, top = [], None, 0
     for h in sorted(hourly, key=lambda x: x["t"]):
         if not t0 <= h["t"] <= t1:
             continue
-        if (h.get("uv") or 0) >= 6:
+        if (h.get("uv") or 0) >= STRONG_UV:
             start = start or h["t"]
             top = max(top, round(h["uv"]))
         elif start is not None:
@@ -329,7 +392,8 @@ def timeline(now, co2_pts, rh_pts, pm_past, pm_fc_adj, hourly, sun, show_rh):
     if dark_from is not None:
         night.append([_iso(dark_from), _iso(t1)])
     return {"t0": _iso(t0), "t1": _iso(t1), "now": _iso(now), "co2": co2, "rh": rh,
-            "pm": {"past": win(pm_past, t0, now), "fc": [[_iso(t), round(v, 1)] for t, v in pm_fc_adj if now < t <= t1]},
+            "pm": {"past": win(pm_past, t0, now), "fc": [[_iso(t), round(v, 1)] for t, v in pm_fc_adj if now < t <= t1],
+                   **({"source": "model"} if pm_past_model else {})},
             "hours": hours, "uv": uv,
             "sun": [{"t": _iso(e["t"]), "kind": e["kind"]} for e in events if t0 <= e["t"] <= t1],
             "night": night, "limits": {"co2": LIMITS["co2"], "pm": LIMITS["pm"], "rh": LIMITS["rh_damp"]}}
@@ -352,19 +416,26 @@ def _since(pts, limit, now):
     return f"yesterday {s}" if t.date() < now.date() else s
 
 
-def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today, pollen_tomorrow, rush, sun, now, means=None):
-    """The whole card from the rules: items with actions and explanations, the Also line, the needs row, the chart."""
+def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today, pollen_tomorrow, rush, sun, now, road=None,
+                  pm_past_model=False, monitor_label=None):
+    """The whole card from the rules: items with actions and explanations, the Also line, the needs row, the chart.
+    `road` is the road's name (None without one); `rush` its rush windows from rush_windows(). With pm_past_model,
+    pm_past is the model's past hours: the chart draws it, but it can't calibrate the model against itself.
+    `monitor_label` names the outdoor monitor in the PM2.5 item's sentences ("your yard monitor", "this monitor");
+    None leaves phrases' default, the home's outdoor monitor."""
     cams_now = next((v for t, v in cams if _floor_hour(t) == _floor_hour(now) and v is not None), None)
-    adjusted, _k = calibrate_forecast(cams, pm_past, now)
+    adjusted, k = calibrate_forecast(cams, [] if pm_past_model else pm_past, now)
+    fit = "calibrated" if k is not None else None
     if adjusted is None:   # not enough history to calibrate: anchor to the reading now, fading over 6 hours
-        adjusted, _anchored = anchor_forecast([(t, v) for t, v in cams if t >= _floor_hour(now)], r.get("pm_now"), cams_now)
+        adjusted, anchored = anchor_forecast([(t, v) for t, v in cams if t >= _floor_hour(now)], r.get("pm_now"), cams_now)
+        fit = "anchored" if anchored else None
     outlook = pm_outlook(r.get("pm_now"), adjusted, now)
     if outlook["max"] is not None and round(outlook["max"]) > LIMITS["pm"]:
         at_t = outlook["max_at"] or now
         if smoke:
             outlook["cause"] = "smoke"
-        elif any(a <= at_t < b and toward for a, b, toward in rush):
-            outlook["cause"] = "BQE rush"
+        elif road and any(a <= at_t < b and toward for a, b, toward in rush):
+            outlook["cause"] = f"{road} rush"
     night = last_night(co2_pts, now)
 
     pollen_ok = pollen_today if pollen_today and (pollen_today.get("index") or 0) >= LIMITS["pollen"] else None
@@ -375,7 +446,6 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
     items, also = select(cands, extra)
 
     wind_at = lambda t: next((h.get("wind_dir") for h in hourly if t is not None and _floor_hour(h["t"]) == _floor_hour(t)), None)
-    model_key = {"co2": "co2", "rh": "humidity", "pm": "pm"}
     for it in items:
         # whose need the item is: its chip on the card names that need and opens its sentence after the item's
         it["need"] = {"co2": "toddler", "rh": "sinus", "pollen": "sinus"}.get(it["id"], "toddler" if outlook.get("high") else "runner")
@@ -384,45 +454,48 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
         when = it["action"]["when"] or ""
         if it["id"] == "co2":
             f["since"] = _since(co2_pts, LIMITS["co2"], now)
-            if when.startswith("before "):
-                f["rush_start"] = when[7:]
+            if when.startswith("before "):   # the PM2.5 stretch ahead: with a road and rush hours, its rush fumes
+                f["rush_start" if road and rush else "dirty_at"] = when[7:]
             elif when.startswith("after "):
                 f["clean_at"] = when[6:]
             cold = next((h for h in sorted(hourly, key=lambda x: x["t"])
-                         if now < h["t"] <= now + timedelta(hours=8) and h.get("temp") is not None and h["temp"] <= 10), None)
+                         if now < h["t"] <= now + COLD_AHEAD and h.get("temp") is not None and h["temp"] <= COLD_C), None)
             if cold:
                 f.update(temp_at=round(cold["temp"]), temp_time=clock(cold["t"]))
+        home = {}   # facts for the sentences only, not kept on the item
         if it["id"] == "rh":
             f["drier_out"] = _drier_outside(r)
             if f["drier_out"] and not it["action"]["text"].startswith("Air"):
                 f["drier_out"] = None   # drier outside, but the air there is dirty soon: say nothing about airing
+            # the AC as a second option, unless it is the action; "stop at" only when something is running
+            home = {"ac_too": "ac_dry" in APPLIANCES and it["action"]["text"] != AC_DRY, "appliance": bool(APPLIANCES)}
         if it["id"] == "pm":
             f.update(wind_dir=wind_at(outlook["max_at"] or now), smoke=bool(smoke))
-        m = (means or {}).get(model_key.get(it["id"]))
-        text = phrases.why(it["id"], f, effect=m.strip() if m else None)   # the model's line replaces only the effect
-        it["why"] = text
+            # how the forecast was fitted, and to which monitor: its timing sentence says so
+            home = {"forecast_fit": fit, **({"monitor_label": monitor_label} if monitor_label else {})}
+        it["why"] = phrases.why(it["id"], {**f, **home})
         it["facts"] = f
 
     needs = needs_row(r, outlook, pollen_today, smoke, night, now)
-    for n in needs:
-        n["why"] = phrases.pill_why(n["id"], n["facts"], n["ok"], n["state"])
+    for n in needs:   # the appliances pick the damp-room words; like `home` above, not kept as facts
+        n["why"] = phrases.pill_why(n["id"], {**n["facts"], **{a: True for a in APPLIANCES}}, n["ok"], n["state"])
     show_rh = any(i["id"] == "rh" and not i["facts"].get("dry") for i in items)
-    tl = timeline(now, co2_pts, rh_pts, pm_past, adjusted, hourly, sun, show_rh)
+    tl = timeline(now, co2_pts, rh_pts, pm_past, adjusted, hourly, sun, show_rh, pm_past_model)
     t0 = datetime.fromisoformat(tl["t0"])
-    return {"label": "Tonight" if t0.hour >= 18 else "Today", "clock": clock(now), "items": items, "also": also,
+    return {"label": "Tonight" if t0.hour >= TONIGHT_FROM else "Today", "clock": clock(now), "items": items, "also": also,
             "needs": needs, "all_clear": not items, "timeline": tl}
 
 
 
-def rush_windows(hourly, now, windows, toward_range):
-    """Today's and tomorrow's BQE rush windows as (start, end, wind_toward): toward when at least half the window's
-    forecast hours blow from `toward_range` (degrees)."""
+def rush_windows(hourly, now, windows, toward):
+    """Today's and tomorrow's rush windows of the road as (start, end, wind_toward): toward when at least half the
+    window's forecast hours blow from the arc `toward` (lo, hi) in degrees, which can cross north (lo > hi)."""
     out = []
     for d in (0, 1):
         day = (now + timedelta(days=d)).replace(hour=0, minute=0, second=0, microsecond=0)
         for start, end, _name in windows:
             a, b = day + timedelta(hours=start), day + timedelta(hours=end)
             winds = [h["wind_dir"] for h in hourly if a <= h["t"] < b and h.get("wind_dir") is not None]
-            toward = sum(1 for w in winds if toward_range[0] <= w <= toward_range[1])
-            out.append((a, b, bool(winds) and toward * 2 >= len(winds)))
+            n = sum(1 for w in winds if bearing_in(w, toward))
+            out.append((a, b, bool(winds) and n * 2 >= len(winds)))
     return out

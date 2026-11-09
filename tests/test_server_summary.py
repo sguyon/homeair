@@ -1,19 +1,5 @@
-import pytest
-
 import server
 from conftest import SAMPLE_PAYLOAD
-
-
-def test_summary_ai_off_never_calls_model(monkeypatch, client):
-    monkeypatch.setattr(server, "SUMMARY_AI", False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    monkeypatch.setattr(server, "call_read_model", lambda *a, **k: pytest.fail("model called"))
-    r = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD}).get_json()
-    assert r["source"] == "rules" and r["note"] is None
-
-
-def test_pm_fine_is_15():
-    assert server.PM_FINE == 15
 
 
 def test_weather_asks_for_sun_times_and_past_hours(monkeypatch):
@@ -27,7 +13,7 @@ def test_weather_asks_for_sun_times_and_past_hours(monkeypatch):
         seen.update(params or {})
         return R()
     monkeypatch.setattr(server.requests, "get", fake_get)
-    server._fetch_weather()
+    server._fetch_weather(server.home_here())
     assert seen["daily"] == "sunrise,sunset" and seen["past_hours"] == 4 and seen["forecast_days"] == 2
 
 
@@ -37,16 +23,12 @@ def test_payload_has_summary(client):
     assert [i["id"] for i in s["items"]][:2] == ["co2", "rh"]
 
 
-def test_model_means_reach_the_card(monkeypatch, client):
-    monkeypatch.setattr(server, "SUMMARY_AI", True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    monkeypatch.setattr(server, "ai_allowed", lambda ip: None)
-    monkeypatch.setattr(server, "call_read_model", lambda *a, **k: {"why": "Stale and damp inside today.",
-                        "means": {"co2": "Stale air makes sleep lighter.", "humidity": "Damp air feeds mold.", "pm": "Clean air."}})
-    body = {"format": "read", "force": True, **SAMPLE_PAYLOAD, "indoor_co2": 1310}
-    r = client.post("/api/analyze", json=body).get_json()
-    co2 = next(i for i in r["summary"]["items"] if i["id"] == "co2")
-    assert r["source"] == "model" and co2["why"].startswith("Stale air makes sleep lighter.")
+def test_read_carries_no_unread_fields(client):
+    # the page reads summary, generated_at and clock; the old card's headline, cards, checked, ahead and the pollen
+    # relief line had no reader left
+    r = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD}).get_json()
+    assert not {"headline", "cards", "checked", "ahead", "relief", "relief_short"} & set(r)
+    assert {"summary", "generated_at", "clock"} <= set(r)
 
 
 def test_history_keeps_humidity_for_the_chart(monkeypatch, client):
@@ -57,18 +39,30 @@ def test_history_keeps_humidity_for_the_chart(monkeypatch, client):
     assert rows[0]["rhum_corrected"] == 51 and rows[0]["rhum"] == 52 and "atmp" not in rows[0]
 
 
-def test_cached_model_read_still_draws_a_fresh_card(monkeypatch, client):
-    monkeypatch.setattr(server, "SUMMARY_AI", True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    monkeypatch.setattr(server, "ai_allowed", lambda ip: None)
-    monkeypatch.setattr(server, "call_read_model", lambda *a, **k: {"why": "Stale and damp inside today.",
-                        "means": {"co2": "Stale air makes sleep lighter.", "humidity": "Damp air feeds mold.", "pm": "Clean air."}})
-    client.post("/api/analyze", json={"format": "read", "force": True, **SAMPLE_PAYLOAD, "indoor_co2": 1310})
-    r = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD, "indoor_co2": 1320}).get_json()
-    co2 = next(i for i in r["summary"]["items"] if i["id"] == "co2")
-    assert r.get("cached") and co2["num"] == "1,320" and co2["why"].startswith("Stale air makes sleep lighter.")
-
-
 def test_canned_smoke_is_off_like_the_real_function(client):
     s = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD}).get_json()["summary"]
     assert next(n for n in s["needs"] if n["id"] == "runner")["facts"]["smoke"] is False
+
+
+def test_analyze_needs_read_format(client):
+    for body in ({}, {"format": "stream"}):
+        r = client.post("/api/analyze", json=body)
+        assert r.status_code == 400 and "error" in r.get_json()
+
+
+def test_card_is_redrawn_on_every_read(client):
+    a = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD, "indoor_co2": 1310}).get_json()
+    b = client.post("/api/analyze", json={"format": "read", **SAMPLE_PAYLOAD, "indoor_co2": 1320}).get_json()
+    num = lambda r: next(i for i in r["summary"]["items"] if i["id"] == "co2")["num"]
+    assert num(a) == "1,310" and num(b) == "1,320"
+
+
+def test_home_without_outdoor_history_draws_no_model_past(monkeypatch):
+    """The model's past hours stand in for a public monitor's history only: a home whose outdoor history is missing
+    (AirGradient failed, or no outdoor monitor) draws no past PM2.5, as before."""
+    from fixtures import golden_inputs as gi
+    gi.install(server, monkeypatch, gi.EVENING)
+    monkeypatch.setattr(server, "history_points", lambda lid, now, hours=24: gi.history(lid, now, hours) if lid == 1 else [])
+    with server.app.test_client() as c:
+        pm = c.post("/api/analyze", json={"format": "read", **gi.PAYLOAD}).get_json()["summary"]["timeline"]["pm"]
+    assert "source" not in pm and pm["past"] == [] and pm["fc"]

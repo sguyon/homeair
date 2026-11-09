@@ -1,10 +1,16 @@
 """Shared fixtures: the Flask app with every upstream fetch replaced by canned data, so no test touches the network."""
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The server reads its config at import. Tests use the reference config (tests/fixtures/config_reference.toml), never the
+# gitignored config.toml, which CI doesn't have.
+REFERENCE_TOML = (Path(__file__).parent / "fixtures" / "config_reference.toml").read_text(encoding="utf-8")
+os.environ.pop("DEMO", None)
+os.environ["CONFIG_TOML"] = REFERENCE_TOML
 import server  # noqa: E402
 
 SAMPLE_PAYLOAD = {

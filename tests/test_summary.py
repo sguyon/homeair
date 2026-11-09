@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from summary import LIMITS, HOUSEHOLD, anchor_forecast, pm_outlook, candidates, select
+from summary import anchor_forecast, pm_outlook, candidates, select
 
 TZ = ZoneInfo("America/New_York")
 NOW = datetime(2026, 11, 8, 15, 40, tzinfo=TZ)
@@ -19,11 +19,6 @@ def outlook(peak=None, now_v=4, at_h=19, cause=None):
     o = pm_outlook(now_v, pts, NOW)
     o["cause"] = cause
     return o
-
-
-def test_limits_and_household():
-    assert LIMITS == {"co2": 800, "rh_damp": 60, "rh_dry": 30, "rh_stop": 55, "pm": 15, "pm_high": 35, "pollen": 3}
-    assert HOUSEHOLD["equipment"] == {"dehumidifier", "ac_dry"}
 
 
 def test_anchor_edges():
@@ -200,7 +195,7 @@ def test_runner_says_clean_air_without_a_cutoff():
 
 def test_runner_amber_only_on_numbers():
     assert need(needs_row(FINE, ol(over=[(at(16), at(20))]), None, False, None, at(15)), "runner")["state"] == "Avoid 4–8 PM"
-    assert need(needs_row(FINE, ol(over=[(at(15), at(20))], now_v=20), None, False, None, at(15)), "runner")["state"] == "Not clean now"
+    assert need(needs_row(FINE, ol(over=[(at(15), at(20))], now_v=20), None, False, None, at(15)), "runner")["state"] == "Run after 8 PM"
     n = need(needs_row(FINE, ol(over=[(at(15), at(20))], now_v=40, high=True), None, False, None, at(15)), "runner")
     assert (n["ok"], n["state"]) == (False, "Skip today")
 
@@ -332,7 +327,7 @@ def busy(**k):
     args = dict(r=BUSY_R, cams=cams, hourly=hourly_for(at(11), 20), co2_pts=pts(at(12), at(15, 40), 1100),
                 rh_pts=pts(at(12), at(15, 40), 63), pm_past=pts(at(12), at(15, 40), 4), smoke=False,
                 pollen_today=None, pollen_tomorrow=None,
-                rush=[(at(16), at(20), True), (at(7, day=1), at(10, day=1), False)], sun=SUN, now=at(15, 40))
+                rush=[(at(16), at(20), True), (at(7, day=1), at(10, day=1), False)], sun=SUN, now=at(15, 40), road="BQE")
     args.update(k)
     return build_summary(**args)
 
@@ -361,12 +356,6 @@ def test_build_summary_tonight_and_clear():
 def test_tomorrow_pollen_goes_on_also():
     s = busy(pollen_tomorrow={"index": 4, "name": "Tree"})
     assert s["also"] == "Also: pollen high tomorrow (tree), keep windows shut overnight."
-
-
-def test_model_means_replace_effect():
-    s = busy(means={"co2": "Stale air makes sleep lighter."})
-    co2 = next(i for i in s["items"] if i["id"] == "co2")
-    assert co2["why"].startswith("Stale air makes sleep lighter.") and "Above 800" not in co2["why"]
 
 
 def test_night_without_yesterdays_sunset():
@@ -443,15 +432,6 @@ def test_since_names_yesterday():
     assert _since(pts(at(8, day=-1), at(8), 1000), 800, at(8)) is None   # over for the whole window: start unknown
 
 
-def test_model_means_replace_only_the_effect_sentence():
-    plain = next(i for i in busy()["items"] if i["id"] == "co2")["why"]
-    co2 = next(i for i in busy(means={"co2": "Stale air makes sleep lighter."})["items"] if i["id"] == "co2")["why"]
-    assert co2 == plain.replace("Above 800 the air feels stale, and focus and sleep can suffer.", "Stale air makes sleep lighter.")
-    plain = next(i for i in busy()["items"] if i["id"] == "pm")["why"]
-    pm = next(i for i in busy(means={"pm": "Fine dust irritates the airways."})["items"] if i["id"] == "pm")["why"]
-    assert pm.startswith("Fine dust irritates the airways. ") and pm.endswith(plain.split(". ", 1)[1].split("used here for any hour. ", 1)[-1])
-
-
 def test_damp_why_never_suggests_airing_when_the_action_is_the_dehumidifier():
     # outside is drier, but PM2.5 goes over 15 at 5 PM, so the action is the dehumidifier
     s = busy(r={"co2": 600, "rh": 70, "rh_out": 40, "t_in": 21, "t_out": 15, "pm_now": 4})
@@ -481,3 +461,110 @@ def test_air_before_a_dirty_stretch_that_has_not_started():
     assert (a["text"], a["when"]) == ("Open a window for 10 min", "before 11 PM")
     a = action(CO2_ITEM, {"co2": 900}, ol(over=[(at(21), at(23))], now_v=40, high=True), [], at(21, 30))
     assert (a["text"], a["when"]) == ("Air out", "after 11 PM")
+
+
+def test_no_road_no_rush_in_the_text():
+    s = busy(road=None, rush=[])
+    pm, co2 = s["items"][0], s["items"][1]
+    assert pm["ctx"] == "Peak 7 PM · now 4" and "rush" not in pm["why"]
+    assert co2["why"].endswith("Do it before 5 PM, when the air outside gets dirtier.")
+
+
+def test_rush_windows_arc_crossing_north():
+    hr = hourly_for(at(0), 48, wind=350)
+    rw = rush_windows(hr, at(15, 40), [(16, 20, "evening")], (300, 20))
+    assert [t for _, _, t in rw] == [True, True]
+
+
+# ── The damp-room action follows the appliances in [home] ──
+import summary as summary_mod  # noqa: E402
+
+DAMP_R = {"rh": 64, "rh_out": 80, "t_in": 21, "t_out": 21}
+
+
+def damp_item(monkeypatch, appliances):
+    monkeypatch.setattr(summary_mod, "APPLIANCES", set(appliances))
+    s = busy()
+    return next(i for i in s["items"] if i["id"] == "rh")
+
+
+def test_damp_with_both_appliances(monkeypatch):
+    rh = damp_item(monkeypatch, {"dehumidifier", "ac_dry"})
+    assert rh["action"]["text"] == "Run the dehumidifier" and rh["action"]["when"] == "until under 55%"
+    assert rh["why"].endswith("The AC’s dry mode works too. Stop at 55%.")
+
+
+def test_damp_with_only_the_dehumidifier(monkeypatch):
+    rh = damp_item(monkeypatch, {"dehumidifier"})
+    assert rh["action"]["text"] == "Run the dehumidifier"
+    assert "dry mode" not in rh["why"] and rh["why"].endswith("Stop at 55%.")
+
+
+def test_damp_with_only_the_ac(monkeypatch):
+    rh = damp_item(monkeypatch, {"ac_dry"})
+    assert rh["action"]["text"] == "Run the AC’s dry mode" and rh["action"]["when"] == "until under 55%"
+    assert "works too" not in rh["why"] and rh["why"].endswith("Stop at 55%.")
+
+
+def test_damp_with_neither(monkeypatch):
+    rh = damp_item(monkeypatch, set())
+    # nothing lowers the humidity, so no "until under" and no "Stop at"
+    assert rh["action"] == {"text": "Keep the windows shut", "when": None, "when_end": None}
+    assert "dry mode" not in rh["why"] and "Stop at" not in rh["why"]
+
+
+def damp_pollen_pill(monkeypatch, appliances):
+    monkeypatch.setattr(summary_mod, "APPLIANCES", set(appliances))
+    sinus = next(n for n in busy(pollen_today={"index": 4, "name": "Tree"})["needs"] if n["id"] == "sinus")
+    assert sinus["state"] == "Damp + pollen"
+    assert set(sinus["facts"]) == {"rh", "pollen_index", "pollen_type"}   # the appliances aren't kept as facts
+    return sinus["why"]
+
+
+def test_damp_pollen_pill_follows_the_appliances(monkeypatch):
+    both = damp_pollen_pill(monkeypatch, {"dehumidifier", "ac_dry"})
+    assert both == "Damp inside and pollen outside: dehumidify with the windows shut."   # the reference home's text
+    assert damp_pollen_pill(monkeypatch, {"dehumidifier"}) == both
+    assert damp_pollen_pill(monkeypatch, {"ac_dry"}) == "Damp inside and pollen outside: run the AC’s dry mode with the windows shut."
+    assert damp_pollen_pill(monkeypatch, set()) == "Damp inside and pollen outside: keep the windows shut."
+
+
+def test_airing_mentions_the_ac_only_when_there_is_one(monkeypatch):
+    dry_out = {**BUSY_R, "rh_out": 40, "t_out": 8}
+    monkeypatch.setattr(summary_mod, "APPLIANCES", {"ac_dry"})
+    rh = next(i for i in busy(r=dry_out, cams=[(at(h), 3) for h in range(15, 27)])["items"] if i["id"] == "rh")
+    assert rh["action"]["text"] == "Air the room for 10 min" and "The AC’s dry mode works too." in rh["why"]
+    monkeypatch.setattr(summary_mod, "APPLIANCES", set())
+    rh = next(i for i in busy(r=dry_out, cams=[(at(h), 3) for h in range(15, 27)])["items"] if i["id"] == "rh")
+    assert "dry mode" not in rh["why"]
+
+
+# ── A public monitor: no history, so the chart's past PM2.5 is the model's ──
+
+def test_model_past_when_no_history():
+    cams = [(at(h), v) for h, v in zip(range(10, 27), [5, 5, 6, 6, 7, 8, 9, 18, 23, 25, 16, 8, 5, 4, 4, 4, 4])]
+    model_past = [(t, v) for t, v in cams if t <= at(15, 40)]
+    s = busy(r={"pm_now": 4}, cams=cams, co2_pts=[], rh_pts=[], pm_past=model_past, pm_past_model=True, rush=[], road=None)
+    pm = s["timeline"]["pm"]
+    assert pm["source"] == "model"
+    assert pm["past"][0][0] < iso(at(15, 40)) and pm["past"] == [[iso(at(h)), float(v)] for h, v in zip(range(12, 16), [6, 6, 7, 8])]
+    # the model's past isn't the monitor's: the forecast starts from the reading now (anchored), not calibrated to itself
+    anchored = busy(r={"pm_now": 4}, cams=cams, co2_pts=[], rh_pts=[], pm_past=[], rush=[], road=None)
+    assert pm["fc"] == anchored["timeline"]["pm"]["fc"] and s["items"] == anchored["items"]
+    assert "source" not in anchored["timeline"]["pm"] and "source" not in busy()["timeline"]["pm"]   # measured: no key
+    assert timeline(at(15, 40), [], [], model_past, [], [], [], False, pm_past_model=True)["pm"]["source"] == "model"
+
+
+def test_pm_timing_says_how_the_forecast_was_fitted():
+    """The PM2.5 item's last sentence says what was done: scaled by a day of the monitor's readings, or started from
+    its reading now when there's too little history to scale by (busy()'s model starts at 3 PM: one past hour)."""
+    pm = busy(monitor_label="your yard monitor")["items"][0]
+    assert pm["why"].endswith("The forecast is Open-Meteo’s prediction for the wider area, started from your yard monitor’s reading now.")
+    assert "scaled" not in pm["why"] and "monitor_label" not in pm["facts"] and "forecast_fit" not in pm["facts"]
+    # a day of the model and of the monitor: scaled, and the sentence says so
+    day = [(at(15) + timedelta(hours=h), 8.0 if h <= 0 else 30.0) for h in range(-24, 12)]
+    pm = busy(cams=day, pm_past=pts(at(15) - timedelta(hours=24), at(15, 40), 8), monitor_label="your yard monitor")["items"][0]
+    assert pm["why"].endswith("scaled to what your yard monitor measured over the last day.")
+    # no reading now and no history: the raw model, and no sentence about fitting it
+    pm = busy(r={**BUSY_R, "pm_now": None}, pm_past=[])["items"][0]
+    assert "The forecast is" not in pm["why"]
