@@ -2,6 +2,8 @@
 import json
 import math
 import os
+import re
+import tempfile
 import tomllib
 from collections import namedtuple
 from dataclasses import dataclass
@@ -10,6 +12,9 @@ from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent   # the app's folder: config.toml, demo/ and relative road routes live here
+
+# Owner-only file mode: every saved dotenv contains credentials, including an existing file.
+ENV_FILE_MODE = 0o600
 
 # the profiles the page knows ([profiles]); a new one is code (SETUP.md, "Adding a profile")
 PROFILES = ("toddler", "sinus", "runner")
@@ -36,6 +41,61 @@ def env_key(name: str, env: Mapping[str, str] = os.environ) -> str:
     """The key's value, or "" when it is missing, empty or still the placeholder."""
     value = env.get(name, "")
     return value if real_value(value) else ""
+
+
+def parse_dotenv(text):
+    """KEY=value lines from a .env file. One pair of matching quotes around a value is dropped
+    (AIRGRADIENT_TOKEN="abc" is abc); the first line for a key wins, like the environment over the file."""
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            key, val = key.strip().removeprefix("export ").strip(), val.strip()
+            if not key or key == "export":   # "=x" or "export =x": no name to set
+                continue
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                val = val[1:-1]
+            out.setdefault(key, val)
+    return out
+
+
+def defines(line, key):
+    """Whether a dotenv line sets key, using parse_dotenv's name rules."""
+    s = line.strip()
+    return bool(s) and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip().removeprefix("export ").strip() == key
+
+
+def write_env_key(path, key, value):
+    """Replace one key atomically, preserving other lines. Unique temporary files and the result are owner-only."""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or any(c in value for c in "\r\n\0"):
+        raise ValueError("Invalid environment entry")
+    target = path.resolve() if path.is_symlink() else path
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        text = ""
+    out, placed = [], False
+    for line in text.splitlines():
+        if defines(line, key):
+            if not placed:
+                out.append(f"{key}={value}")
+                placed = True
+            continue
+        out.append(line)
+    if not placed:
+        out.append(f"{key}={value}")
+    fd, name = tempfile.mkstemp(prefix=".env-", dir=target.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), ENV_FILE_MODE)
+            stream.write("\n".join(out) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class ConfigError(Exception):

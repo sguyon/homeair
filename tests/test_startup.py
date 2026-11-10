@@ -7,6 +7,7 @@ import shutil
 import pytest
 
 import server as server_module
+import sources
 
 REFERENCE = os.environ["CONFIG_TOML"]
 
@@ -85,8 +86,8 @@ def test_placeholder_token_without_config_is_demo(tmp_path):
 
 def test_placeholder_pollen_key_is_not_set_up(monkeypatch):
     monkeypatch.setenv("GOOGLE_POLLEN_API_KEY", "your_key_here")
-    assert server_module.pollen_state() == "not_set_up"
-    assert server_module._fetch_pollen() == {"today": [], "tomorrow": []}   # never calls Google with the placeholder
+    assert sources.pollen_state() == "not_set_up"
+    assert sources._fetch_pollen() == {"today": [], "tomorrow": []}   # never calls Google with the placeholder
 
 
 def test_dotenv_skips_lines_without_a_key():
@@ -110,7 +111,7 @@ def test_main_binds_localhost_unless_host_is_set(monkeypatch, capsys):
 
 def test_expired_token_is_not_no_token(reloaded, monkeypatch):
     srv = reloaded(AIRGRADIENT_TOKEN="expired", CONFIG_TOML=REFERENCE)
-    monkeypatch.setattr(srv, "api_get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("401")))
+    monkeypatch.setattr(sources, "api_get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("401")))
     srv.app.config["TESTING"] = True
     with srv.app.test_client() as c:
         r = c.get("/api/current?force=1")
@@ -126,3 +127,19 @@ def test_dotenv_drops_one_pair_of_matching_quotes():
         '# C=commented\n'
         'B=second\n')       # the first line for a key wins
     assert env == {"AIRGRADIENT_TOKEN": "abc", "GOOGLE_POLLEN_API_KEY": "k1", "A": "\"x'", "B": "plain"}
+
+
+def test_airgradient_api_base_is_airgradients_unless_a_test_server_is_named(monkeypatch):
+    """Production talks to AirGradient; AIRGRADIENT_API_BASE (simulated setups only) points the monitors' calls elsewhere."""
+    import importlib, sys
+    monkeypatch.delenv("AIRGRADIENT_API_BASE", raising=False)
+    import server
+    assert sources.API_BASE == "https://api.airgradient.com/public/api/v1"
+    monkeypatch.setenv("AIRGRADIENT_API_BASE", "http://127.0.0.1:5696/public/api/v1/")
+    sys.modules.pop("server", None)
+    try:
+        assert importlib.import_module("server").sources.API_BASE == "http://127.0.0.1:5696/public/api/v1"
+    finally:
+        monkeypatch.delenv("AIRGRADIENT_API_BASE")
+        sys.modules.pop("server", None)
+        importlib.import_module("server")
