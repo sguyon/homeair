@@ -1,3 +1,4 @@
+from pathlib import Path
 """Local first-run token entry; all credentials and files here are made up."""
 import logging
 from html import unescape
@@ -50,6 +51,9 @@ class Reply:
 
 
 def page(client, **kwargs):
+    # Redeem the startup link as a browser would; ordinary page requests never grant entry.
+    if server.token_state.code and not client.get_cookie(server.token_setup.COOKIE_NAME):
+        client.get("/?setup=" + server.token_state.code, base_url=BASE)
     return client.get("/", base_url=BASE, **kwargs)
 
 
@@ -71,9 +75,12 @@ def test_local_form_is_visible_and_private(local):
     assert 'id="no-token" hidden' not in text
     assert 'type="password"' in text and 'autocomplete="off"' in text
     assert 'action="/api/token"' in text
-    assert "One step left: connect your monitors" in text
+    assert "Connect your AirGradient account" in text and "data-1p-ignore" in text
+    # "Show me where": closed by default, the picture is in the repo and described for screen readers
+    assert '<details class="token-help">' in text and "Picture of AirGradient" in text and 'src="/static/airgradient-api-access.png"' in text and "alt=" in text
+    assert (Path(server.__file__).parent / "static" / "airgradient-api-access.png").exists()
     assert "https://app.airgradient.com/settings/place?tab=4" in text
-    assert "your agent never sees it" in text
+    assert "Your agent never sees it" in text and "Landed on the dashboard" in text
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["Referrer-Policy"] == "same-origin"
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
@@ -82,6 +89,7 @@ def test_local_form_is_visible_and_private(local):
 
 @pytest.mark.parametrize("base,remote", [("http://127.0.0.1:5555", "127.0.0.1"), ("http://[::1]:5555", "::1")])
 def test_loopback_addresses_work(local, base, remote):
+    local.get("/?setup=" + server.token_state.code, base_url=base, environ_overrides={"REMOTE_ADDR": remote})
     response = local.get("/", base_url=base, environ_overrides={"REMOTE_ADDR": remote})
     value = nonce(response)
     response = local.post("/api/token", base_url=base, environ_overrides={"REMOTE_ADDR": remote},
@@ -89,35 +97,25 @@ def test_loopback_addresses_work(local, base, remote):
     assert response.status_code == 303
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"environ_overrides": {"REMOTE_ADDR": "192.168.1.8"}},
-    {"headers": {"Host": "evil.example"}},
-    {"headers": {"Host": "localhost.evil.example"}},
-    {"headers": {"Host": "127.0.0.2"}},
-    {"headers": {"Host": "localhost@evil.example"}},
-    {"headers": {"Forwarded": "for=127.0.0.1"}},
-    {"headers": {"X-Forwarded-For": "127.0.0.1"}},
-    {"headers": {"X-Forwarded-Host": "localhost"}},
-    {"headers": {"X-Forwarded-Proto": "http"}},
-    {"headers": {"X-Forwarded-Prefix": "/"}},
-    {"headers": {"X-Real-IP": "127.0.0.1"}},
-    {"headers": {"Via": "proxy"}},
-    {"headers": {"X-Forwarded-For": ""}},
-    {"headers": {"CF-Connecting-IP": "127.0.0.1"}},
-    {"headers": {"True-Client-IP": "127.0.0.1"}},
-])
-def test_nonlocal_or_proxied_requests_never_get_or_submit_form(local, kwargs):
+def test_nonlocal_requests_never_get_or_submit_form(local):
     value = nonce(page(local))
-    response = page(local, **kwargs)
-    assert 'type="password"' not in response.get_data(as_text=True)
-    response = submit(local, value, **kwargs)
-    assert response.status_code == 403
+    kwargs = {"environ_overrides": {"REMOTE_ADDR": "192.168.1.8"}}
+    assert 'type="password"' not in page(local, **kwargs).get_data(as_text=True)
+    assert submit(local, value, **kwargs).status_code == 403
     assert not server.env_path.exists()
+
+
+def test_proxy_and_host_guesses_are_unneeded_with_the_code(local):
+    headers = {"Host": "custom.local:5555", "X-Forwarded-For": "127.0.0.1", "Via": "proxy"}
+    response = local.get("/?setup=" + server.token_state.code, base_url=BASE, headers=headers)
+    assert response.status_code == 303
+    response = local.get("/", base_url=BASE, headers=headers)
+    assert 'type="password"' in response.get_data(as_text=True)
 
 
 def test_network_instructions(local):
     text = page(local, environ_overrides={"REMOTE_ADDR": "192.168.1.8"}).get_data(as_text=True)
-    assert "Open this page on the computer running it to add your token." in text
+    assert "link the app printed" in text
 
 
 @pytest.mark.parametrize("marker", ["RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "VERCEL", "RENDER", "FLY_APP_NAME", "K_SERVICE", "DYNO",
@@ -130,7 +128,7 @@ def test_hosted_copies_block_entry_even_with_empty_marker(local, monkeypatch, ma
     if marker.startswith("RAILWAY"):
         assert "Add AIRGRADIENT_TOKEN in your Railway project → Variables, then redeploy." in text
     else:
-        assert ".env" in text and "scripts/setup.py token" in text
+        assert ".env" in text and ".env" in text
     assert submit(local, value).status_code == 403
 
 
@@ -151,7 +149,7 @@ def test_unwritable_folder_instructions_and_guard(local):
     try:
         text = page(local).get_data(as_text=True)
         assert 'type="password"' not in text
-        assert "scripts/setup.py token" in text
+        assert ".env" in text
         assert submit(local, value).status_code == 403
     finally:
         folder.chmod(0o700)
@@ -167,7 +165,7 @@ def test_existing_token_cannot_be_replaced(local, monkeypatch, where):
     else:
         server.env_path.write_text("AIRGRADIENT_TOKEN=already-set\n")
     assert 'type="password"' not in page(local).get_data(as_text=True)
-    assert submit(local, value).status_code == 409
+    assert submit(local, value).status_code == 303
     assert server.TOKEN != TOKEN
 
 
@@ -190,7 +188,7 @@ def test_nonce_is_one_use_and_bound_to_browser_and_origin(local):
     assert submit(local, "wrong-value").status_code == 403
     assert submit(local, value, headers={"Origin": BASE, "Host": "127.0.0.1:5555"}).status_code == 403
     assert submit(local, value).status_code == 303
-    assert submit(local, value).status_code == 409
+    assert submit(local, value).status_code == 303
 
 
 def test_wrong_token_is_not_saved_or_logged_and_nonce_is_consumed(local, monkeypatch, caplog, capsys):
@@ -202,7 +200,7 @@ def test_wrong_token_is_not_saved_or_logged_and_nonce_is_consumed(local, monkeyp
     response = submit(local, value)
     assert response.status_code == 400
     assert response.headers["Cache-Control"] == "no-store"
-    assert "AirGradient didn't accept this token" in unescape(response.get_data(as_text=True))
+    assert "AirGradient refused this token" in unescape(response.get_data(as_text=True))
     assert TOKEN not in response.get_data(as_text=True) + caplog.text + str(capsys.readouterr())
     assert not server.env_path.exists() and server.TOKEN == ""
     assert submit(local, value).status_code == 403
@@ -310,7 +308,7 @@ def test_another_writer_winning_during_validation_is_not_overwritten(local, monk
         server.env_path.write_text("AIRGRADIENT_TOKEN=from-terminal\n")
         return Reply()
     monkeypatch.setattr(sources.requests, "get", other_writer)
-    assert submit(local).status_code == 409
+    assert submit(local).status_code == 303
     assert server.env_path.read_text() == "AIRGRADIENT_TOKEN=from-terminal\n"
     assert server.TOKEN == ""
 
@@ -334,6 +332,34 @@ def test_empty_account_is_a_valid_token(local, monkeypatch):
     assert submit(local).status_code == 303
 
 
+def test_fresh_copy_with_an_empty_account_says_to_add_a_monitor(local, monkeypatch):
+    from dataclasses import replace
+    class Empty(Reply):
+        def json(self):
+            return []
+    monkeypatch.setattr(server, "CFG", replace(server.CFG, demo=True))
+    monkeypatch.setattr(server, "MODE", "demo")
+    monkeypatch.delenv("DEMO", raising=False)
+    monkeypatch.setattr(sources.requests, "get", lambda *a, **k: Empty())
+    assert submit(local).status_code == 303
+    text = local.get("/", base_url=BASE).get_data(as_text=True)
+    assert "Connected to AirGradient" in text and "No monitors with readings yet" in text and 'class="plist token-found"' not in text
+
+
+def test_fresh_copy_card_lists_the_account_monitors(local, monkeypatch):
+    from dataclasses import replace
+    class Many(Reply):
+        def json(self):
+            return [{"locationId": i, "locationName": f"Room <{i}>"} for i in range(6)]
+    monkeypatch.setattr(server, "CFG", replace(server.CFG, demo=True))
+    monkeypatch.setattr(server, "MODE", "demo")
+    monkeypatch.delenv("DEMO", raising=False)
+    monkeypatch.setattr(sources.requests, "get", lambda *a, **k: Many())
+    assert submit(local).status_code == 303
+    text = local.get("/", base_url=BASE).get_data(as_text=True)
+    assert "6 monitors on your account" in text and "and 2 more" in text and "<li>Room <" not in text   # names are escaped
+
+
 def test_upstream_debug_urls_cannot_log_candidate_token(local, monkeypatch, caplog):
     def debug_response(*a, **k):
         logging.getLogger("urllib3.connectionpool").debug('"GET /current?token=%s HTTP/1.1" 200', TOKEN)
@@ -353,7 +379,7 @@ def test_rejected_credentials_get_the_same_plain_error(local, monkeypatch, statu
     monkeypatch.setattr(sources.requests, "get", lambda *a, **k: Rejected())
     response = submit(local)
     assert response.status_code == 400
-    assert "AirGradient didn't accept this token" in unescape(response.get_data(as_text=True))
+    assert "AirGradient refused this token" in unescape(response.get_data(as_text=True))
     assert not server.env_path.exists()
 
 
@@ -390,8 +416,6 @@ def test_browser_same_origin_post_saves_token(local, headers):
 @pytest.mark.parametrize("token_set", [False, True])
 @pytest.mark.parametrize("kwargs", [
     {"environ_overrides": {"REMOTE_ADDR": "192.168.1.8"}},
-    {"headers": {"Host": "evil.example", "Origin": "http://evil.example"}},
-    {"headers": {"Origin": BASE, "X-Forwarded-For": "127.0.0.1"}},
     {"headers": {"Origin": "http://evil.example"}},
     {"headers": {"Origin": "null"}},
     {"headers": {}},
@@ -415,15 +439,12 @@ def test_non_ascii_browser_cookie_is_refused(local, cookie):
 
 
 @pytest.mark.parametrize("cookie", ["attacker-chosen", "é"])
-def test_unknown_browser_cookie_is_replaced(local, cookie):
+def test_unknown_cookie_never_grants_a_form(local, cookie):
     local.set_cookie(server.token_setup.COOKIE_NAME, cookie)
-    response = page(local)
-    fresh = local.get_cookie(server.token_setup.COOKIE_NAME).value
-    assert fresh != cookie
-    # Another page from this browser keeps the server-issued identifier.
-    page(local)
-    assert local.get_cookie(server.token_setup.COOKIE_NAME).value == fresh
-    assert submit(local, nonce(response)).status_code == 303
+    original = local.get_cookie(server.token_setup.COOKIE_NAME).value
+    response = local.get("/", base_url=BASE)
+    assert 'type="password"' not in response.get_data(as_text=True)
+    assert local.get_cookie(server.token_setup.COOKIE_NAME).value == original
 
 
 def test_validation_does_not_block_local_page_or_allow_a_second_save(local, monkeypatch):
@@ -442,5 +463,121 @@ def test_validation_does_not_block_local_page_or_allow_a_second_save(local, monk
             assert pool.submit(another_browser).result(timeout=5) == 303
             return Reply()
         monkeypatch.setattr(sources.requests, "get", validate)
-        assert submit(local, value).status_code == 409
+        assert submit(local, value).status_code == 303
     assert server.TOKEN == winner
+
+
+@pytest.mark.parametrize("code", [None, "wrong-code", "é"])
+def test_startup_code_is_required(local, code):
+    url = "/" if code is None else "/?setup=" + code
+    response = local.get(url, base_url=BASE, follow_redirects=True)
+    assert 'type="password"' not in response.get_data(as_text=True)
+    assert not local.get_cookie(server.token_setup.COOKIE_NAME)
+    assert "link the app printed" in response.get_data(as_text=True)
+    assert local.post("/api/token", base_url=BASE, headers={"Origin": BASE},
+                      data={"setup_nonce": "wrong", "token": TOKEN}).status_code == 403
+
+
+def test_setup_redirect_strips_code_and_sets_private_cookie(local, caplog):
+    code = server.token_state.code
+    response = local.get("/?setup=" + code, base_url=BASE)
+    assert response.status_code == 303 and response.headers["Location"] == "/"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    cookie = response.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+    assert local.get_cookie(server.token_setup.COOKIE_NAME).value == code
+    clean = local.get(response.headers["Location"], base_url=BASE)
+    assert clean.request.query_string == b""
+    assert code not in clean.get_data(as_text=True) + caplog.text
+    assert submit(local, nonce(clean)).status_code == 303
+
+
+def test_startup_codes_change_and_print_only_without_token(local, monkeypatch, capsys):
+    first = server.token_state.code
+    state = server.token_setup.TokenState()
+    assert state.code != first
+    monkeypatch.setattr(server, "token_state", state)
+    server.print_setup_link(5600)
+    assert capsys.readouterr().out == f"Paste your AirGradient token here: http://localhost:5600/?setup={state.code}\n"
+    monkeypatch.setattr(server, "TOKEN", TOKEN)
+    server.print_setup_link(5600)
+    assert capsys.readouterr().out == ""
+    assert server.token_setup.TokenState(TOKEN).code is None
+
+
+def test_old_startup_cookie_is_refused_after_restart(local, monkeypatch):
+    value = nonce(page(local))
+    monkeypatch.setattr(server, "token_state", server.token_setup.TokenState())
+    assert submit(local, value).status_code == 403
+
+
+def test_fresh_copy_can_collect_token_before_home_config(local, monkeypatch):
+    from dataclasses import replace
+    monkeypatch.setattr(server, "CFG", replace(server.CFG, demo=True))
+    monkeypatch.setattr(server, "MODE", "demo")
+    monkeypatch.delenv("DEMO", raising=False)
+    assert submit(local).status_code == 303
+    # Remain in the demo until setup writes a home and the agent restarts the app.
+    assert server.MODE == "demo"
+    # The page then says the token is saved and sends the user back to the agent, never the demo's made-up home.
+    text = local.get("/", base_url=BASE).get_data(as_text=True)
+    assert "Connected to AirGradient" in text and "1 monitor on your account" in text and "Unnamed monitor" in text and 'class="no-token fresh-copy"' in text and '"state": "no_token"' in text
+    assert 'action="/api/token"' not in text and '"now":' not in text
+
+
+def test_werkzeug_logs_only_the_first_request_with_the_setup_code(local):
+    from werkzeug.serving import WSGIRequestHandler
+    handler = object.__new__(WSGIRequestHandler)
+    handler.command = "GET"
+    handler.request_version = "HTTP/1.1"
+    lines = []
+    handler.log = lambda level, fmt, *args: lines.append(fmt % args)
+    code = server.token_state.code
+    handler.path = "/?setup=" + code
+    response = local.get(handler.path, base_url=BASE)
+    handler.log_request(response.status_code)
+    handler.path = response.headers["Location"]
+    response = local.get(handler.path, base_url=BASE)
+    handler.log_request(response.status_code)
+    assert code in lines[0]  # Werkzeug's initial request line includes the query string.
+    assert code not in lines[1] and "GET / HTTP/1.1" in lines[1]
+
+
+def test_connected_card_names_each_monitor_indoor_or_outdoor_and_sends_the_user_back(local, monkeypatch):
+    from dataclasses import replace
+    class Two(Reply):
+        def json(self):
+            return [{"locationId": 1, "locationName": "Living room", "locationType": "indoor", "model": "I-9PSL"},
+                    {"locationId": 2, "locationName": "Back porch", "model": "O-1PST"}]
+    monkeypatch.setattr(server, "CFG", replace(server.CFG, demo=True))
+    monkeypatch.setattr(server, "MODE", "demo")
+    monkeypatch.delenv("DEMO", raising=False)
+    monkeypatch.setattr(sources.requests, "get", lambda *a, **k: Two())
+    assert submit(local).status_code == 303
+    text = unescape(local.get("/", base_url=BASE).get_data(as_text=True))
+    assert "<b>Living room</b><em>Indoor monitor</em>" in text and "<b>Back porch</b><em>Outdoor monitor</em>" in text
+    assert "go back to your agent" in text and "You can close this tab" in text
+    assert "<button" not in text.split("token-found", 1)[1].split("token-next", 1)[0]   # the monitors are a list, not controls
+
+
+def test_a_malformed_token_is_told_apart_from_a_refused_one(local, monkeypatch):
+    called = []
+    monkeypatch.setattr(sources.requests, "get", lambda *a, **k: called.append(1) or Reply())
+    response = local.post("/api/token", base_url=BASE, data={"setup_nonce": nonce(page(local)), "token": "has spaces in it"},
+                          headers={"Origin": BASE, "Referer": BASE + "/"})
+    assert response.status_code == 400 and not called   # never sent to AirGradient
+    assert "doesn't look like an AirGradient token" in unescape(response.get_data(as_text=True))
+
+
+def test_an_expired_form_is_a_page_with_a_way_forward_never_raw_json(local):
+    page(local)
+    response = submit(local, "a-form-value-from-an-old-tab")
+    assert response.status_code == 403 and response.mimetype == "text/html"
+    text = unescape(response.get_data(as_text=True))
+    assert "nothing was sent" in text and 'name="setup_nonce"' in text   # a fresh form, ready for the token
+    local.delete_cookie(server.token_setup.COOKIE_NAME)   # as after a restart: the old link no longer counts
+    response = submit(local, "a-form-value-from-an-old-tab")
+    assert response.status_code == 403 and response.mimetype == "text/html"
+    assert "Ask your agent for the new setup link" in unescape(response.get_data(as_text=True))
+

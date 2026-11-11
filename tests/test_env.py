@@ -45,8 +45,11 @@ def test_local_address_is_dev_only_on_the_reloading_dev_server(client, monkeypat
     """The maintainer's `flask run --reload` is dev; a home running the app on its own network is not."""
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("WERKZEUG_RUN_MAIN", "true")
-    for host in ("localhost:5555", "127.0.0.1", "192.168.1.5", "10.0.0.2", "172.20.1.1"):
+    for host in ("localhost:5555", "127.0.0.1", "192.168.1.5", "10.0.0.2", "172.20.1.1",
+                 "laptop:5555", "mymac.local", "laptop.tail1234ab.ts.net", "100.103.6.97"):   # a machine name, Bonjour, Tailscale
         assert app_env(page(client, host).get_data(as_text=True)) == '"dev"', host
+    for host in ("example.com", "100.200.1.1"):   # a public name, and a public 100.x address outside Tailscale's range
+        assert app_env(page(client, host).get_data(as_text=True)) == "null", host
     monkeypatch.delenv("WERKZEUG_RUN_MAIN")
     for host in ("localhost:5555", "192.168.1.5"):
         html = page(client, host).get_data(as_text=True)
@@ -64,13 +67,13 @@ def test_noindex_unless_demo(client, monkeypatch):
 def test_build_info_from_env(monkeypatch):
     monkeypatch.delenv("VERCEL_GIT_COMMIT_SHA", raising=False)
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abcdef1234567890")
-    assert server.get_build_info().startswith("v2 · abcdef1 · ")
+    assert server.get_build_info().startswith("v0.1 · abcdef1 · ")
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA")
     monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "1234567890abcdef")
-    assert server.get_build_info().startswith("v2 · 1234567 · ")
+    assert server.get_build_info().startswith("v0.1 · 1234567 · ")
     monkeypatch.delenv("VERCEL_GIT_COMMIT_SHA")
     monkeypatch.setenv("GIT_COMMIT_SHA", "fedcba0987654321")   # the Docker image's, from the GIT_SHA build arg
-    assert server.get_build_info().startswith("v2 · fedcba0 · ")
+    assert server.get_build_info().startswith("v0.1 · fedcba0 · ")
 
 
 def test_build_time_label_follows_the_home_timezone(monkeypatch):

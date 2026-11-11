@@ -192,17 +192,29 @@ logging.getLogger("urllib3.connectionpool").addFilter(_TokenURLFilter())
 
 
 def validate_token(token):
-    """One uncached call, without changing the running credential or exposing upstream bodies/errors."""
+    """One uncached call, without changing the running credential or exposing upstream bodies/errors.
+    None: AirGradient refused the token. A list (maybe empty): accepted, with the account's monitors as
+    {"name": ..., "kind": "indoor" | "outdoor" | None}, for the page's "connected" card."""
     response = requests.get(f"{API_BASE}/locations/measures/current", params={"token": token}, timeout=10, allow_redirects=False)
     if response.status_code in (400, 401, 403):
-        return False
+        return None
     response.raise_for_status()
     if response.status_code != 200:
         raise ValueError("Unexpected AirGradient status")
     # An account with no monitors is still a valid account; malformed responses aren't credentials we can verify.
-    if not isinstance(response.json(), list):
+    rows = response.json()
+    if not isinstance(rows, list):
         raise ValueError("Unexpected AirGradient response")
-    return True
+    return [{"name": publicmap.plain_text(row.get("locationName") or "") or "Unnamed monitor", "kind": monitor_kind(row)}
+            for row in rows if isinstance(row, dict)]
+
+
+def monitor_kind(row):
+    """Indoor or outdoor, from the place's setting in AirGradient, else the model ("O-…" is an Open Air); None if neither says."""
+    if row.get("locationType") in ("indoor", "outdoor"):
+        return row["locationType"]
+    model = str(row.get("model") or "")
+    return "outdoor" if model.startswith(publicmap.OUTDOOR_PREFIX) else "indoor" if model.startswith("I-") else None
 
 
 def api_get(path, params=None):
@@ -475,12 +487,25 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 def place_rows(rows):
     """A home with one monitor gets only that monitor's rows: the token may see others (a second monitor, an old one),
-    and an indoor-only home's outdoor PM2.5 is its source. A two-monitor home, the demo and no config: as they came.
+    and an indoor-only home's outdoor PM2.5 is its source. Explicit ids choose among account monitors.
+    The demo and no config: as they came.
     A copy: the cache keeps its list."""
     if not isinstance(rows, list) or runtime.CFG is None or runtime.CFG.demo or runtime.CFG.place is None:
         return rows
-    drop = {kind for kind, name in (("indoor", runtime.CFG.place.indoor), ("outdoor", runtime.CFG.place.outdoor)) if name is None}
-    return [r for r in rows if not (isinstance(r, dict) and r.get("locationType") in drop)] if drop else rows
+    place = runtime.CFG.place
+    selected = {kind: getattr(place, kind + "_id") for kind in ("indoor", "outdoor") if getattr(place, kind) is not None}
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            out.append(row)
+            continue
+        kind = next((k for k, mid in selected.items() if mid is not None and mid == row.get("locationId")), row.get("locationType"))
+        if kind in ("indoor", "outdoor"):
+            if kind not in selected or (selected[kind] is not None and selected[kind] != row.get("locationId")):
+                continue
+            row = {**row, "locationType": kind}
+        out.append(row)
+    return out
 
 
 def _iso(ts):

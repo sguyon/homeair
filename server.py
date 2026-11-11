@@ -43,6 +43,10 @@ TOKEN = env_key("AIRGRADIENT_TOKEN")   # .env.example's placeholder counts as no
 NO_CONFIG_MESSAGE = "No config: copy config.example.toml to config.toml (or set CONFIG_TOML)"
 APP_LOAD_ERROR = 4   # gunicorn's exit code for "the app can't load": the master stops instead of respawning forever
 ENV_LABEL = {"dev": "DEV", "preview": "PREVIEW"}   # the tag on the page title and app name on dev and preview
+# Addresses that only reach this machine or the home's own network (for the DEV tag): private IPv4 ranges, Tailscale's
+# 100.64.0.0/10 range, and names that never resolve on the internet: bare machine names, Bonjour's .local, Tailscale's ts.net
+LOCAL_HOST = re.compile(r"^(localhost|0\.0\.0\.0|127\.[\d.]+|10\.[\d.]+|192\.168\.[\d.]+|172\.(1[6-9]|2\d|3[01])\.[\d.]+"
+                        r"|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.[\d.]+|[a-z0-9-]+|[a-z0-9.-]+\.(local|ts\.net))$")
 # The weather card's words. Dew point (°C) under DEW_DRY_C dries sinuses (the Open-Meteo source note says so), under
 # DEW_SEVERE_DRY_C badly. Visibility (m) under each line reads very low, reduced, moderate; above the last, clear.
 DEW_SEVERE_DRY_C, DEW_DRY_C = 5, 10
@@ -50,6 +54,8 @@ VISIBILITY_VERY_LOW_M, VISIBILITY_REDUCED_M, VISIBILITY_MODERATE_M = 2000, 5000,
 # digits: the longest ?monitor= read as an id (AirGradient's are 5-6 digits today); a longer one is junk, and past
 # about 4,300 digits Python's int() raises instead of reading it
 MONITOR_ID_MAX_DIGITS = 12
+APP_VERSION = "v0.1"   # the release shown on the page's build line (and the dev bar)
+SAVED_NAMES_SHOWN = 4   # monitor names listed on the "connected" card; more become "and N more"
 
 
 def _note_cache(info):
@@ -60,7 +66,7 @@ def _note_cache(info):
 
 
 app = Flask(__name__)
-token_state = token_setup.TokenState()
+token_state = token_setup.TokenState(TOKEN)
 
 
 def use_config(cfg):
@@ -143,7 +149,7 @@ def get_build_info():
             ).decode().strip()
         except Exception:
             commit = "no-git"
-    return f"v2 · {commit} · {sources.local_now().strftime('%H:%M:%S %Z')}"
+    return f"{APP_VERSION} · {commit} · {sources.local_now().strftime('%H:%M:%S %Z')}"
 
 
 def asset_version(rel_path):
@@ -191,8 +197,7 @@ def icon_env():
     address is "dev"; otherwise a deployment names itself with APP_ENV, never by its address: a home that runs the app
     on its own network (a laptop, a small home server at 192.168.…) is a normal deployment."""
     host = (request.host or "").split(":")[0].lower()
-    local = host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith(("127.", "10.", "192.168.")) or re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host)
-    if local and sources._dev_server():
+    if LOCAL_HOST.match(host) and sources._dev_server():
         return "dev"
     env = os.environ.get("APP_ENV", "").strip().lower()
     return env if env in ENV_LABEL else None
@@ -224,20 +229,54 @@ def inline_touch_icon(html):
 
 @app.route("/")
 def index():
+    if "setup" in request.args:
+        response = redirect("/", code=303)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if (setup_mode() and token_setup.local_entry(request, env_path)
+                and not token_setup.has_token(env_path, TOKEN)
+                and token_state.authorized(request.args["setup"])):
+            response.set_cookie(token_setup.COOKIE_NAME, token_state.code, httponly=True,
+                                samesite="Strict", secure=request.is_secure)
+        return response
     return render_page()
 
 
-def render_page(error=None, status=200):
-    """The missing-token card works without JavaScript; no credential is ever embedded in the page."""
+def setup_mode():
+    # A fresh copy opens the demo; its startup link must collect the token before setup can discover monitors.
+    return MODE == "no_token" or (MODE == "demo" and CFG.demo and os.environ.get("DEMO") != "1")
+
+
+def print_setup_link(port):
+    if not real_value(TOKEN) and token_state.code:
+        print(f"Paste your AirGradient token here: http://localhost:{port}/?setup={token_state.code}", flush=True)
+
+
+TOKEN_FORMAT_ERROR = ("This doesn't look like an AirGradient token. Press the copy button next to API Access "
+                      "(not \"Renew API token\"), then paste it here.")
+TOKEN_REFUSED_ERROR = ("AirGradient refused this token. Check that API Access is turned on for the place that shows your monitor, "
+                       "then copy the token again.")
+FORM_EXPIRED_ERROR = "This form had expired, so nothing was sent. Paste the token again."
+LINK_EXPIRED_ERROR = ("This page is from before the app restarted, so it can't connect. Ask your agent for the new setup link, "
+                      "or restart the app to get one.")
+
+
+def render_page(error=None, status=200, card=False):
+    """The missing-token card works without JavaScript; no credential is ever embedded in the page.
+    card: show the token card even without a valid setup cookie (an expired link explains itself instead of showing the demo)."""
     html_path = Path(__file__).parent / "index.html"
     html = inline_touch_icon(tag_env(version_assets(html_path.read_text())))
-    html = inject_app(html)
-
     browser = None
-    if MODE == "no_token":
-        entry = token_setup.allowed(request, env_path, TOKEN, MODE)
+    # A fresh copy (the demo, no home yet) shows only the card: the token box with its link, then "saved" until setup restarts it.
+    saved = setup_mode() and MODE == "demo" and token_state.saved
+    show_setup = MODE == "no_token" or saved or (setup_mode() and (card or token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, ""))))
+    html = inject_app(html, setup_page=show_setup)
+    if show_setup:
+        entry = (token_setup.allowed(request, env_path, TOKEN, "no_token")
+                 and token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, "")))
         value, browser = token_state.issue(request) if entry else (None, None)
-        card = render_template("token_card.html", entry=entry, nonce=value, error=error,
+        card = render_template("token_card.html", entry=entry and not saved, saved=saved,
+                               found=token_state.saved["monitors"] if saved else [], shown=SAVED_NAMES_SHOWN, nonce=value, error=error,
                                instructions=token_setup.instructions(request), max_length=token_setup.TOKEN_MAX_LENGTH)
         html = html.replace('id="no-token" hidden', 'id="no-token"')
         html = html.replace("<!-- token-setup -->", card)
@@ -249,11 +288,12 @@ def render_page(error=None, status=200):
         f'<body data-build="{build_info}">'
     )
 
-    if MODE == "no_token":
-        html = html.replace('<body data-build=', '<body class="no-token" data-build=', 1)
+    if show_setup:
+        # fresh-copy: no home yet, so the header has no home menu to show
+        html = html.replace('<body data-build=', '<body class="no-token%s" data-build=' % (" fresh-copy" if MODE == "demo" else ""), 1)
     response = make_response(html, status)
     response.headers["Referrer-Policy"] = "same-origin"
-    if MODE == "no_token":
+    if show_setup:
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = "frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
         response.headers["X-Frame-Options"] = "DENY"
@@ -267,15 +307,18 @@ def save_token():
     """First-run local setup only. Validate unlocked, then serialize the final check and save."""
     global TOKEN, MODE
     with token_state.lock:
-        if MODE == "demo" or not token_setup.local_entry(request, env_path) or not token_setup.same_origin(request):
+        if (MODE == "demo" and not setup_mode()) or not token_setup.local_entry(request, env_path) or not token_setup.same_origin(request):
             return jsonify(error="Token entry is only available on this computer's local page."), 403
         if token_setup.has_token(env_path, TOKEN):
-            return jsonify(error="A token is already set."), 409
-        if MODE != "no_token":
+            return redirect("/", code=303)   # sent twice, or from an old tab: the page shows where things stand
+        if not setup_mode():
             return jsonify(error="Token entry is only available on this computer's local page."), 403
         request.max_content_length = token_setup.TOKEN_POST_MAX_BYTES
         if not token_state.consume(request, request.form.get("setup_nonce", "")):
-            return jsonify(error="This form expired. Open the page again."), 403
+            # A page, never raw JSON: a fresh form when this browser still holds the setup link, else what to do.
+            if token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, "")):
+                return render_page(FORM_EXPIRED_ERROR, 403)
+            return render_page(LINK_EXPIRED_ERROR, 403, card=True)
         retry = token_state.retry_after()
         if retry:
             response = render_page("Too many attempts. Wait five minutes, then try again.", 429)
@@ -285,7 +328,7 @@ def save_token():
         if (not candidate or len(candidate) > token_setup.TOKEN_MAX_LENGTH
                 or not token_setup.TOKEN_CHARACTERS.fullmatch(candidate) or not real_value(candidate)):
             token_state.failed()
-            return render_page("AirGradient didn't accept this token", 400)
+            return render_page(TOKEN_FORMAT_ERROR, 400)
     try:
         accepted = sources.validate_token(candidate)
     except (sources.requests.RequestException, ValueError):
@@ -294,18 +337,20 @@ def save_token():
             return render_page("AirGradient didn't answer. Try again shortly.", 502)
 
     with token_state.lock:
-        if not accepted:
+        if accepted is None:
             token_state.failed()
-            return render_page("AirGradient didn't accept this token", 400)
+            return render_page(TOKEN_REFUSED_ERROR, 400)
         # Recheck for a token written while the validation call was waiting.
         if token_setup.has_token(env_path, TOKEN):
-            return jsonify(error="A token is already set."), 409
+            return redirect("/", code=303)   # another tab or the terminal won: keep theirs, show the page
         try:
             write_env_key(env_path, "AIRGRADIENT_TOKEN", candidate)
         except (OSError, UnicodeError, ValueError):
             return render_page("Couldn't save the token. Check that the app's folder is writable.", 500)
         os.environ["AIRGRADIENT_TOKEN"] = candidate
-        TOKEN, MODE = candidate, "live"
+        TOKEN, MODE = candidate, server_mode(CFG, candidate)
+        token_state.code = None
+        token_state.saved = {"monitors": accepted}   # the account's monitors and their kinds, for the "connected" card
         token_state.nonces.clear()
         token_state.failures.clear()
         response = redirect("/", code=303)
@@ -325,11 +370,11 @@ def page_clock():
     return None
 
 
-def inject_app(html):
+def inject_app(html, setup_page=False):
     """The home's config for the page's scripts (config.public_view), as window.APP before the first of them.
     Every "<" is escaped (\\u003c, still the same JSON) so no config value can close the script or open a comment."""
-    now = page_clock()
-    data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" else {})}, ensure_ascii=False).replace("<", "\\u003c")
+    now = None if setup_page else page_clock()   # the token card never shows the demo's moments
+    data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {})}, ensure_ascii=False).replace("<", "\\u003c")
     return html.replace("<script src=", f"<script>window.APP = {data};</script>\n<script src=", 1)
 
 
@@ -633,4 +678,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5555))
     host = os.environ.get("HOST", "127.0.0.1")   # HOST=0.0.0.0 to open it from a phone on the same network
     print(f"Home Air Quality → http://localhost:{port}")
+    print_setup_link(port)
     app.run(host=host, port=port, debug=False)

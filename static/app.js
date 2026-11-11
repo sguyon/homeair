@@ -879,7 +879,6 @@ function renderRead(r, stale, why) {
   note.hidden = !why;
   note.textContent = why === 'offline' ? `Earlier summary, written at ${r.clock}. It updates when the page is back online.`
     : why === 'failed' ? `Earlier summary, written at ${r.clock}. A new one could not be written just now.` : '';
-  $('read-meta').textContent = `Updated at ${r.clock}${stale ? ' (earlier summary)' : ''}.`;
 }
 
 // ── Busy state ────────────────────────────────────────
@@ -998,6 +997,11 @@ let inFlight = null, lastRefresh = 0;
 // A config but no AirGradient token yet: the header and one plain card. Everything that needs the monitors stays hidden.
 function showNoToken() {
   bootRead = null;
+  // "Show me where": the picture opens larger in a dialog on this page (never in another app); Esc or Close shuts it
+  const big = document.querySelector('.token-help-big');
+  document.querySelector('.token-help-zoom')?.addEventListener('click', () => big?.showModal());
+  big?.querySelector('.token-help-close')?.addEventListener('click', () => big.close());
+  big?.addEventListener('click', e => { if (e.target === big) big.close(); });
   document.body.classList.add('no-token');
   $('no-token').hidden = false;
   setBusy(false);
@@ -1213,7 +1217,6 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-open-home]'); if (!t) return;
   e.preventDefault(); e.stopPropagation(); openHome(t.dataset.openHome);
 }, true);
-$('s-src') && $('s-src').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHome('sources'); } });
 
 // Dev and local only: the build and a Clear cache button (the dev site registers a service worker that caches files).
 (() => {
