@@ -1,5 +1,7 @@
 # Setup
 
+**Done when** `uv run --python 3.12 --with-requirements requirements.txt scripts/setup.py --live <the page's address>` ends with `Live OK`: the page answers with the home's settings, and each monitor has a recent reading.
+
 For a coding agent setting this up for someone's home. Do the steps yourself when a command can. Ask one question per message, in plain words, then wait for the answer: no question tool with several questions, and don't queue the next question while you work. Skip answers the user already gave. Don't change the app's code during setup: if the token is refused twice, stop and say what the page said. Never ask for a key in chat, read or print `.env`, or commit private settings. Ask before changing a live service or account.
 
 ## Get ready
@@ -13,7 +15,7 @@ git clone https://github.com/sguyon/home-air-quality
 cd home-air-quality
 ```
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if missing; use Python 3.12: `uv python install 3.12`. All commands below run from this folder. For Docker or a home server, follow [DEPLOYMENT.md](DEPLOYMENT.md#docker) first.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if missing; use Python 3.12: `uv python install 3.12`. All commands below run from this folder. To see what's done and the next command at any point, run `uv run --python 3.12 --with-requirements requirements.txt scripts/setup.py --status`; it changes nothing. For Docker or a home server, follow [DEPLOYMENT.md](DEPLOYMENT.md#docker) first.
 
 ## Connect AirGradient
 
@@ -82,3 +84,7 @@ It uses read-only GET requests and ends with `Live OK`. The page should show the
 Give the user the address, what to expect, and one start command with the full repo path: `cd /path/to/home-air-quality && uv run --python 3.12 --with-requirements requirements.txt server.py`. Include the actual port and log location if started in the background. Ctrl+C stops it in a terminal.
 
 Change names, profiles, drying equipment (`[home] appliances`) or limits in `config.toml`; [config.example.toml](config.example.toml) explains the settings. Restart after editing config or `.env` by hand. Keep a private copy of config; it isn't in git. Optional [pollen, road tracing, new profiles and Vercel demo](docs/optional.md); [Railway and Docker deployment](DEPLOYMENT.md).
+
+## On your phone
+
+To open it from a phone on the same Wi-Fi, start it with `HOST=0.0.0.0` before the start command (anyone on that Wi-Fi can then open it), and open `http://<the computer's name>.local:5555` on the phone. Away from home, use the Railway address ([DEPLOYMENT.md](DEPLOYMENT.md)). Then add it to the home screen: Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); it opens like an app. It works offline only on https, which the Railway address has.

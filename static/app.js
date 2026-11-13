@@ -6,7 +6,7 @@ const uniq = svg => { const n = ++svgCopy; return svg.replace(/id="([^"]+)"/g, `
 // The home (place, links, road, profiles, limits, pollen seasons) comes from the server's config: window.APP, set in index().
 const APP = window.APP;
 // A public AirGradient monitor's page (the demo's ?monitor=<id>): {id, name, street, contributor, url}. One that can't
-// be shown ({id, error}) gets the default sample's page instead, with the reason in the demo banner (picker.js).
+// be shown ({id, error}) gets the default sample's page instead, with the reason in the demo's monitor picker (picker.js).
 // A public monitor's view has no indoor monitor; neither has a view whose place names none (APP.place.indoor null).
 const PUB = APP.public && !APP.public.error ? APP.public : null;
 const NO_INDOOR = APP.place.indoor === null || !!PUB;
@@ -110,9 +110,12 @@ applyConfig();
 if ($('nb-credit')) $('nb-credit').innerHTML = creditHtml(!!APP.now);   // the demo's line, or AirGradient's credit
 if (PUB && $('hist-none')) $('hist-none').innerHTML = noHistoryHTML();   // shown only if AirGradient's map has no past readings
 
-// The demo's banner (a sample, or a public monitor's page): the samples 1 2 3, the monitor picker, Source and setup.
-if ((APP.now || APP.public) && $('demo-bar') && !/[?&]shot\b/.test(location.search)) {   // not in screenshots: the README says they come from the demo
-  Picker.mount($('demo-bar'), APP);
+// The demo's top area (a sample, or a public monitor's page; not in screenshots: the README says they come from the demo):
+// the name and pitch, the samples 1 2 3, the monitor picker, Setup guide. It shows the logo and name, so the weather line leaves
+// its logo out (app.css, html.has-demo-top).
+if ($('demo-top') && Picker.showsTop(APP, location.search)) {
+  Picker.mount($('demo-top'), APP);
+  document.documentElement.classList.add('has-demo-top');
 }
 // Nearby monitors turned off in the config: the section says so in one line instead of showing an empty table and map.
 if ((APP.sources || {}).nearby === false) {
@@ -888,27 +891,18 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const TURN_MS = 900;
 let busyCount = 0, spin = null, lastStamp = null, loadFailed = false;
 
-// The heading over the summary: Today or Tonight while the readings are fresh, otherwise when they are from.
-const FRESH_MIN = 10;
+// Whether the readings are fresh, on the logo: its dot green while they are, grey otherwise, with the words in its name and
+// hover (home.js readingsState). The summary's age line says how old they are; the hidden heading stays Today or Tonight.
 function showUpdated() {
-  const title = $('now-title'), meta = $('updated');
+  const title = $('now-title'), meta = $('updated'), mark = document.querySelector('.now-mark');
   const offline = navigator.onLine === false;
-  const set = (t, m, stale) => {
-    title.textContent = t; meta.textContent = busyCount ? '' : m;   // while busy, the button says Updating…
-    title.classList.toggle('stale', stale); meta.classList.toggle('stale', stale && !busyCount);
-  };
-  // the heading over the summary: TODAY or TONIGHT (the card's span) while the readings are fresh
-  const fresh = (state.read && state.read.summary && state.read.summary.label) || 'Today';
-  if (lastStamp == null) return set(offline ? 'Offline' : fresh, loadFailed ? 'Readings did not load' : '', offline || loadFailed);
-  const d = new Date(lastStamp);
-  const day = t => new Date(t).toLocaleDateString('en-US', { timeZone: TZ });
-  const at = day(d) === day(readingsNow()) ? clock(d)
-    : d.toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const mins = Math.round((readingsNow() - lastStamp) / 60000);
-  const age = mins < 60 ? `${mins} min old` : mins < 48 * 60 ? `${Math.round(mins / 60)} h old` : `${Math.round(mins / 1440)} days old`;
-  if (offline) return set('Offline', `Last reading ${at}`, true);
-  if (mins > FRESH_MIN) return set(`As of ${at}`, age, true);
-  set(fresh, '', false);
+  const s = readingsState(lastStamp, readingsNow(), { offline, failed: loadFailed, tz: TZ });
+  const fresh = (state.read && state.read.summary && state.read.summary.label) || 'Today';   // the summary's span
+  title.textContent = fresh;
+  meta.textContent = busyCount ? '' : s.meta;   // while busy, the button says Updating…
+  meta.classList.toggle('stale', !s.fresh && !!s.meta && !busyCount);
+  const name = `Home Air Quality · ${s.status}`;
+  mark.classList.toggle('is-stale', !s.fresh); mark.title = name; $('mark-name').textContent = name;
 }
 
 function startSpin() {

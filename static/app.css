@@ -1,21 +1,21 @@
 /* Home Air Quality: page styles. Theme tokens, then components and their responsive/state rules. */
-:root { --card: #fff; --bad: #b42318; --sky: #2f7fb8; --accent: #3a5fc8; --accent-ink: #2f4fae; --accent-soft: #e9effa; --accent-line: #b3c4e0;
+:root { --card: #fff; --bad: #b42318; --sky: #2f7fb8; --accent: #1c7488; --accent-ink: #155a6b; --accent-soft: #e6f4f7; --accent-line: #a6d3dd;
   --ai-bg: #e7eef8; --ai-line: #cdd9ea; --pill: rgba(255, 255, 255, .72); --tile: #f4f7fb; --q-bg: #f6f8fb; --q-line: #d5dee6; --q-ink: #24384a;
   --q-hover: #e7eef5; --ico-sky: #e3f1fb; --ico-ink: #e7eef5; --ico-smoke: #f3eee8; --smoke: #8a5a32; --series-in: #0f2233; --series-out: #2f7fb8;
   --bar-lo: #d7f3e8; --bar-hi: #4fb08f; --bubble-ink: #fff; --mark-bg: #0f2233; color-scheme: light; --bg: #f8f9fb; --ink: #18181b; --soft: #52525b;
   --muted: #71717a; --faint: #a1a1aa; --line: #e8e8ec; --line-strong: #d4d4d8; --meter: #eeeff2; --track: #eeeff2; --grid: #ececf0; --warn: #b45309;
   --warn-fill: #f59e0b; --ico-warn: #fef3e2; --good: #15803d; --good-fill: #22a55a; --ico-good: #e8f6ee; --shadow: rgba(0, 0, 0, .05);
-  --bubble-bg: #18181b; --demo-bar: #13283b; --demo-bar-ink: #eef3f8; --demo-bar-soft: rgba(238, 243, 248, .72);
-  --demo-bar-chip: rgba(255, 255, 255, .12); --demo-bar-chip-hover: rgba(255, 255, 255, .2); --demo-bar-rule: rgba(255, 255, 255, .18);
-  --demo-bar-live: #4fd1a1; --sky-city: #9fb0c8; --win-lit: #f6efe2; --brand-ink: #0f2233; --brand-dot: #7fd3e6; --brand-dot-ink: #1f7d93; }
-:root[data-theme="dark"] { --good: #52c99d; --good-fill: #2fae82; --bad: #f07a6d; --sky: #6db3e8; --accent: #86a3f2; --accent-ink: #b3c6f8;
-  --accent-soft: #1b2944; --accent-line: #3b5285; --ai-bg: #121f35; --ai-line: #25385a; --pill: rgba(18, 28, 39, .78); --q-bg: #1a2633;
+  --bubble-bg: #18181b; --sky-city: #9fb0c8; --win-lit: #f6efe2; --brand-ink: #0f2233; --brand-dot: #7fd3e6; --brand-dot-ink: #1f7d93;
+  /* the logo: its day colours, its colours on a dark background, and its dot (green: fresh readings; grey: not) */
+  --logo-day-house: #0f2233; --logo-day-roof: #7fd3e6; --logo-day-roof-a: .55; --logo-night-house: #eef5fa; --logo-night-roof: #3d8ea8;
+  --logo-night-roof-a: 1; --logo-live: #4fd68f; --logo-idle: #a7adb6; --logo-glow-a: .32; }
+:root[data-theme="dark"] { --good: #52c99d; --good-fill: #2fae82; --bad: #f07a6d; --sky: #6db3e8; --accent: #7fd3e6; --accent-ink: #a9e4f1;
+  --accent-soft: #12323b; --accent-line: #2a5a68; --ai-bg: #121f35; --ai-line: #25385a; --pill: rgba(18, 28, 39, .78); --q-bg: #1a2633;
   --q-line: #2d3d50; --q-ink: #c8d3de; --q-hover: #243446; --ico-sky: #15304a; --ico-good: #153a2e; --ico-ink: #1f2c3a; --ico-smoke: #33271d;
   --smoke: #d8a77c; --bar-lo: #1e3d34; --bar-hi: #43c296; --bubble-bg: #e6edf4; --bubble-ink: #0f2233; --mark-bg: #1b3049;
   --shadow: rgba(0, 0, 0, .35); color-scheme: dark; --series-in: #7da2f5; --series-out: #4fc8e0; --bg: #0e0f12; --card: #17181c; --ink: #ececef;
   --soft: #a1a1aa; --muted: #8b8b94; --faint: #6b6b74; --line: #26272d; --line-strong: #3a3b42; --meter: #24252b; --track: #24252b; --grid: #26272d;
-  --tile: #1f2025; --warn: #fbbf24; --warn-fill: #f59e0b; --ico-warn: #3a2c12; --demo-bar: #222d39; --demo-bar-soft: rgba(238, 243, 248, .7);
-  --demo-bar-chip: rgba(255, 255, 255, .09); --demo-bar-chip-hover: rgba(255, 255, 255, .16); --brand-ink: #d6f1f7; --brand-dot: #7fd3e6;
+  --tile: #1f2025; --warn: #fbbf24; --warn-fill: #f59e0b; --ico-warn: #3a2c12; --brand-ink: #d6f1f7; --brand-dot: #7fd3e6;
   --brand-dot-ink: #9fe0ee; }
 * { box-sizing: border-box; }
 
@@ -57,6 +57,10 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
   transition: opacity .5s ease, visibility .5s; }
 .bar { display: flex; align-items: flex-start; justify-content: flex-start; gap: 16px; }
 .chart-head, .card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chart-head { flex-wrap: wrap; row-gap: 2px; }   /* a long reading line drops under the title instead of squeezing it */
+.chart-head b, .seg button { white-space: nowrap; }   /* labels stay on one line ("1 h", "PM2.5 fine particles") */
+.seg button { flex: none; }
+.chart-bar { flex-wrap: wrap; row-gap: 8px; }   /* on a narrow screen with large text the range buttons go under History, never cut off */
 .site { display: flex; align-items: center; gap: 10px; flex: none; white-space: nowrap; font: 700 21px/1 Inter, sans-serif; letter-spacing: -.02em;
   font-weight: 650 !important; }
 .live { display: inline-block; width: 8px; height: 8px; border-radius: 99px; background: var(--good); flex: none; }
@@ -146,7 +150,7 @@ tr.you td { font-weight: 650; }
 .pending { color: var(--soft); }
 #nb { display: grid; gap: 0 !important; margin: 0 -12px; }
 .icon-btn:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink);
-  box-shadow: 0 1px 2px var(--shadow), 0 4px 14px rgba(58, 95, 200, .16); }
+  box-shadow: 0 1px 2px var(--shadow), 0 4px 14px rgba(28, 116, 136, .16); }
 .icon-btn:active { transform: scale(.94); box-shadow: none; }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .icon-btn[aria-busy="true"] { cursor: progress; color: var(--accent); }
@@ -217,9 +221,7 @@ h2 span { font: 400 13.5px/1.2 Inter, sans-serif !important; color: var(--muted)
 :root[data-theme="light"] { --series-in: #3b6fe0; --series-out: #22a6c4; --bg: #f8f9fb; --ink: #18181b; --soft: #52525b; --muted: #71717a;
   --faint: #a1a1aa; --line: #e8e8ec; --line-strong: #d4d4d8; --meter: #eeeff2; --track: #eeeff2; --grid: #ececf0; --warn: #b45309;
   --warn-fill: #f59e0b; --ico-warn: #fef3e2; --good: #15803d; --good-fill: #22a55a; --ico-good: #e8f6ee; --shadow: rgba(0, 0, 0, .05);
-  --bubble-bg: #18181b; --demo-bar: #13283b; --demo-bar-ink: #eef3f8; --demo-bar-soft: rgba(238, 243, 248, .72);
-  --demo-bar-chip: rgba(255, 255, 255, .12); --demo-bar-chip-hover: rgba(255, 255, 255, .2); --demo-bar-rule: rgba(255, 255, 255, .18);
-  --demo-bar-live: #4fd1a1; }
+  --bubble-bg: #18181b; }
 :root:not([data-theme]) { --series-in: #3b6fe0; --series-out: #22a6c4; }
 .mc-head { display: flex; justify-content: space-between; gap: 12px; border: 0; margin: 0 -22px 18px; padding: 16px 22px;
   border-radius: 16px 16px 0 0; border-bottom: 1px solid var(--line); align-items: center;
@@ -560,6 +562,7 @@ input[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-o
 .sky-cap { margin: 0 0 0 40px; font-size: 13px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; transition: color 1.2s ease;
   display: flex; align-items: center; gap: 4px 14px; line-height: 22px; height: 22px; flex-wrap: nowrap; overflow: hidden; column-gap: 12px;
   row-gap: 0; }
+.sky-cap > .cap-i { flex: none; }   /* an item never shrinks: the line overflows and fitCap drops whole items (never "Hazy ai") */
 .sky-cap:empty { display: none; }
 html.sky-dark .sky-cap { color: rgba(236, 242, 250, .82); }
 html.sky-on:not(.sky-dark) .sky-cap { color: #23384d; }
@@ -654,17 +657,6 @@ a.addr { color: inherit; text-decoration: underline; text-decoration-color: colo
   text-underline-offset: 3px; }
 a.addr:hover { color: var(--accent-ink); text-decoration-color: currentColor; }
 a.addr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.cap-live { font-weight: 600; --live: var(--good); }
-html.sky-dark .cap-live { --live: #4cd69a; }
-.cap-live i { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--live); flex: none; }
-.cap-live i::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: var(--live); opacity: 0;
-  animation: live-ping 2.4s cubic-bezier(.2, .7, .2, 1) infinite; }
-.cap-live.cached i { background: var(--muted); }
-.cap-live.cached i::after { display: none; }
-@keyframes live-ping { 0% { transform: scale(.4); opacity: .55; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .cap-live i::after { animation: none; }
-}
 .dsp-open { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px 0 10px; margin-left: 4px; border-radius: 99px;
   border-left: 1px solid var(--line); border-top-left-radius: 0; border-bottom-left-radius: 0; color: var(--soft);
   font: 500 13px/1 Inter, sans-serif; transition: background-color .15s ease, color .15s ease; }
@@ -698,9 +690,9 @@ html.theme-swap *::after { transition: none !important; }
 /* Today and summary header */
 .now-bar { margin: 44px 0 12px; align-items: flex-end; justify-content: space-between; gap: 16px; position: relative; z-index: 6; display: block;
   margin-top: 18px !important; margin-bottom: 10px !important; }
-.now-h { margin: 0 !important; transition: color 1.2s ease; font: 500 12.5px/1 Inter, sans-serif !important; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--muted) !important; }
-html.sky-dark .now-h { color: #f2f6fb !important; color: color-mix(in srgb, #f2f6fb 75%, transparent) !important; }
+/* Today or Tonight: for screen readers only, on every width (Sacha, 2026-11-13: the logo makes it redundant) */
+.now-h { position: absolute !important; width: 1px; height: 1px; margin: -1px !important; padding: 0; overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0; }
 .now-bar .sky-cap { margin: 4px 0 0; padding: 0; border: 0; background: none !important; -webkit-backdrop-filter: none; backdrop-filter: none;
   font-size: 14.5px !important; height: 26px !important; line-height: 26px !important; padding-left: 14px; margin-left: -14px !important; }
 .s-tools { position: absolute; top: 16px; right: 18px; display: flex; align-items: center; gap: 8px; z-index: 2; font-size: 12.5px;
@@ -791,13 +783,10 @@ html.sky-dark .now-line .dsp-top .chev { color: rgba(236, 242, 250, .8); }
 .now-line .dsp-top .sky-quick:not(.off) { color: var(--accent-ink); background: var(--accent-soft); }
 html.sky-dark .now-line .dsp-top .sky-quick:not(.off) { color: #fff; background: rgba(255, 255, 255, .2); }
 .now-line .dsp-top:hover .dsp-b:hover ~ .dsp-open { border: 0; background: transparent !important; }
-.now-text .now-h { flex: none; }
 .now-text .now-line { margin-top: 0; flex: 1 1 auto; min-width: 0; }
 @media (max-width: 700px) {
   .now-text { flex-wrap: wrap; gap: 6px 12px; }
   .now-text .now-line { flex-basis: 100%; }
-  .now-text .now-h { position: absolute !important; width: 1px; height: 1px; margin: -1px !important; padding: 0; overflow: hidden;
-    clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 }
 .now-line .dsp-open .chev { color: var(--soft) !important; width: 15px !important; height: 15px !important; }
 html.sky-on:not(.sky-dark) .now-line .dsp-open, html.sky-on:not(.sky-dark) .now-line .dsp-open .chev { color: #23384d !important; }
@@ -826,53 +815,164 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
 .ps-months { min-height: 14px; }
 #pollen-kv:empty { display: none; }
 
-/* Demo banner and public-monitor picker */
-.demo-bar { position: relative; z-index: 45; background: var(--demo-bar); color: var(--demo-bar-ink); font: 500 12.5px/1.3 Inter, sans-serif; }
-.demo-bar[hidden] { display: none; }
-.db-inner { position: relative; max-width: 1240px; margin: 0 auto; padding: 7px 44px; min-height: 44px; box-sizing: border-box; display: flex;
-  align-items: center; gap: 10px 14px; }
-.db-sample { display: flex; align-items: center; gap: 10px; flex: none; }
-.db-tag { font: 700 10.5px/1 Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--demo-bar);
-  background: var(--demo-bar-ink); padding: 5px 7px; border-radius: 5px; }
-.db-label { color: var(--demo-bar-soft); white-space: nowrap; }
-.db-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--demo-bar-chip); border-radius: 8px; }
-.db-seg a { min-width: 30px; box-sizing: border-box; text-align: center; padding: 6px 8px; border-radius: 6px; color: var(--demo-bar-soft);
+/* The demo's top area (static/picker.js topHTML; mock 93, concept E): the name and pitch, then the three ways in as columns
+   split by hairlines, each with its title, one line and its control as the last line, on one baseline. */
+/* always the light style, in either theme (Sacha, 2026-11-12): the light theme's values (:root above), redefined here; the
+   picker opens inside it, so its panel is light too */
+.demo-top { --card: #fff; --tile: #f4f7fb; --ink: #18181b; --soft: #52525b; --muted: #71717a; --line: #e8e8ec; --line-strong: #d4d4d8;
+  --meter: #eeeff2; --q-bg: #f6f8fb; --q-hover: #e7eef5; --accent: #1c7488; --accent-ink: #155a6b; --accent-soft: #e6f4f7; --accent-line: #a6d3dd;
+  --brand-ink: #0f2233; --brand-dot: #7fd3e6; --brand-dot-ink: #1f7d93; --ico-ink: #e7eef5; --ico-sky: #e3f1fb; --ico-good: #e8f6ee;
+  --sky: #2f7fb8; --good: #15803d; --good-fill: #22a55a; --warn: #b45309; --bad: #b42318; --shadow: rgba(0, 0, 0, .05);
+  --tag-bg: #13283b; --tag-ink: #eef3f8; --live-on-accent: #7fe0b4; --seg-hover: rgba(24, 24, 27, .06); --seg-raise: 0 1px 2px rgba(0, 0, 0, .12);
+  --dt-pad: 16px; --dt-ctl-h: 34px; --dt-btn-h: 32px; --dt-pop-air: 9px; color-scheme: light;
+  position: relative; z-index: 45; background: linear-gradient(180deg, var(--tile), var(--card)); border-bottom: 1px solid var(--line);
+  color: var(--ink); font: 400 13px/1.4 Inter, sans-serif; }
+.demo-top[hidden] { display: none; }
+/* in dark mode it stays light, with a clear edge so it reads as its own band over the dark page (Sacha, 2026-11-13: B) */
+:root[data-theme="dark"] .demo-top { border-bottom-color: rgba(0, 0, 0, .35); box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 10px 28px -10px rgba(0, 0, 0, .75); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .demo-top { border-bottom-color: rgba(0, 0, 0, .35); box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 10px 28px -10px rgba(0, 0, 0, .75); }
+}
+.dt-in { position: relative; max-width: 1240px; margin: 0 auto; padding: var(--dt-pad) 44px; box-sizing: border-box; display: grid;
+  grid-template-columns: minmax(0, 1.1fr) repeat(3, minmax(0, 1fr)); align-items: stretch; }   /* the brand a little wider for its pitch; the last title still fits beside Hide (Sacha, 2026-11-13) */
+.dt-brand { padding-right: 24px; }
+.dt-name { margin: 0; display: flex; align-items: center; gap: 10px; font: 650 19px/1 Inter, sans-serif; letter-spacing: -.02em; color: var(--ink); }
+.dt-mark { width: 28px; height: 28px; flex: none; display: block; }
+.dt-tag { font: 700 10.5px/1 Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--tag-ink); background: var(--tag-bg);
+  padding: 5px 7px; border-radius: 5px; }
+.dt-pitch { margin: 10px 0 0; font: 500 13.5px/1.45 Inter, sans-serif; color: var(--ink); text-wrap: pretty; }   /* no lone last word */
+.dt-pitch span { color: var(--soft); font-weight: 400; }
+.dt-pitch a { color: var(--accent-ink); text-underline-offset: 2px; }
+.dt-way { display: flex; flex-direction: column; gap: 3px; padding: 0 20px; border-left: 1px solid var(--line); min-width: 0; }
+.dt-t { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 14px/1.3 Inter, sans-serif; }
+.dt-ico { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; }
+.dt-ico svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dt-ink { background: var(--ico-ink); color: var(--brand-ink); }
+.dt-sky { background: var(--ico-sky); color: var(--sky); }
+.dt-good { background: var(--ico-good); color: var(--good); }
+.dt-s { margin: 0 0 10px 32px; font-size: 12.5px; color: var(--soft); text-wrap: pretty; }
+.dt-ctl { margin-top: auto; display: flex; align-items: center; gap: 8px; min-height: var(--dt-ctl-h); white-space: nowrap; min-width: 0; }
+.dt-lab { font: 600 11px/1 Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+/* the samples 1 2 3 */
+.dt-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--meter); border-radius: 9px; }
+.dt-seg a { min-width: 30px; box-sizing: border-box; text-align: center; padding: 7px 8px; border-radius: 7px; color: var(--soft);
   font: 600 12.5px/1 Inter, sans-serif; text-decoration: none; transition: background-color .15s ease, color .15s ease; }
-.db-seg a:hover { color: var(--demo-bar-ink); background: var(--demo-bar-chip-hover); }
-.db-seg a[aria-current] { background: var(--demo-bar-ink); color: var(--demo-bar); }
-.demo-bar a:focus-visible, .demo-bar button:focus-visible { outline: 2px solid var(--demo-bar-ink); outline-offset: 2px; }
-.db-end { flex: 1; display: flex; align-items: center; gap: 14px; min-width: 0; }
-.db-live { margin: 0 0 0 4px; padding-left: 14px; border-left: 1px solid var(--demo-bar-rule); color: var(--demo-bar-soft); white-space: nowrap; }
-.db-pickwrap { position: relative; min-width: 0; }
-.db-pick { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; border: 0; cursor: pointer; white-space: nowrap;
-  background: var(--demo-bar-chip); color: var(--demo-bar-ink); font: 600 12.5px/1 Inter, sans-serif; padding: 7px 8px 7px 10px; border-radius: 8px;
-  transition: background-color .15s ease; }
-.db-pick:hover { background: var(--demo-bar-chip-hover); }
-.db-pick-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.db-pick .live { width: 7px; height: 7px; background: var(--demo-bar-live); }
-.db-pick svg.i { width: 15px; height: 15px; flex: none; transition: transform .15s ease; }
-.db-pick[aria-expanded="true"], .db-pick.is-chosen { background: var(--demo-bar-ink); color: var(--demo-bar); }
-.db-pick[aria-expanded="true"] .live, .db-pick.is-chosen .live { background: var(--good-fill); }
-.db-pick[aria-expanded="true"] svg.i { transform: rotate(180deg); }
-.db-gh { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; color: var(--demo-bar-ink); font-weight: 600; text-decoration: none;
-  white-space: nowrap; }
-.db-gh:hover { text-decoration: underline; text-underline-offset: 2px; }
-.db-octo { width: 16px; height: 16px; flex: none; }
+.dt-seg a:hover:not([aria-current]) { color: var(--ink); background: var(--seg-hover); }   /* a tint on the track, never the current one's raised surface */
+.dt-seg a[aria-current] { background: var(--card); color: var(--ink); box-shadow: var(--seg-raise); }
+/* the monitor picker's button; its panel (.pm-pop below) opens under the top area */
+.dt-pickwrap { position: relative; min-width: 0; max-width: 100%; }
+.dt-pick { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-height: var(--dt-btn-h); box-sizing: border-box; padding: 7px 9px 7px 11px;
+  border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: var(--card); font: 600 12.5px/1 Inter, sans-serif;
+  cursor: pointer; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease; }
+.dt-pick:hover, .dt-pick[aria-expanded="true"] { background: var(--accent-ink); border-color: var(--accent-ink); }
+.dt-pick.is-chosen { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
+.dt-pick.is-chosen:hover, .dt-pick.is-chosen[aria-expanded="true"] { background: var(--q-hover); border-color: var(--accent); }
+.dt-pick-t { min-width: 0; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }   /* a monitor's long name, ellipsized */
+.dt-pick .live { width: 7px; height: 7px; background: var(--live-on-accent); }
+.dt-pick.is-chosen .live { background: var(--good-fill); }
+.dt-pick svg.i { width: 15px; height: 15px; flex: none; transition: transform .15s ease; }
+.dt-pick[aria-expanded="true"] svg.i { transform: rotate(180deg); }
+.demo-top .pm-pop { top: calc(100% + (var(--dt-ctl-h) - var(--dt-btn-h)) / 2 + var(--dt-pad) + 1px); left: 0; }   /* from the button down to the top area's edge: the row's slack, the padding, the 1 px border */
+/* Setup guide */
+.dt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; min-height: var(--dt-btn-h); padding: 7px 11px;
+  border: 1px solid var(--line-strong); border-radius: 9px; background: var(--card); color: var(--ink); font: 600 12.5px/1.1 Inter, sans-serif;
+  text-decoration: none; white-space: nowrap; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
+.dt-btn:hover { background: var(--q-hover); }
+.dt-gh { width: 15px; height: 15px; flex: none; fill: currentColor; }   /* GitHub's mark on the Setup button */
+.dt-bi { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.demo-top a:focus-visible, .demo-top button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Hide / Show (Sacha, 2026-11-13: "fold it to a slim bar"): a quiet button at the top-right corner, on the name's row; folded, the
+   area is one slim line with the logo, the name, DEMO and Show at its end, where Hide was, so the page still says it's a demo and
+   the way back stays under the pointer. On a computer the last column's title leaves it room (it wraps rather than touch it) */
+.dt-fold { position: absolute; top: var(--dt-pad); right: 36px; z-index: 1; display: inline-flex; align-items: center; gap: 4px;
+  height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: 500 12px/1 Inter, sans-serif;
+  cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+@media (hover: hover) { .dt-fold:hover { background: var(--seg-hover); color: var(--ink); } }   /* a tap on a phone leaves no tint */
+@media (min-width: 1241px) {
+  .demo-top:not(.is-folded) .dt-way:last-child { padding-right: 0; }   /* the button's corner: no gutter needed at the content edge */
+  .demo-top:not(.is-folded) .dt-way:last-child .dt-t { padding-right: 56px; }   /* px: the button's width less its 8 px overhang, plus air */
+}
+.dt-fi { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.demo-top.is-folded .dt-pitch, .demo-top.is-folded .dt-way { display: none; }
+.demo-top.is-folded .dt-in { display: flex; align-items: center; padding-top: 8px; padding-bottom: 8px; }
+.demo-top.is-folded .dt-brand { padding: 0; }
+.demo-top.is-folded .dt-name { font-size: 17px; gap: 8px; }   /* a small step down from 19 px, so folding reads as the same header */
+.demo-top.is-folded .dt-mark { width: 24px; height: 24px; }
+.demo-top.is-folded .dt-fold { position: static; order: 1; margin: -2px -8px -2px auto; }   /* the row's own height; the text lines up with the page's right edge */
+@media (prefers-reduced-motion: reduce) {
+  .demo-top, .dt-seg a, .dt-pick, .dt-pick svg.i, .dt-btn, .dt-fold { transition: none; }
+}
+@media (max-width: 1240px) and (min-width: 701px) {   /* a tablet or a small laptop: the name and pitch above, the three ways in a row under them (below 1241 px the last title wouldn't fit beside Hide) */
+  .dt-in { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 14px; }
+  .dt-brand { grid-column: 1 / -1; padding: 0; }
+  .dt-pitch { max-width: calc(100% * 2 / 3 - 20px); }   /* two of the three columns, short of the second's divider: two lines (Sacha, 2026-11-13) */
+  .dt-w1 { border-left: 0; padding-left: 0; }
+}
 @media (max-width: 900px) {
-  .db-inner { padding: 7px 16px; }
+  .dt-in { padding: var(--dt-pad); }
+  .dt-fold { right: 8px; }
+}
+@media (max-width: 700px) {   /* a phone: one row per way, its title left and its control right; only the sample's name stays under its title */
+  .dt-in { grid-template-columns: 1fr; padding: 12px 16px 4px; }
+  .dt-brand { padding: 0 0 10px; }
+  .dt-name { font-size: 16px; gap: 8px; }
+  .dt-mark { width: 24px; height: 24px; }
+  .dt-pitch { margin-top: 8px; font-size: 13px; }
+  .dt-way { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 6px 0; border-left: 0;
+    border-top: 1px solid var(--line); }
+  .dt-s { display: none; }
+  .dt-w1 .dt-s { display: block; grid-column: 1; margin: 1px 0 0 32px; font-size: 12px; }
+  .dt-w1 .dt-gen { display: none; }
+  .dt-w1 .dt-ctl { grid-column: 2; grid-row: 1 / span 2; }
+  .dt-ctl { margin: 0; min-height: 0; }
+  .dt-pick, .dt-btn { min-height: 44px; }   /* touch targets of 44 px, as the app's buttons */
+  .dt-seg a { position: relative; min-width: 44px; padding: 14px 8px; }
+  .dt-seg a::before { content: ""; position: absolute; inset: -2px 0; }   /* the hit area reaches over the track's padding: 44 px tall */
+  .dt-pick-t { max-width: 104px; }   /* a picked name stays as wide as "Select a monitor", so the title keeps its two lines */
+  .dt-pickwrap { position: static; }
+  .demo-top .pm-pop { left: 16px; right: 16px; width: auto; top: calc(100% + 1px + var(--dt-pop-air)); }   /* under the top area's border, with a little air */
+  .dt-fold { top: 2px; bottom: auto; height: 44px; }   /* 44 px to tap, centred on the name's row */
+  .demo-top.is-folded .dt-in { padding: 0 16px; }
+  .demo-top.is-folded .dt-fold { height: 44px; margin: 0 -8px 0 auto; }
+}
+
+/* The header, one line on every page (Sacha, 2026-11-13: the real home takes the demo's header, so there's one layout): the logo
+   and the weather (Today is read out only), then the home menu's row (.bar, after the weather in index.html, so the tab order follows what
+   you see) at the right end (a computer), or at the right end of the logo's row with the weather under it (a phone). The name is read out from
+   the logo's hidden text; on the demo the top area shows the logo and name, so the line leaves its logo out. Not in the weather view. */
+.now-bar > .bar { margin: 0; padding: 0; }
+.now-mark svg.mark { display: block; }   /* 40 px, 32 px on a phone: the logo's own sizes (.site svg.mark, below) */
+html.has-demo-top .now-mark, html.wx-full .now-mark { display: none; }
+html:not(.has-demo-top) .now-bar { margin-top: 0 !important; }   /* no top area above: the line starts where the logo row did */
+@media (min-width: 701px) {
+  html:not(.wx-full) .now-bar { display: flex; align-items: center; margin-bottom: 16px !important; }
+  html.has-demo-top:not(.wx-full) .now-bar { margin-top: 12px !important; }
+  /* the menu's 46 px row is 12 px taller than the weather line, so the demo's top margin gives back 6 px; the menu is the row's
+     tallest, so the bottom margin is its clearance from the summary */
+  .now-bar > .bar { flex: none; }
+}
+@media (max-width: 1060px) and (min-width: 701px) {   /* a tablet: the menu without the home's name (as on a phone), so the weather keeps its room */
+  .now-bar .bar .home { display: none; }
 }
 @media (max-width: 700px) {
-  .db-inner { padding: 8px 10px; flex-wrap: wrap; gap: 6px; font-size: 12px; }
-  .db-sample { gap: 5px; }
-  .db-tag { padding: 5px 6px; }
-  .db-label { display: none; }
-  .db-seg a { min-width: 24px; padding: 6px 5px; }
-  .db-end { flex: 1 1 auto; gap: 6px; }
-  .db-live { margin: 0; padding: 0; border: 0; }
-  .db-pickwrap { position: static; flex: 0 1 auto; }
-  .db-pick { gap: 5px; padding: 6px 6px 6px 8px; }
-  .db-gh-t { display: none; }
+  :root { --dt-row: 40px; --dt-mark: 32px; }   /* px: the top row (the logo and the menu), as tall as the menu; the logo on it */
+  html:not(.wx-full) .now-bar > .bar { position: absolute; top: 0; right: 0; }
+  html:not(.wx-full) .now-line { padding-top: calc(var(--dt-row) + 22px); }   /* 22 px from the menu down to the Weather pill, as drawn */
+  .now-text .now-mark { position: absolute; left: 0; top: calc((var(--dt-row) - var(--dt-mark)) / 2); }
+  .now-mark svg.mark { width: var(--dt-mark) !important; height: var(--dt-mark) !important; }   /* also from 641 to 700 px, where .site's is 40 */
+  html:not(.wx-full) .now-line .dsp { margin-left: auto; }   /* the Weather pill at the right end of the weather row, under the menu */
+  html:not(.wx-full) .now-bar { margin-bottom: 12px !important; }
 }
+/* The weather view: the top area fades with the page, and the menu leaves the pill */
+.demo-top { transition: opacity .5s ease, visibility .5s; }
+@media (prefers-reduced-motion: reduce) { .demo-top { transition: none; } }   /* after the fade, so it wins */
+html.wx-full .demo-top { opacity: 0; visibility: hidden; pointer-events: none; }
+html.wx-full .now-bar > .bar { display: none; }
+/* the demo: a bigger weather & theme control on the weather line, so visitors find it (Sacha, 2026-11-12); a real home keeps the small one */
+html.has-demo-top .now-line .dsp-top { height: 44px !important; padding: 3px 4px 3px 3px; gap: 4px !important; }   /* the line's own rule sets 34 px with !important */
+html.has-demo-top .now-line .dsp-top .sky-quick, html.has-demo-top .now-line .dsp-open { width: 38px !important; height: 38px !important; }
+html.has-demo-top .now-line .dsp-top svg.i { width: 20px; height: 20px; }
+html.has-demo-top .now-line .dsp-top .chev { width: 17px; height: 17px; }
 .pm-pop { position: absolute; left: 0; top: calc(100% + 12px); z-index: 50; width: min(440px, calc(100vw - 32px)); box-sizing: border-box;
   text-align: left; white-space: normal; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px 12px;
   box-shadow: 0 18px 44px rgba(16, 24, 40, .16); color: var(--ink); font: 400 14px/1.4 Inter, sans-serif; }
@@ -964,7 +1064,7 @@ h2:not(.now-h):not(.s-do) { margin-top: 32px !important; }
   color: var(--muted) !important; font-size: 12px !important; }
 .nb-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .nb-legend i { display: inline-block; flex: none; }
-.lg-you { width: 9px; height: 9px; border-radius: 50%; background: #3a5fc8; box-shadow: 0 0 0 2px var(--card); }
+.lg-you { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lg-dot { width: 9px; height: 9px; border-radius: 50%; background: #22a55a; }
 .lg-bqe { width: 16px; height: 4px; border-radius: 2px; background: #71717a; }
 .lg-plume { width: 14px; height: 10px; border-radius: 3px; background: color-mix(in srgb, #f59e0b 45%, transparent) !important; }
@@ -1011,9 +1111,8 @@ h2:not(.now-h):not(.s-do) { margin-top: 32px !important; }
   flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--edge) 18%, transparent); }
 .grid4 > .card .card-top .q .bubble { left: auto; right: -6px; transform: none; z-index: 20; }
 .grid4 > .card:hover, .grid4 > .card:focus-within { z-index: 3; position: relative; }
-html.sky-on .now-bar .sky-cap, html.sky-on .now-h { text-shadow: 0 0 6px rgba(255, 255, 255, .7), 0 0 2px rgba(255, 255, 255, .6); }
-html.sky-on.sky-dark .now-bar .sky-cap, html.sky-on.sky-dark .now-h { text-shadow: 0 0 6px rgba(10, 16, 30, .55), 0 0 2px rgba(10, 16, 30, .5); }
-.now-bar .cap-live { gap: 9px; }
+html.sky-on .now-bar .sky-cap { text-shadow: 0 0 6px rgba(255, 255, 255, .7), 0 0 2px rgba(255, 255, 255, .6); }
+html.sky-on.sky-dark .now-bar .sky-cap { text-shadow: 0 0 6px rgba(10, 16, 30, .55), 0 0 2px rgba(10, 16, 30, .5); }
 .pr-ic > svg { width: 38px !important; height: 38px !important; filter: none !important; }
 
 /* Monitor cards. All are emitted as .card.mc; the shared .card padding supplies the sides. */
@@ -1283,19 +1382,24 @@ html.wx-full .now-line .dsp-pop { position: fixed !important; width: 340px !impo
   .wx-b.wx-exit { padding: 0; width: 32px; }
 }
 .fx-preview summary > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.site svg.mark .mk-fr { fill: none; stroke: #0f2233; stroke-width: 2.4; }
-.site svg.mark .mk-br { fill: none; stroke: #0f2233; stroke-width: 2; }
-.site svg.mark .mk-dot { fill: #1f7d93; }
-.site svg.mark * { transition: fill .8s ease, stroke .8s ease; }
-html.sky-dark .site svg.mark .mk-fr, html.sky-dark .site svg.mark .mk-br, :root[data-theme="dark"] .site svg.mark .mk-fr, :root[data-theme="dark"] .site svg.mark .mk-br { stroke: #eef5fa; }
-html.sky-dark .site svg.mark .mk-dot, :root[data-theme="dark"] .site svg.mark .mk-dot { fill: #7fd3e6; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .site svg.mark .mk-fr, :root:not([data-theme="light"]) .site svg.mark .mk-br { stroke: #eef5fa; }
-  :root:not([data-theme="light"]) .site svg.mark .mk-dot { fill: #7fd3e6; }
-}
-.site svg.mark { flex: none; width: 32px !important; height: 32px !important; }
+/* The logo (mock 94, round 8 a): a navy house, the day's sky in its roof, a dot rising from the window bar. On a dark background
+   (the dark theme, or a dark sky behind the header: sky.js's sky-dark) the house turns pale and the roof deepens; the demo's top
+   area is always light. The dot and its glow say whether the readings are fresh: green while they are, grey when they are old, the
+   page is offline or they haven't loaded (app.js showUpdated sets .is-stale). Never the air's amber or red: the summary says that. */
+svg.mark, svg.dt-mark { --logo-house: var(--logo-day-house); --logo-roof: var(--logo-day-roof); --logo-roof-a: var(--logo-day-roof-a); --logo-dot: var(--logo-live); }
+:root[data-theme="dark"] .site svg.mark, html.sky-dark .site svg.mark { --logo-house: var(--logo-night-house); --logo-roof: var(--logo-night-roof);
+  --logo-roof-a: var(--logo-night-roof-a); }
+html.sky-ink:not(.sky-dark) .site svg.mark { --logo-house: var(--logo-day-house); --logo-roof: var(--logo-day-roof); --logo-roof-a: var(--logo-day-roof-a); }   /* a bright sky in the dark theme */
+.now-mark.is-stale svg.mark { --logo-dot: var(--logo-idle); --logo-glow-a: 0; }   /* old readings: a flat grey dot, no glow, so it differs by light and not only by hue */
+svg.mark .lg-house, svg.dt-mark .lg-house { fill: var(--logo-house); }
+svg.mark .lg-roof, svg.dt-mark .lg-roof { fill: var(--logo-roof); opacity: var(--logo-roof-a); }
+svg.mark .lg-dot, svg.mark .lg-glow, svg.dt-mark .lg-dot, svg.dt-mark .lg-glow { fill: var(--logo-dot); }
+svg.mark .lg-glow, svg.dt-mark .lg-glow { opacity: var(--logo-glow-a); }
+.site svg.mark * { transition: fill .8s ease, opacity .8s ease; }
+@media (prefers-reduced-motion: reduce) { .site svg.mark * { transition: none; } }
+.site svg.mark { flex: none; width: 40px !important; height: 40px !important; }   /* as tall as the 46 px menu's content beside it (mock 94, round 21) */
 @media (max-width: 640px) {
-  .bar .site svg.mark, .site svg.mark { width: 28px !important; height: 28px !important; }
+  .bar .site svg.mark, .site svg.mark { width: 32px !important; height: 32px !important; }
 }
 .s-by .s-tag #s-tag-t { -webkit-background-clip: text; background: none !important; color: var(--soft) !important;
   -webkit-text-fill-color: currentColor; }
@@ -1437,6 +1541,15 @@ html.sky-dark .site svg.mark .mk-dot, :root[data-theme="dark"] .site svg.mark .m
 :root .sum-card > .s-bar #s-ago { display: inline !important; font: 400 13px/1.2 Inter, sans-serif; color: var(--muted);
   line-height: 20px !important; display: inline-block; margin: 0 !important; padding: 0 !important; }
 :root .sum-card > .s-bar #s-ago:not(:empty)::before { content: "· "; }
+/* One status at a time: when the readings are old or the page is offline, their age replaces "Updated just now" (which would
+   contradict it); on a computer it follows "from 6 sources" with a dot, on a phone it starts its own row, so no dot there */
+:root .sum-card > .s-bar #updated:not(:empty) ~ #s-ago { display: none !important; }
+:root .sum-card > .s-bar #updated, :root .sum-card > .s-bar #s-ago { white-space: nowrap; }
+:root .sum-card > .s-bar #updated { font: 400 13px/1.2 Inter, sans-serif; line-height: 20px !important; display: inline-block; margin: 0 !important; padding: 0 !important; }
+:root .sum-card > .s-bar #updated:empty { display: none; }   /* fresh: no slot, so "Updated just now" starts at the title's edge */
+@media (min-width: 481px) {
+  :root .sum-card > .s-bar #updated:not(:empty)::before { content: "· "; color: var(--muted); }
+}
 :root .sum-card > .s-bar #read-refresh { padding: 0 !important; justify-content: center; border-color: transparent !important;
   border-radius: 50% !important; color: var(--soft); width: 32px !important; height: 32px !important; }
 :root .sum-card > .s-bar #read-refresh span { display: none; }
@@ -1506,7 +1619,6 @@ html.wx-full .now-bar::before { content: ""; position: absolute; inset: 0; z-ind
   box-shadow: 0 6px 24px -10px rgba(15, 23, 38, .35), inset 0 0 0 1px rgba(255, 255, 255, .5); }
 html.wx-full.sky-dark .now-bar::before { background: rgba(15, 23, 38, .42);
   box-shadow: 0 6px 24px -10px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(255, 255, 255, .12); }
-html.wx-full .now-bar .now-h { display: none !important; }
 html.wx-full .now-bar .sky-cap { text-shadow: none !important; }
 html.wx-full .now-text { gap: 0; }
 html.wx-full .now-line { gap: 10px; }
@@ -1532,8 +1644,6 @@ html.wx-full .now-bar .wx-mode::before { content: ""; width: 1px; height: 18px; 
 .dsp-pop .fx-presets .fx-rand[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink);
   box-shadow: inset 0 0 0 1px var(--accent-line); }
 .dsp-pop .fx-presets .fx-rand::before { content: none !important; }
-.site svg.mark .mk-sky { fill: url(#mk-g) !important; opacity: .85 !important; }
-html:not(.sky-on) .site svg.mark .mk-sky { fill: #7fd3e6 !important; opacity: .5 !important; }
 .mc-hw svg { filter: none !important; width: 80px !important; height: 80px !important; }
 
 /* Match the Open Air drawing to the ONE; estimates keep their smaller source mark. */
@@ -1600,12 +1710,14 @@ body.no-token .bar .custom { display: none; }   /* the token page: no home menu 
 .s-profiles:empty { display: none; }
 .s-profiles .sx-nh .sx-why p { top: calc(100% + 6px); right: 18px; left: auto; width: min(380px, calc(100% - 36px)); }
 :root .sum-card > .s-bar + .sx { padding-top: 0; }
-@media (max-width: 480px) {
-  .s-meta { display: flex; flex-wrap: wrap; align-items: center; flex: 1 1 auto; min-width: 0; }
-  :root .sum-card > .s-bar .s-tools { flex-basis: 100%; margin-left: 28px !important; }
+@media (max-width: 480px) {   /* a phone: the title and the profile icons on row 1, the status and Refresh under them across the full width */
+  :root .sum-card > .s-bar { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: 0; }
+  .s-meta { display: contents; }
+  :root .sum-card > .s-bar .s-by { grid-row: 1; grid-column: 1; min-width: 0; }
+  :root .sum-card > .s-bar .s-tools { grid-row: 2; grid-column: 1 / -1; justify-self: start; margin-left: 28px !important; }   /* 28 px: under the title's text, past its mark */
   :root .sum-card > .s-bar #s-ago:not(:empty)::before { content: none; }
   :root .sum-card > .s-bar #read-refresh { margin: -10px 0 -10px -6px; }
-  .s-profiles { padding-left: 10px; }
+  .s-profiles { grid-row: 1; grid-column: 2; padding-left: 10px; }
 }
 .blocks .pop-head > div { min-width: 0; line-height: 1.35; }
 .blocks .pop-head > div > b { display: inline; }
@@ -1664,7 +1776,7 @@ html.outside-dark .mc-out .mc-status.warn { color: var(--warn); }
 .hist-est[hidden] { display: none; }
 
 /* sky.js measures the background and supplies readable ink and halo colors for either theme. */
-html.sky-ink .bar .site, html.sky-ink .now-bar .now-h { color: var(--sky-ink) !important;
+html.sky-ink .bar .site { color: var(--sky-ink) !important;
   text-shadow: 0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo), 0 0 12px var(--sky-halo); }
 html.sky-ink .now-bar .sky-cap { color: var(--sky-ink) !important;
   text-shadow: 0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo), 0 0 12px var(--sky-halo) !important; }
@@ -1675,8 +1787,6 @@ html.sky-ink .now-line .dsp-top .theme-quick, html.sky-ink .now-line .dsp-open, 
 :root.sky-ink.wx-full .now-bar::before { background: rgba(var(--sky-halo-rgb), .6) !important; }
 html.sky-ink:not(.sky-dark) .now-bar .cap-i.air.warn svg.i { color: #b45309; }
 html.sky-ink:not(.sky-dark) .now-bar .cap-i.air.bad svg.i { color: #b42318; }
-html.sky-ink:not(.sky-dark) .site svg.mark .mk-fr, html.sky-ink:not(.sky-dark) .site svg.mark .mk-br { stroke: #0f2233; }
-html.sky-ink:not(.sky-dark) .site svg.mark .mk-dot { fill: #1f7d93; }
 
 /* ── Local first-run token form (begin) ── */
 /* One narrow card on the plain page background (sky.js keeps the sky off here): two numbered steps, each with one action. */
@@ -1758,6 +1868,9 @@ html.sky-ink:not(.sky-dark) .site svg.mark .mk-dot { fill: #1f7d93; }
 /* Touch screens: small icon controls keep their look but get an invisible tap area of about 44 px
    (the phone pass found the legend's (i) at 13 px, the (?) buttons at 22–28 px, the chart's range buttons at 27 px tall). */
 @media (pointer: coarse) {
+  .dt-btn, .dt-pick { min-height: 44px; }
+  .dt-seg a { position: relative; min-width: 44px; padding: 14px 8px; }
+  .dt-seg a::before { content: ""; position: absolute; inset: -2px 0; }
   .q, .sx-nh-i, .sx-nchip, .dsp-b, .lg-info, .seg button { position: relative; }
   .q::before, .sx-nh-i::before { content: ""; position: absolute; inset: -8px; }
   .dsp-b::before { content: ""; position: absolute; inset: -8px 0; }   /* side by side: grow only up and down */
