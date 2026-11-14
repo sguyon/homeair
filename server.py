@@ -171,11 +171,14 @@ def version_assets(html):
 def api_headers(resp):
     """No browser HTTP caching of live data (the server cache does that); say how fresh the answer is."""
     if request.path.startswith("/api/"):
-        resp.headers["Cache-Control"] = "no-store" if request.path == "/api/token" else "no-cache"
+        # never kept: the token form, and the setup state the Connected card polls while setup restarts the app
+        resp.headers["Cache-Control"] = "no-store" if request.path in ("/api/token", "/api/setup") else "no-cache"
         if getattr(g, "cache_state", None):
             resp.headers["X-Cache"] = g.cache_state
             resp.headers["X-Data-Age"] = str(g.cache_age)
-    if MODE == "demo" and request.method == "GET" and resp.status_code == 200 and (request.path == "/" or request.path.startswith("/api/")):
+    if (MODE == "demo" and request.method == "GET" and resp.status_code == 200 and (request.path == "/" or request.path.startswith("/api/"))
+            and resp.headers.get("Cache-Control") != "no-store"):
+        # a page that must not be kept (a fresh copy's setup card) stays so: a kept card would come back after setup
         if request_monitor() is not None or request.path == "/api/monitors":
             # a public monitor is live: a CDN keeps it as long as its data stays fresh in the cache (demo/public.py)
             resp.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
@@ -376,6 +379,13 @@ def inject_app(html, setup_page=False):
     now = None if setup_page else page_clock()   # the token card never shows the demo's moments
     data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {})}, ensure_ascii=False).replace("<", "\\u003c")
     return html.replace("<script src=", f"<script>window.APP = {data};</script>\n<script src=", 1)
+
+
+@app.route("/api/setup")
+def setup_state():
+    """Whether the app still waits for setup. The Connected card asks every few seconds and opens the home once setup has
+    restarted the app with it, so nobody has to reload the tab."""
+    return jsonify({"setup": setup_mode()})
 
 
 @app.route("/api/road/route")
@@ -674,7 +684,26 @@ from sources import api_get, local_now
 from air_read import road_traffic, rush_windows
 
 
+def write_pid_file():
+    """Leave this copy's pid in app.pid while it runs, so `setup.py --start-at-login on` can stop it before the system
+    starts its own (scripts/autostart.py); removed at exit, SIGTERM included."""
+    import atexit, signal
+    path = Path(__file__).parent / "app.pid"
+    pid = str(os.getpid())
+    path.write_text(pid)
+
+    def remove():
+        try:
+            if path.read_text().strip() == pid:
+                path.unlink()
+        except OSError:
+            pass
+    atexit.register(remove)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # atexit runs on SIGTERM only through a normal exit
+
+
 if __name__ == "__main__":
+    write_pid_file()
     port = int(os.environ.get("PORT", 5555))
     host = os.environ.get("HOST", "127.0.0.1")   # HOST=0.0.0.0 to open it from a phone on the same network
     print(f"Home Air Quality → http://localhost:{port}")
