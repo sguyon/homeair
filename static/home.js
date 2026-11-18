@@ -1,4 +1,4 @@
-// Home Air Quality: the home's profiles and road in words, and compass bearings. app.js, sky.js and map.js use these; the home itself
+// Home Air: the home's profiles and road in words, and compass bearings. app.js, sky.js and map.js use these; the home itself
 // comes from the server as window.APP (config.public_view). Twin of config.bearing_in in Python: change both together.
 (function (root) {
   // True if a compass bearing lies in the arc [lo, hi]; lo > hi means the arc crosses north.
@@ -242,8 +242,9 @@
     return /^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : '';
   }
 
-  // The credit AirGradient's public data (CC-BY-SA 4.0) asks for, under the neighborhood table. Each monitor's owner
-  // is named in its open row (nbDetailHTML). The demo's monitors are made up.
+  // The credit AirGradient's public data (CC-BY-SA 4.0) asks for, under the neighborhood table. A monitor's owner is
+  // named in its open row (nbDetailHTML) when the map gives one, and every row links to it on AirGradient's map. The
+  // demo's monitors are made up.
   function creditHtml(isDemo) {
     if (isDemo) return 'Made-up monitors for the demo';
     const a = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
@@ -439,7 +440,54 @@
     return { fresh: true, status: 'Live readings', meta: '' };
   }
 
-  const api = { readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel };
+  // ── When the page asks the server again ──
+  // The server fetches AirGradient at most every 5 minutes (sources.REFRESH_SECONDS) whatever the number of tabs. The
+  // page asks it again when someone comes back to it (the tab shown again, the window focused, the network back) and
+  // what it shows is older than that, when the Refresh button is pressed, and every 5 minutes while the tab is on
+  // screen (recheckDue: a wall tablet stays current). A hidden tab never asks.
+  const REFRESH_STALE_MS = 5 * 60 * 1000;
+  function refreshDue({ hidden, last, now, staleMs = REFRESH_STALE_MS }) {
+    return !hidden && now - last >= staleMs;
+  }
+  // The one timer: every REFRESH_STALE_MS a tab on screen asks the server again (its cache answers); hidden, never.
+  function recheckDue({ visibility }) {
+    return visibility === 'visible';
+  }
+  // A request that never answers must not stop the page: each fetch gives up after FETCH_TIMEOUT_MS, a whole refresh
+  // after REFRESH_TIMEOUT_MS, and the next refresh then starts afresh.
+  const FETCH_TIMEOUT_MS = 20 * 1000, REFRESH_TIMEOUT_MS = 60 * 1000;
+  // The re-check comes 10 s after the server's 5 minutes, so it meets a cache that's due rather than one a moment short.
+  const RECHECK_MS = REFRESH_STALE_MS + 10 * 1000;
+  // One run of `run` at a time: a call while one is running gets that run. A run not settled after timeoutMs is
+  // dropped (its promise rejects), so a stuck run never blocks the next call.
+  function singleFlight(run, { timeoutMs = REFRESH_TIMEOUT_MS, timers = globalThis } = {}) {
+    let current = null;
+    return (...args) => {
+      if (current) return current;
+      let timer;
+      const p = Promise.race([
+        Promise.resolve().then(() => run(...args)),
+        new Promise((_, reject) => { timer = timers.setTimeout(() => reject(new Error('timed out')), timeoutMs); }),
+      ]).finally(() => { timers.clearTimeout(timer); if (current === p) current = null; });
+      current = p;
+      return p;
+    };
+  }
+  // The re-check timer: armed while the tab is on screen, stopped while it's hidden. Each tick arms the next one
+  // before it asks, so a refresh that hangs can't stop the timer.
+  function recheckTimer({ refresh, visibility, ms = RECHECK_MS, timers = globalThis }) {
+    let t = null;
+    const stop = () => { if (t !== null) timers.clearTimeout(t); t = null; };
+    const arm = () => { stop(); if (recheckDue({ visibility: visibility() })) t = timers.setTimeout(tick, ms); };
+    function tick() {
+      t = null;
+      arm();
+      if (recheckDue({ visibility: visibility() })) Promise.resolve().then(refresh).catch(() => {});
+    }
+    return { arm, stop, armed: () => t !== null };
+  }
+
+  const api = { refreshDue, recheckDue, singleFlight, recheckTimer, FETCH_TIMEOUT_MS, REFRESH_TIMEOUT_MS, RECHECK_MS, REFRESH_STALE_MS, readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);

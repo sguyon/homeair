@@ -234,7 +234,7 @@ def _raw_pm(pm, rh):
 
 
 def source_row(key):
-    """The public monitor as AirGradient's world list gives it: the balcony monitor's reading now (the story's), with
+    """The public monitor as a public monitor row: the balcony monitor's reading now (the story's), with
     the raw pm02 its correction reads back as the story's PM2.5."""
     m, _ = world(key)
     out = history(key)[1][-1]
@@ -394,7 +394,7 @@ def install(server, moment_for_request):
     With ?monitor=<id> (server.request_monitor()) and that id an outdoor monitor of AirGradient's public map, the
     request is about that monitor instead: the real fetchers at its place, through the real cache under keys that
     carry its id (MONITOR_TTL), its history from AirGradient's public map when the map has it (monitor_history), no
-    pollen, no road, the runner's profile only (its view's), and its reading counts only while it's online and recent
+    pollen, no road, the demo's three profiles (its view's), and its reading counts only while it's online and recent
     (server.outdoor_row). An id that can't be shown (unknown, or the map didn't answer) gets the default sample's
     made-up answers, which no one caches, and the page says why (window.APP.public.error).
 
@@ -410,10 +410,9 @@ def install(server, moment_for_request):
     # the real ones, before they're replaced: a public monitor uses them
     _REAL.clear()
     _REAL.update({name: getattr(sources, name) for name in (
-        "cached", "_fetch_world", "_fetch_nearby", "get_open_meteo_data", "get_air_forecast", "smoke_status",
+        "cached", "_fetch_nearby", "get_open_meteo_data", "get_air_forecast", "smoke_status",
         "local_now", "source_on", "outdoor_source")},
-        road_traffic=air_read.road_traffic, page_view=server.page_view, indoor_monitor=air_read.indoor_monitor,
-        force=sources._force, world_cache=sources.WORLD_CACHE)
+        road_traffic=air_read.road_traffic, page_view=server.page_view, force=sources._force)
     real = _REAL
     request_monitor = server.request_monitor
     ranges = sorted(sources.HIST_TTL)   # the History card's ranges (h): a monitor's history is fetched and cached by them
@@ -483,10 +482,10 @@ def install(server, moment_for_request):
         w = which()
         return dict(air_forecast(key())) if w == "sample" else real["get_air_forecast"](here())
 
-    def nearby_of(world, *a, **k):
+    def nearby_of(*a, **k):
         w = which()
         if w != "sample":
-            return real["_fetch_nearby"](world, here())
+            return real["_fetch_nearby"](here(), skip_own=False)   # a public monitor's page: the map's area around it
         rows = [dict(n) for n in nearby(key())]
         if outdoor_from() is None:
             return rows
@@ -516,8 +515,10 @@ def install(server, moment_for_request):
         return source_past(key(), frm, to) if location_id == SOURCE_MONITOR_ID == outdoor_from() else []
 
     def indoor_monitor():
+        """A sample's moment says (a hidden case can have none); a public monitor is outdoor only, so its summary reads
+        nothing indoors and its toddler profile waits for an indoor monitor, as an outdoor-only home's does."""
         m = sample()
-        return m.indoor if m else real["indoor_monitor"]()
+        return m.indoor if m else False
 
     def now(*a, **k):
         w = which()
@@ -575,7 +576,6 @@ def install(server, moment_for_request):
     sources.source_on = source_on
     sources.pollen_state = lambda: "ok" if sources.source_on("pollen") else "off"   # made up, so no key to miss
     sources.history_points = points
-    sources._fetch_world = lambda: world_list() if which() == "monitor" else []   # a sample's cached() runs it; nothing leaves the machine
     sources._fetch_nearby = nearby_of
     air_read.active_road = lambda: server.ROAD if which() == "sample" else None
     air_read.road_traffic = lambda hour, wind: real["road_traffic"](hour, wind) if which() == "sample" else dict(no_road)
@@ -586,7 +586,7 @@ def install(server, moment_for_request):
     server.page_view = page_view
     server.page_clock = page_clock
     server.monitor_missing = lambda: asked() == "missing"
-    air_read.outdoor_row = monitor   # a public monitor's row from the world list: its age and offline flag; None for a sample
+    air_read.outdoor_row = monitor   # a public monitor's row from the map: its age and offline flag; None for a sample
     # the hidden one-monitor cases (?moment=indoor-near, indoor-model, outdoor-only): which monitors the home has
     sources.outdoor_from = outdoor_from
     sources.outdoor_source = outdoor_source
@@ -614,16 +614,23 @@ def real_cached(key, fetch, **kw):
     return _REAL["cached"](key, fetch, **{**kw, "wait": min(kw.get("wait", public.MONITOR_WAIT), left)})
 
 
-def world_list():
-    """AirGradient's world list through the real cache ("ag:world", one list for every monitor and the picker), fetched
-    in the request's thread (never inside a cached fetch). Raises when the map doesn't answer and nothing recent is cached."""
-    value, _ = real_cached("ag:world", _REAL["_fetch_world"], force=_REAL["force"](), **_REAL["world_cache"])
-    return value
+PICKER_CACHE = {"ttl": 15 * 60, "keep": 3600, "force_floor": 15 * 60}   # s: one area request per place a quarter hour
+
+
+def picker_area(lat, lon):
+    """The public monitors within publicmap.PICKER_KM of a place (rounded to 2 decimals), through the real cache: one
+    area request on AirGradient's map per place every 15 min at most, asked only when the picker opens or a visitor
+    searches. Raises when the map doesn't answer and nothing recent is cached."""
+    lat, lon = round(lat, 2), round(lon, 2)
+    value, _ = real_cached(f"ag:pick:{lat:.2f},{lon:.2f}", lambda: publicmap.fetch_area(lat, lon, publicmap.PICKER_KM),
+                           force=_REAL["force"](), **PICKER_CACHE)
+    return value or []
 
 
 def _resolve(mid):
-    """(monitor, None), or (None, the message for the page) when it can't be shown; (None, None) without an id.
-    Memoized per request (flask.g), so a request reads the world list once."""
+    """(monitor, None), or (None, the message for the page) when it can't be shown; (None, None) without an id (the
+    monitor's id on AirGradient's map). Memoized per request (flask.g): its name and place (a day) and its reading now
+    (5 min) are two small map requests, never a list."""
     if mid is None:
         return None, None
     from flask import g
@@ -631,28 +638,37 @@ def _resolve(mid):
     if memo and memo[0] == mid:
         return memo[1]
     try:
-        mon = publicmap.find(world_list(), mid)
-        out = (mon, None) if mon else (None, public.UNKNOWN.format(id=mid))
+        place, _ = real_cached(f"ag:place:{mid}", lambda: publicmap.fetch_place(mid), ttl=publicmap.LOCATION_TTL,
+                               swr=publicmap.LOCATION_TTL, keep=7 * 24 * 3600)   # {}: no such monitor on the map
     except WORLD_ERRORS:
-        out = (None, public.WORLD_DOWN)
+        g.public_monitor = (mid, (None, public.WORLD_DOWN))
+        return g.public_monitor[1]
+    try:
+        now, _ = real_cached(f"ag:now:{mid}", lambda: publicmap.fetch_now(mid), ttl=public.MONITOR_TTL, keep=3600,
+                             force=_REAL["force"](), force_floor=60) if place else (None, None)
+    except WORLD_ERRORS:
+        now = {}   # its place without a reading: shown as not reporting
+    try:
+        mon = publicmap.monitor_row(place, now) if place else None
+    except RuntimeError:
+        mon = None
+    out = (mon, None) if mon else (None, public.UNKNOWN.format(id=mid))
     g.public_monitor = (mid, out)
     return out
 
 
 def monitor_history(mon, hours):
     """A public monitor's last `hours` of readings from AirGradient's public map, as /api/history rows; [] when the
-    map has no entry for it or doesn't answer (the page then draws the model's past). Fetched in the request's thread
-    through the real cache, under keys that carry the monitor's id: its map id for MAP_ID_TTL, each range for
-    HISTORY_TTL. A failed fetch isn't cached, so the next request asks again."""
-    here_key = public.here_of(mon).key
+    map doesn't answer (the page then draws the model's past). Fetched in the request's thread through the real cache,
+    under keys that carry the monitor's id, each range for HISTORY_TTL. A failed fetch isn't cached, so the next
+    request asks again."""
+    here_key, mid = public.here_of(mon).key, mon.get("mapId")
+    if not isinstance(mid, int):
+        return []
     try:
-        mid, _ = real_cached(f"ag:mapid:{here_key}", lambda: publicmap.map_id(mon), ttl=publicmap.MAP_ID_TTL,
-                                 wait=publicmap.MAP_WAIT)
-        if mid is None:
-            return []
         rows, _ = real_cached(f"ag:maphist:{here_key}:{hours}h", lambda: publicmap.history(mid, hours),
                                   ttl=publicmap.HISTORY_TTL, wait=publicmap.MAP_WAIT)
-    except WORLD_ERRORS:   # the map failed or timed out, like the world list; a bug in our code still raises
+    except WORLD_ERRORS:   # the map failed or timed out; a bug in our code still raises
         return []
     return [dict(r) for r in rows]
 

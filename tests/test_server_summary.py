@@ -10,7 +10,7 @@ def test_weather_asks_for_sun_times_and_past_hours(monkeypatch):
         def raise_for_status(self): pass
         def json(self): return {"current": {"temperature_2m": 1}}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, **kw):
         seen.update(params or {})
         return R()
     monkeypatch.setattr(sources.requests, "get", fake_get)

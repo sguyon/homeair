@@ -34,7 +34,7 @@ def test_writes_three_files(root):
     folder = root / homeserver.FOLDER
     assert sorted(p.name for p in folder.iterdir()) == [".env", "config.toml", "docker-compose.yml"]
     compose = (folder / "docker-compose.yml").read_text()
-    assert "image: ghcr.io/sguyon/home-air-quality:latest" in compose
+    assert "image: ghcr.io/sguyon/homeair:latest" in compose and "ghcr.io/sguyon/home-air-quality:latest" in compose
     assert '- "8000:8000"' in compose
     assert "restart: unless-stopped" in compose
     assert "target: /config/config.toml" in compose and "read_only: true" in compose

@@ -52,9 +52,9 @@ def launchd_plist(root, home, port, host=None):
 
 def systemd_unit(root, port, host=None):
     return (
-        "[Unit]\nDescription=Home Air Quality\n\n"
+        "[Unit]\nDescription=Home Air\n\n"
         "[Service]\n"
-        f'WorkingDirectory="{root}"\n'
+        f"WorkingDirectory={root}\n"
         f'ExecStart=/bin/sh "{root / "scripts" / "run.sh"}" server.py\n'
         f"Environment=PORT={port}\n"
         + (f"Environment=HOST={host}\n" if host else "") +
@@ -85,7 +85,7 @@ def _alive(pid):
 
 def _is_ours(pid):
     """The pid is this app (a stale app.pid can name another program after a crash or a restart)."""
-    out = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
+    out = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout   # -ww: Linux's ps cuts a long command at 80 columns when piped, losing "server.py" at its end
     return "server.py" in out
 
 

@@ -27,6 +27,15 @@ WEATHER = {
 }
 
 
+@pytest.fixture(autouse=True)
+def fresh_budgets():
+    """Every test starts with today's call budgets unused and no source paused (budgets.py counts per process)."""
+    import budgets
+    budgets.clear()
+    yield
+    budgets.clear()
+
+
 @pytest.fixture
 def canned(monkeypatch):
     monkeypatch.setattr(sources, "get_open_meteo_data", lambda *a, **k: WEATHER)

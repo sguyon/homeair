@@ -1,4 +1,4 @@
-/* Home Air Quality: page styles. Theme tokens, then components and their responsive/state rules. */
+/* Home Air: page styles. Theme tokens, then components and their responsive/state rules. */
 :root { --card: #fff; --bad: #b42318; --sky: #2f7fb8; --accent: #1c7488; --accent-ink: #155a6b; --accent-soft: #e6f4f7; --accent-line: #a6d3dd;
   --ai-bg: #e7eef8; --ai-line: #cdd9ea; --pill: rgba(255, 255, 255, .72); --tile: #f4f7fb; --q-bg: #f6f8fb; --q-line: #d5dee6; --q-ink: #24384a;
   --q-hover: #e7eef5; --ico-sky: #e3f1fb; --ico-ink: #e7eef5; --ico-smoke: #f3eee8; --smoke: #8a5a32; --series-in: #0f2233; --series-out: #2f7fb8;
@@ -206,6 +206,7 @@ h2 span { font: 400 13.5px/1.2 Inter, sans-serif !important; color: var(--muted)
 .bar .custom-top { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; border-radius: 12px; padding: 2px 4px; }
 .bar .custom-top:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bar .home { margin: 0; text-align: left; align-items: flex-start; }
+.bar .home.sample-place { display: flex; max-width: none; }
 .bar .avatar { transition: box-shadow .15s ease; position: relative; }
 .bar .custom-top:hover .avatar, .bar .custom[open] .avatar { box-shadow: 0 0 0 4px var(--accent-soft); }
 .bar .custom-top .fold { display: none; }
@@ -316,7 +317,8 @@ svg.ts .ts-legend text { fill: var(--soft); font: 500 11.5px Inter, sans-serif; 
   .bar .site { font-size: 16px; gap: 8px; min-width: 0; }
   .bar .site svg.mark { width: 26px; height: 26px; }
   .bar details.custom { width: auto; }
-  .bar .home { display: none !important; }
+  .bar .home:not(.sample-place) { display: none !important; }
+  .bar .home.sample-place { max-width: 72vw; white-space: normal; text-wrap: pretty; }
   .bar .avatar { width: 32px; height: 32px; }
   .bar .custom .blocks { left: auto; width: calc(100vw - 32px); }
 }
@@ -823,7 +825,7 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
   --meter: #eeeff2; --q-bg: #f6f8fb; --q-hover: #e7eef5; --accent: #1c7488; --accent-ink: #155a6b; --accent-soft: #e6f4f7; --accent-line: #a6d3dd;
   --brand-ink: #0f2233; --brand-dot: #7fd3e6; --brand-dot-ink: #1f7d93; --ico-ink: #e7eef5; --ico-sky: #e3f1fb; --ico-good: #e8f6ee;
   --sky: #2f7fb8; --good: #15803d; --good-fill: #22a55a; --warn: #b45309; --bad: #b42318; --shadow: rgba(0, 0, 0, .05);
-  --tag-bg: #13283b; --tag-ink: #eef3f8; --live-on-accent: #7fe0b4; --seg-hover: rgba(24, 24, 27, .06); --seg-raise: 0 1px 2px rgba(0, 0, 0, .12);
+  --tag-bg: #13283b; --tag-ink: #eef3f8; --live-on-accent: #7fe0b4; --seg-hover: rgba(24, 24, 27, .06);
   --dt-pad: 16px; --dt-ctl-h: 34px; --dt-btn-h: 32px; --dt-pop-air: 9px; color-scheme: light;
   position: relative; z-index: 45; background: linear-gradient(180deg, var(--tile), var(--card)); border-bottom: 1px solid var(--line);
   color: var(--ink); font: 400 13px/1.4 Inter, sans-serif; }
@@ -834,7 +836,7 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
   :root:not([data-theme="light"]) .demo-top { border-bottom-color: rgba(0, 0, 0, .35); box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 10px 28px -10px rgba(0, 0, 0, .75); }
 }
 .dt-in { position: relative; max-width: 1240px; margin: 0 auto; padding: var(--dt-pad) 44px; box-sizing: border-box; display: grid;
-  grid-template-columns: minmax(0, 1.1fr) repeat(3, minmax(0, 1fr)); align-items: stretch; }   /* the brand a little wider for its pitch; the last title still fits beside Hide (Sacha, 2026-11-13) */
+  grid-template-columns: minmax(0, 1.1fr) repeat(3, minmax(0, 1fr)); align-items: stretch; }   /* more room for the brand's pitch */
 .dt-brand { padding-right: 24px; }
 .dt-name { margin: 0; display: flex; align-items: center; gap: 10px; font: 650 19px/1 Inter, sans-serif; letter-spacing: -.02em; color: var(--ink); }
 .dt-mark { width: 28px; height: 28px; flex: none; display: block; }
@@ -845,11 +847,8 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
 .dt-pitch a { color: var(--accent-ink); text-underline-offset: 2px; }
 .dt-way { display: flex; flex-direction: column; gap: 3px; padding: 0 20px; border-left: 1px solid var(--line); min-width: 0; }
 .dt-t { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 14px/1.3 Inter, sans-serif; }
-.dt-ico { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; }
+.dt-ico { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--ico-ink); color: var(--brand-ink); }
 .dt-ico svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.dt-ink { background: var(--ico-ink); color: var(--brand-ink); }
-.dt-sky { background: var(--ico-sky); color: var(--sky); }
-.dt-good { background: var(--ico-good); color: var(--good); }
 .dt-s { margin: 0 0 10px 32px; font-size: 12.5px; color: var(--soft); text-wrap: pretty; }
 .dt-ctl { margin-top: auto; display: flex; align-items: center; gap: 8px; min-height: var(--dt-ctl-h); white-space: nowrap; min-width: 0; }
 .dt-lab { font: 600 11px/1 Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -857,19 +856,16 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
 .dt-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--meter); border-radius: 9px; }
 .dt-seg a { min-width: 30px; box-sizing: border-box; text-align: center; padding: 7px 8px; border-radius: 7px; color: var(--soft);
   font: 600 12.5px/1 Inter, sans-serif; text-decoration: none; transition: background-color .15s ease, color .15s ease; }
-.dt-seg a:hover:not([aria-current]) { color: var(--ink); background: var(--seg-hover); }   /* a tint on the track, never the current one's raised surface */
-.dt-seg a[aria-current] { background: var(--card); color: var(--ink); box-shadow: var(--seg-raise); }
+.dt-seg a:hover:not([aria-current]) { color: var(--ink); background: var(--seg-hover); }
+.dt-seg a[aria-current] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px var(--shadow); }
 /* the monitor picker's button; its panel (.pm-pop below) opens under the top area */
 .dt-pickwrap { position: relative; min-width: 0; max-width: 100%; }
 .dt-pick { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-height: var(--dt-btn-h); box-sizing: border-box; padding: 7px 9px 7px 11px;
   border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: var(--card); font: 600 12.5px/1 Inter, sans-serif;
   cursor: pointer; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease; }
 .dt-pick:hover, .dt-pick[aria-expanded="true"] { background: var(--accent-ink); border-color: var(--accent-ink); }
-.dt-pick.is-chosen { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
-.dt-pick.is-chosen:hover, .dt-pick.is-chosen[aria-expanded="true"] { background: var(--q-hover); border-color: var(--accent); }
 .dt-pick-t { min-width: 0; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }   /* a monitor's long name, ellipsized */
 .dt-pick .live { width: 7px; height: 7px; background: var(--live-on-accent); }
-.dt-pick.is-chosen .live { background: var(--good-fill); }
 .dt-pick svg.i { width: 15px; height: 15px; flex: none; transition: transform .15s ease; }
 .dt-pick[aria-expanded="true"] svg.i { transform: rotate(180deg); }
 .demo-top .pm-pop { top: calc(100% + (var(--dt-ctl-h) - var(--dt-btn-h)) / 2 + var(--dt-pad) + 1px); left: 0; }   /* from the button down to the top area's edge: the row's slack, the padding, the 1 px border */
@@ -878,31 +874,27 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
   border: 1px solid var(--line-strong); border-radius: 9px; background: var(--card); color: var(--ink); font: 600 12.5px/1.1 Inter, sans-serif;
   text-decoration: none; white-space: nowrap; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
 .dt-btn:hover { background: var(--q-hover); }
-.dt-gh { width: 15px; height: 15px; flex: none; fill: currentColor; }   /* GitHub's mark on the Setup button */
+.dt-gh { width: 15px; height: 15px; flex: none; fill: currentColor; }
 .dt-bi { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .demo-top a:focus-visible, .demo-top button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Hide / Show (Sacha, 2026-11-13: "fold it to a slim bar"): a quiet button at the top-right corner, on the name's row; folded, the
-   area is one slim line with the logo, the name, DEMO and Show at its end, where Hide was, so the page still says it's a demo and
-   the way back stays under the pointer. On a computer the last column's title leaves it room (it wraps rather than touch it) */
-.dt-fold { position: absolute; top: var(--dt-pad); right: 36px; z-index: 1; display: inline-flex; align-items: center; gap: 4px;
-  height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: 500 12px/1 Inter, sans-serif;
+/* Anchor Hide and Show to the banner's outer corner, outside the content grid. */
+.dt-fold { position: absolute; top: 2px; right: 8px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  width: 72px; height: 44px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: 500 12px/1 Inter, sans-serif;
   cursor: pointer; transition: background-color .15s ease, color .15s ease; }
 @media (hover: hover) { .dt-fold:hover { background: var(--seg-hover); color: var(--ink); } }   /* a tap on a phone leaves no tint */
 @media (min-width: 1241px) {
-  .demo-top:not(.is-folded) .dt-way:last-child { padding-right: 0; }   /* the button's corner: no gutter needed at the content edge */
-  .demo-top:not(.is-folded) .dt-way:last-child .dt-t { padding-right: 56px; }   /* px: the button's width less its 8 px overhang, plus air */
+  .dt-in { padding-top: 32px; }   /* leave the last title clear of Hide near the grid's right edge */
 }
 .dt-fi { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .demo-top.is-folded .dt-pitch, .demo-top.is-folded .dt-way { display: none; }
-.demo-top.is-folded .dt-in { display: flex; align-items: center; padding-top: 8px; padding-bottom: 8px; }
+.demo-top.is-folded .dt-in { display: flex; align-items: center; min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
 .demo-top.is-folded .dt-brand { padding: 0; }
 .demo-top.is-folded .dt-name { font-size: 17px; gap: 8px; }   /* a small step down from 19 px, so folding reads as the same header */
 .demo-top.is-folded .dt-mark { width: 24px; height: 24px; }
-.demo-top.is-folded .dt-fold { position: static; order: 1; margin: -2px -8px -2px auto; }   /* the row's own height; the text lines up with the page's right edge */
 @media (prefers-reduced-motion: reduce) {
   .demo-top, .dt-seg a, .dt-pick, .dt-pick svg.i, .dt-btn, .dt-fold { transition: none; }
 }
-@media (max-width: 1240px) and (min-width: 701px) {   /* a tablet or a small laptop: the name and pitch above, the three ways in a row under them (below 1241 px the last title wouldn't fit beside Hide) */
+@media (max-width: 1240px) and (min-width: 701px) {   /* a tablet or a small laptop: the name and pitch above, the three ways in a row under them */
   .dt-in { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 14px; }
   .dt-brand { grid-column: 1 / -1; padding: 0; }
   .dt-pitch { max-width: calc(100% * 2 / 3 - 20px); }   /* two of the three columns, short of the second's divider: two lines (Sacha, 2026-11-13) */
@@ -910,9 +902,8 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
 }
 @media (max-width: 900px) {
   .dt-in { padding: var(--dt-pad); }
-  .dt-fold { right: 8px; }
 }
-@media (max-width: 700px) {   /* a phone: one row per way, its title left and its control right; only the sample's name stays under its title */
+@media (max-width: 700px) {   /* a phone: one row per way, its title and description left and its control right */
   .dt-in { grid-template-columns: 1fr; padding: 12px 16px 4px; }
   .dt-brand { padding: 0 0 10px; }
   .dt-name { font-size: 16px; gap: 8px; }
@@ -920,20 +911,15 @@ svg.ts .ts-sw-over { fill: var(--warn-fill); opacity: .35; }
   .dt-pitch { margin-top: 8px; font-size: 13px; }
   .dt-way { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 6px 0; border-left: 0;
     border-top: 1px solid var(--line); }
-  .dt-s { display: none; }
-  .dt-w1 .dt-s { display: block; grid-column: 1; margin: 1px 0 0 32px; font-size: 12px; }
-  .dt-w1 .dt-gen { display: none; }
-  .dt-w1 .dt-ctl { grid-column: 2; grid-row: 1 / span 2; }
-  .dt-ctl { margin: 0; min-height: 0; }
+  .dt-s { grid-column: 1; margin: 1px 0 0 32px; font-size: 12px; }
+  .dt-ctl { grid-column: 2; grid-row: 1 / span 2; margin: 0; min-height: 0; }
   .dt-pick, .dt-btn { min-height: 44px; }   /* touch targets of 44 px, as the app's buttons */
   .dt-seg a { position: relative; min-width: 44px; padding: 14px 8px; }
   .dt-seg a::before { content: ""; position: absolute; inset: -2px 0; }   /* the hit area reaches over the track's padding: 44 px tall */
   .dt-pick-t { max-width: 104px; }   /* a picked name stays as wide as "Select a monitor", so the title keeps its two lines */
   .dt-pickwrap { position: static; }
   .demo-top .pm-pop { left: 16px; right: 16px; width: auto; top: calc(100% + 1px + var(--dt-pop-air)); }   /* under the top area's border, with a little air */
-  .dt-fold { top: 2px; bottom: auto; height: 44px; }   /* 44 px to tap, centred on the name's row */
   .demo-top.is-folded .dt-in { padding: 0 16px; }
-  .demo-top.is-folded .dt-fold { height: 44px; margin: 0 -8px 0 auto; }
 }
 
 /* The header, one line on every page (Sacha, 2026-11-13: the real home takes the demo's header, so there's one layout): the logo
@@ -952,7 +938,7 @@ html:not(.has-demo-top) .now-bar { margin-top: 0 !important; }   /* no top area 
   .now-bar > .bar { flex: none; }
 }
 @media (max-width: 1060px) and (min-width: 701px) {   /* a tablet: the menu without the home's name (as on a phone), so the weather keeps its room */
-  .now-bar .bar .home { display: none; }
+  .now-bar .bar .home:not(.sample-place) { display: none; }
 }
 @media (max-width: 700px) {
   :root { --dt-row: 40px; --dt-mark: 32px; }   /* px: the top row (the logo and the menu), as tall as the menu; the logo on it */
@@ -979,6 +965,7 @@ html.has-demo-top .now-line .dsp-top .chev { width: 17px; height: 17px; }
 .pm-pop[hidden] { display: none; }
 :root[data-theme="dark"] .pm-pop { box-shadow: 0 18px 44px rgba(0, 0, 0, .5); }
 .pm-pop .pop-head span { font-size: 13px; line-height: 1.4; }
+.pm-pop .pop-head a { color: var(--accent-ink); }
 .pm-note { margin: 0 2px 10px; font-size: 13px; line-height: 1.45; color: var(--warn); }
 .pm-note[hidden], .pm-msg[hidden], .pm-more[hidden], .pm-list[hidden], .pm-head[hidden] { display: none; }
 .pm-error { font-weight: 600; }
@@ -994,7 +981,7 @@ html.has-demo-top .now-line .dsp-top .chev { width: 17px; height: 17px; }
 .pm-place svg.i { width: 15px; height: 15px; flex: none; }
 .pm-place input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 400 14px/1 Inter, sans-serif; color: var(--ink); }
 .pm-place input::placeholder { color: var(--muted); }
-.pm-near:focus-visible, .pm-more:focus-visible, .pm-row:focus-visible, .pm-credit a:focus-visible { outline: 2px solid var(--accent);
+.pm-near:focus-visible, .pm-more:focus-visible, .pm-row:focus-visible { outline: 2px solid var(--accent);
   outline-offset: 1px; }
 .pm-head { display: flex; justify-content: space-between; padding: 0 6px 6px; font: 600 11.5px/1 Inter, sans-serif; letter-spacing: .05em;
   text-transform: uppercase; color: var(--muted); }
@@ -1019,8 +1006,6 @@ html.has-demo-top .now-line .dsp-top .chev { width: 17px; height: 17px; }
 .pm-more { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-top: 6px; padding: 8px; border: 0;
   border-radius: 8px; background: var(--q-bg); font: 550 13px/1 Inter, sans-serif; color: var(--soft); cursor: pointer; }
 .pm-more svg.i { width: 15px; height: 15px; }
-.pm-credit { margin: 10px 2px 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
-.pm-credit a { color: var(--accent-ink); }
 @media (max-width: 700px) {
   .pm-pop { left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
 }

@@ -13,10 +13,10 @@ EXAMPLE = (REPO / "config.example.toml").read_text(encoding="utf-8")
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
     """No test reaches AirGradient: an indoor-only config's source check sees no network (tests/test_outdoor_source.py
-    gives it a made-up world list)."""
-    def down():
+    gives it a made-up map)."""
+    def down(*a, **k):
         raise check_config.publicmap.requests.ConnectionError("offline in tests")
-    monkeypatch.setattr(check_config.publicmap, "fetch_world", down)
+    monkeypatch.setattr(check_config.publicmap, "fetch_area", down)
 
 
 def run(tmp_path, text=EXAMPLE, env=None, dotenv=None, argv=None, capsys=None):

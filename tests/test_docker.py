@@ -85,9 +85,11 @@ def test_image_workflow_publishes_only_from_main():
     assert re.search(r"^permissions:\n  contents: read\n  packages: write\n", wf, re.M)
     assert set(re.findall(r"secrets\.(\w+)", wf)) == {"GITHUB_TOKEN"}
     assert "platforms: linux/amd64,linux/arm64" in wf
-    assert "ghcr.io/sguyon/home-air-quality:latest" in wf
-    assert "ghcr.io/sguyon/home-air-quality:${{ github.sha }}" in wf
-    assert "org.opencontainers.image.source=https://github.com/sguyon/home-air-quality" in wf
+    for name in ("homeair", "home-air-quality"):   # the new name, and the old one existing installs pull
+        assert f"ghcr.io/sguyon/{name}:latest" in wf
+        assert f"ghcr.io/sguyon/{name}:${{{{ github.sha }}}}" in wf
+        assert f"github.repository == 'sguyon/{name}'" in wf   # builds before and after the repo rename
+    assert "org.opencontainers.image.source=https://github.com/sguyon/homeair\n" in wf
 
 
 def test_image_keeps_the_scripts_deployment_runs_inside_the_container():

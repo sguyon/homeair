@@ -139,9 +139,9 @@ def _derived(facts):
             f["model_on"] = ""
         if f.get("source_km") is not None:
             f["source_km"] = f"{f['source_km']:g}"   # 1.1, and 2 rather than 2.0
-        # a public monitor whose name isn't known (gone from AirGradient's list since the server started): no name
+        # a public monitor whose name isn't known (gone from AirGradient's map since the server started): no name
         f["source_label"] = f"the public monitor at {f['source_name']}" if f.get("source_name") else "the public monitor you chose"
-        # why the chosen monitor's reading isn't used: AirGradient's list didn't answer ("list": it may be reporting,
+        # why the chosen monitor's reading isn't used: AirGradient's map didn't answer ("list": it may be reporting,
         # so it isn't blamed), or the monitor isn't reporting ("monitor", or True)
         f["fallback_lead"] = ""
         if f.get("source_fallback") == "list":

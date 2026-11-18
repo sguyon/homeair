@@ -1,4 +1,4 @@
-// Home Air Quality: the live sky behind the page and the Weather pill. Uses $, APP, TZ, appNow, has, state and reading from app.js,
+// Home Air: the live sky behind the page and the Weather pill. Uses $, APP, TZ, appNow, has, state and reading from app.js,
 // and bearingIn and pmOver from home.js.
 // ── Sky band: real sun position, cloud cover, wind and PM2.5. Preview overrides from the Customize panel. ──
 var SKY = (() => {

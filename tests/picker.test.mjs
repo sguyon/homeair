@@ -11,29 +11,27 @@ const LIMITS = { pm: 15, pm_high: 35 };
 const MOMENTS = [{ key: 'rush', label: 'Morning rush', n: 1 }, { key: 'clear', label: 'All clear', n: 2 }, { key: 'humid', label: 'Humid evening', n: 3 }];
 const current = html => [...html.matchAll(/<a [^>]*aria-current="page"[^>]*>([^<]*)<\/a>/g)].map(m => m[1]);
 
-const TITLES = ['See a demo', 'See a live monitor near you', 'Set up your own monitor'];
+const TITLES = ['See a demo', 'See a live monitor', 'Set up your own monitor'];
 
 test('top on sample 2: only 2 is marked, no sample name, the three ways in order, the pitch with its repo link', () => {
   const html = picker.topHTML({ now: { moment: 'clear', moments: MOMENTS } });
   assert.deepEqual(current(html), ['2']);
   for (const n of [1, 2, 3]) assert.match(html, new RegExp(`<a href="\\?sample=${n}"`));
   assert.doesNotMatch(html, /dt-now|>All clear</);   // no sample name under See a demo (Sacha, 2026-11-12: remove it)
-  assert.match(html, /<h1 class="dt-name"><svg class="dt-mark"[^>]*>.*?<\/svg>Home Air Quality <span class="dt-tag">Demo<\/span><\/h1>/);
-  // the pitch, in Sacha's words (2026-11-12); "open-source" links to the repo
-  assert.match(html, /<p class="dt-pitch">An <a href="https:\/\/github\.com\/sguyon\/home-air-quality">open-source<\/a> app for your AirGradient monitors\. <span>It adds the weather forecast, pollen and more, and tells you what to do for profiles like young kids, allergies or running\.<\/span><\/p>/);   // the second sentence in regular weight
+  assert.match(html, /<h1 class="dt-name"><svg class="dt-mark"[^>]*>.*?<\/svg>Home Air <span class="dt-tag">Demo<\/span><\/h1>/);
+  // the pitch, in Sacha's words (2026-11-15); "open-source" links to the repo
+  assert.match(html, /<p class="dt-pitch"><a href="https:\/\/github\.com\/sguyon\/homeair">Open-source<\/a> app for your AirGradient monitors: <span>see your air quality next to the weather, pollen, smoke and traffic, with insights for your home and outside\.<\/span><\/p>/);   // the second part in regular weight
   assert.doesNotMatch(html, /Free and|timed actions/);
   const at = TITLES.map(t => html.indexOf(`</span>${t}</p>`));
   assert.ok(at[0] > 0 && at[0] < at[1] && at[1] < at[2], String(at));
-  assert.match(html, /Sample data from a made\u2011up home\./);   // a non-breaking hyphen: "made-" never ends a line
-  assert.match(html, /Real readings from a public AirGradient monitor\./);
-  assert.match(html, /You install it, with a coding agent or Docker\./);
-  // each way's control, last: SAMPLE 1 2 3; Select a monitor (the live dot, the drawn chevron); Setup (GitHub's mark, the drawn arrow)
+  assert.match(html, /Sample data from an example home\./);
+  assert.match(html, /Live data from public monitors near you\./);
+  assert.match(html, /Install it with your coding agent\. Self-host at home or in the cloud\./);
+  // Each way's control: sample 1 2 3, Select a monitor, and Setup guide.
   assert.match(html, /<span class="dt-lab" id="dt-lab">Sample<\/span><nav class="dt-seg" aria-labelledby="dt-lab">/);
   assert.match(html, /<button type="button" class="dt-pick" id="db-pick" aria-haspopup="dialog" aria-expanded="false" aria-controls="db-pop"><i class="live" aria-hidden="true"><\/i><span class="dt-pick-t">Select a monitor<\/span><svg class="i"[^>]*>.*?<\/svg><\/button>/);
   assert.match(html, /<span class="dt-pickwrap" id="db-pickwrap">/);
-  // Setup: GitHub's mark on the left, the word, the drawn ↗ (it opens a new tab)
-  assert.match(html, /<a class="dt-btn" href="https:\/\/github\.com\/sguyon\/home-air-quality#installation" target="_blank" rel="noopener" aria-label="Setup, on GitHub"><svg class="dt-gh"[^>]*>.*?<\/svg>Setup<svg class="dt-bi"[^>]*>.*?<\/svg><\/a>/);
-  assert.doesNotMatch(html, /Setup guide/);
+  assert.match(html, /<a class="dt-btn" href="https:\/\/github\.com\/sguyon\/homeair#installation" target="_blank" rel="noopener" aria-label="Setup guide on GitHub"><svg class="dt-gh"[^>]*>.*?<\/svg>Setup guide<svg class="dt-bi"[^>]*>.*?<\/svg><\/a>/);
   assert.equal((html.match(/<svg /g) || []).length, 8);   // the logo, three way icons, the chevron, GitHub's mark, the arrow, the fold's chevron
   // every arrow and chevron drawn: a text arrow shows as an emoji on iOS (Sacha, 2026-11-12); the old bar's parts are gone
   assert.doesNotMatch(html, /[↗↓▾→]/);
@@ -62,6 +60,7 @@ test('top on a hidden one-monitor moment: no sample marked or named', () => {
   const html = picker.topHTML({ now: { moment: 'indoor-near', moments: MOMENTS } });
   assert.deepEqual(current(html), []);
   assert.doesNotMatch(html, /class="dt-now"/);
+  assert.match(html, /class="dt-pick" id="db-pick"/);
 });
 
 const ROWS = [
@@ -157,7 +156,8 @@ function page(stored = {}) {
       inPicker: id === 'db-pick' || id === 'db-pickwrap' || id.startsWith('pm-'), parentElement: { hidden: false },
       cls: new Set(), get classList() { const c = this.cls; return { contains: k => c.has(k), toggle: (k, on) => (on ?? !c.has(k)) ? c.add(k) : c.delete(k) }; },
       setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
-      addEventListener(t, f) { (this.on[t] ||= []).push(f); }, insertAdjacentHTML() {}, focus() { active = this; },
+      addEventListener(t, f) { (this.on[t] ||= []).push(f); }, insertAdjacentHTML(_, html) { this.innerHTML += html; }, focus() { active = this; },
+      querySelector(sel) { return id === 'home-place' && sel === '[data-app="home-name"]' ? el('home-name') : null; },
       closest() { return this.inPicker ? this : null; } });
     return els.get(id);
   };
@@ -167,7 +167,7 @@ function page(stored = {}) {
   const document = { getElementById: el, addEventListener: (t, f) => (doc[t] ||= []).push(f), get activeElement() { return active; },
     querySelectorAll: sel => (sel === '[aria-controls="db-pop"]' ? [el('db-pick')] : []) };
   const localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
-  const sandbox = { document, localStorage, navigator: {}, URLSearchParams, console,
+  const sandbox = { document, localStorage, navigator: {}, URLSearchParams, console, MAP_PAGE: require('../static/home.js').MAP_PAGE,
     fetch: async () => ({ ok: true, json: async () => ({ monitors: [] }) }) };
   sandbox.window = sandbox;
   vm.runInNewContext(readFileSync(new URL('../static/picker.js', import.meta.url), 'utf8'), sandbox);
@@ -176,9 +176,17 @@ function page(stored = {}) {
 
 test('the picker opens from its button and moves focus into it; Esc closes it and focus returns to the button', () => {
   const pg = page();
-  pg.Picker.mount(pg.el('demo-top'), DEMO_APP);
+  pg.Picker.mount(pg.el('demo-top'), { now: { moment: 'clear', moments: MOMENTS }, place: { name: 'Greenpoint, Brooklyn' } });
   assert.equal(pg.el('demo-top').hidden, false);
   assert.match(pg.el('demo-top').innerHTML, /id="db-pick"/);   // the top area holds the picker's button
+  assert.equal(pg.el('home-name').textContent, 'Sample home');
+  assert.equal(pg.el('home-place').textContent, '');   // the picker updates the title without replacing the pill's children
+  const panel = pg.el('db-pickwrap').innerHTML;
+  assert.match(panel, /role="dialog" aria-labelledby="pm-title"/);
+  assert.match(panel, /id="pm-title">Public AirGradient monitors<\/b>/);
+  assert.match(panel, /Shared by community members on <a href="https:\/\/www\.airgradient\.com\/map\/"[^>]*>AirGradient's map<\/a>, under CC BY-SA\./);
+  assert.match(panel, /id="pm-find-note"/);
+  assert.doesNotMatch(panel, /id="pm-note"|pm-credit|Live readings from monitors/);
   assert.equal(pg.el('db-pop').hidden, true);
   pg.click(pg.el('db-pick'));
   assert.equal(pg.el('db-pop').hidden, false);
@@ -196,6 +204,8 @@ test('a tap outside closes the picker; a tap inside it or on its button again do
   pg.click(pg.el('db-pick'));
   pg.click(pg.el('pm-near'));                         // inside: stays open
   assert.equal(pg.el('db-pop').hidden, false);
+  assert.equal(pg.el('pm-find-note').textContent, picker.offNote('New York'));
+  assert.equal(pg.el('pm-note').textContent, '');
   pg.click(pg.el('summary'));                         // outside
   assert.equal(pg.el('db-pop').hidden, true);
   assert.equal(pg.el('db-pick').getAttribute('aria-expanded'), 'false');
@@ -260,11 +270,11 @@ test("the demo's top area draws the new logo (mock 94, round 8 a): the house, th
   assert.doesNotMatch(svg, /mk-|is-stale/);   // no old parts; the demo's logo is always the live, green one
 });
 
-test('the demo top area keeps its last title on one line beside Hide: four equal columns from 1241 px, the tablet layout below', () => {
+test('the demo top area places Hide above the four-column desktop grid', () => {
   const css = readFileSync(new URL('../static/app.css', import.meta.url), 'utf8');
-  // Sacha, 2026-11-13: "the hide button makes the title goes on 2 lines" ("Set up your own monitor" needs 197 px, Hide 60)
   assert.match(css, /\.dt-in \{[^}]*grid-template-columns: minmax\(0, 1\.1fr\) repeat\(3, minmax\(0, 1fr\)\);/);
-  assert.match(css, /@media \(min-width: 1241px\) \{\s*\.demo-top:not\(\.is-folded\) \.dt-way:last-child \{ padding-right: 0; \}/);
+  assert.match(css, /\.dt-fold \{ position: absolute; top: 2px; right: 8px;/);
+  assert.match(css, /@media \(min-width: 1241px\) \{\s*\.dt-in \{ padding-top: 32px; \}/);
   assert.match(css, /@media \(max-width: 1240px\) and \(min-width: 701px\) \{   \/\* a tablet or a small laptop: the name and pitch above/);
 });
 

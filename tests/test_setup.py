@@ -57,8 +57,8 @@ OUTDOOR = {"locationId": 7002, "locationType": "outdoor", "locationName": "Porch
 def root(tmp_path, monkeypatch):
     monkeypatch.setattr(setup.requests, "get", lambda *a, **k: pytest.fail("Unexpected network request"))
     monkeypatch.setattr(setup, "account_rows", lambda token, **k: [dict(INDOOR)])
-    monkeypatch.setattr(setup.publicmap, "fetch_world", lambda: [])
-    monkeypatch.setattr(setup.check_config.publicmap, "fetch_world", lambda: [])
+    monkeypatch.setattr(setup.publicmap, "fetch_area", lambda *a, **k: [])
+    monkeypatch.setattr(setup.check_config.publicmap, "fetch_area", lambda *a, **k: [])
     def geo(url, params):
         if url == setup.NOMINATIM_SEARCH:
             return OGDEN
@@ -161,16 +161,16 @@ def test_wrong_monitor_choice_is_refused(root, capsys):
 
 
 def test_public_lookup_failure_is_an_estimate(root, monkeypatch, capsys):
-    def down():
+    def down(*a, **k):
         raise requests.ConnectionError(TOKEN)
-    monkeypatch.setattr(setup.publicmap, "fetch_world", down)
+    monkeypatch.setattr(setup.publicmap, "fetch_area", down)
     code, out = run(root, capsys, "--address", "Denver")
     assert code == 0 and "estimate" in out and TOKEN not in out
     assert home(root).outdoor_from == "model"
 
 
 def test_accepts_public_source_suggestion(root, monkeypatch, capsys):
-    monkeypatch.setattr(setup.publicmap, "fetch_world", lambda: [{"locationId": 9001, "model": "O-1PST", "latitude": 39.74, "longitude": -104.98, "timestamp": NOW}])
+    monkeypatch.setattr(setup.publicmap, "fetch_area", lambda *a, **k: [{"locationId": 9001, "model": "O-1PST", "latitude": 39.74, "longitude": -104.98, "timestamp": NOW}])
     monkeypatch.setattr(setup.publicmap, "suggest", lambda *a: (9001, None, 1))
     code, out = run(root, capsys, "--address", "Denver")
     assert code == 0, out
@@ -219,7 +219,7 @@ def test_one_nominatim_request_with_user_agent_and_no_second_geocoder(root, monk
     code, out = run(root, capsys, "--address", "Missing place")
     assert code == 1 and "Couldn't find it" in out
     assert len(seen) == 1 and seen[0][0] == setup.NOMINATIM_SEARCH
-    assert "sguyon/home-air-quality" in seen[0][1]["headers"]["User-Agent"]
+    assert seen[0][1]["headers"]["User-Agent"] == setup.USER_AGENT and setup.USER_AGENT.startswith("HomeAir/")
 
 
 def test_stale_monitor_fails_live_check_after_writing(root, monkeypatch, capsys):
@@ -397,7 +397,7 @@ def test_status_on_an_empty_folder_names_the_first_command(root, capsys):
 def test_status_after_preparing_says_to_connect_on_the_page(root, capsys):
     (root / ".env").write_text("AIRGRADIENT_TOKEN=\n")
     out = status(root, capsys, env={})
-    assert "server.py" in next_line(out) and "?setup=" in next_line(out)
+    assert "--start" in next_line(out) and "setup link" in next_line(out)
 
 
 def test_status_with_a_token_but_no_home_names_the_home_command(root, capsys):
@@ -415,7 +415,7 @@ def test_status_on_a_complete_setup_is_done_with_the_address(root, capsys):
     assert "Steps 1–4 done" in out and "http://localhost:5600" in out and TOKEN not in out
     # SETUP.md's done is --live ending with Live OK: the next command starts the page and runs that check.
     nxt = next_line(out)
-    assert setup.SERVER_CMD in nxt and str(root) in nxt and "PORT=5600" in nxt
+    assert setup.START_CMD in nxt and str(root) in nxt and "PORT=5600" in nxt
     assert f"{setup.SETUP_CMD} --live http://localhost:5600" in nxt and "the page's address" in nxt
 
 
@@ -480,7 +480,7 @@ def test_status_when_airgradient_refuses_the_token_says_to_enter_it_again(root, 
             return {"message": TOKEN}
     out, step4 = _status_with_get(root, monkeypatch, capsys, lambda url, **k: Refused())
     assert "refused the token" in step4 and "didn't answer" not in step4 and TOKEN not in out
-    assert setup.SERVER_CMD in next_line(out)
+    assert setup.START_CMD in next_line(out)
 
 
 def test_status_never_prints_key_values_even_when_set_in_the_environment(root, capsys):
@@ -510,7 +510,7 @@ def test_setup_md_asks_one_question_at_a_time_with_or_without_a_question_tool():
     assert "no question tool" not in intro
 
 
-LAST_MESSAGE = ["Home Air Quality is ready at this address:", "http://localhost:5555",
+LAST_MESSAGE = ["Home Air is ready at this address:", "http://localhost:5555",
                 "It stops when this computer restarts. I can make it start by itself when you log in.",
                 "I can also help you set it up on a home server with Docker, or online with Railway."]
 
@@ -572,7 +572,7 @@ def test_no_straight_to_railway_path():
 
 
 def test_start_survives_the_session():
-    assert "nohup scripts/run.sh server.py > app.log 2>&1 < /dev/null &" in section(doc("SETUP.md"), "Start and verify")
+    assert "scripts/run.sh scripts/setup.py --start" in section(doc("SETUP.md"), "Start and verify")
 
 
 def test_deployment_md_says_which_hosts_are_tested():
@@ -625,11 +625,11 @@ def test_setup_md_lets_the_user_keep_a_default_without_typing_it():
 
 
 def test_setup_md_says_where_the_link_is_and_how_to_stop_it():
-    # review, Important 4: with the app in the background, its setup link is in app.log, and it stops with app.pid
+    # review, Important 4, then --start (14 Nov): the start command prints the setup link and restarts the copy it started
     text = doc("SETUP.md")
-    assert "`?setup=…` link it writes to `app.log`" in text
-    assert "kill $(cat app.pid)" in text
+    assert "`?setup=…` link it prints" in text
+    assert "run the start command again to restart it" in text
 
 
 def test_status_suggests_starting_in_the_background():
-    assert setup.START_CMD == "nohup scripts/run.sh server.py > app.log 2>&1 < /dev/null &"
+    assert setup.START_CMD == "scripts/run.sh scripts/setup.py --start"

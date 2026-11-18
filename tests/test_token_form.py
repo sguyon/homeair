@@ -77,7 +77,7 @@ def test_local_form_is_visible_and_private(local):
     assert 'action="/api/token"' in text
     assert "Connect your AirGradient account" in text and "data-1p-ignore" in text
     # "Show me where": closed by default, the picture is in the repo and described for screen readers
-    assert '<details class="token-help">' in text and "Picture of AirGradient" in text and 'src="/static/airgradient-api-access.png"' in text and "alt=" in text
+    assert '<details class="token-help">' in text and "Picture of AirGradient" in text and 'src="/static/airgradient-api-access.png?v=' in text and "alt=" in text
     assert (Path(server.__file__).parent / "static" / "airgradient-api-access.png").exists()
     assert "https://app.airgradient.com/settings/place?tab=4" in text
     assert "Your agent never sees it" in text and "Landed on the dashboard" in text

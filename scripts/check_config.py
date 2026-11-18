@@ -1,6 +1,6 @@
 """Checks a config file before the app starts. Prints plain problems; reports keys as set or missing, never their values.
 For a home without an outdoor monitor it also checks the chosen outdoor source answers (one request to AirGradient's
-public list), and --suggest lists the nearby public outdoor monitors and prints the source to choose.
+public map), and --suggest lists the nearby public outdoor monitors and prints the source to choose.
 
 Usage: python scripts/check_config.py [--file PATH] [--suggest]
 """
@@ -134,7 +134,7 @@ def suggest_list(world, lat: float, lon: float, now) -> list[str]:
 
 
 def _when(ts):
-    """A world-list timestamp as an aware datetime, or None."""
+    """A monitor's timestamp as an aware datetime, or None."""
     try:
         t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
     except ValueError:
@@ -143,7 +143,7 @@ def _when(ts):
 
 
 def source_lines(cfg, world, now) -> tuple[list[str], list[str]]:
-    """(lines, problems) on an indoor-only home's chosen outdoor source against the world list. A source that isn't
+    """(lines, problems) on an indoor-only home's chosen outdoor source against the map's monitors. A source that isn't
     reporting is a note, not a problem: the page falls back to an estimate until it returns."""
     of, lat, lon = cfg.outdoor_from, cfg.place.lat, cfg.place.lon
     if of == "area":
@@ -158,12 +158,12 @@ def source_lines(cfg, world, now) -> tuple[list[str], list[str]]:
     if listed is not None and publicmap.find(world, of) is None:
         if not str(listed.get("model") or "").startswith(publicmap.OUTDOOR_PREFIX):
             return [], [f"sources.outdoor_from: public monitor {of} is not an outdoor monitor; choose an outdoor one (--suggest)"]
-        return [f"Note: public monitor {of} has no position in AirGradient's public list, so the app can't place it or "
+        return [f"Note: public monitor {of} has no position on AirGradient's public map, so the app can't place it or "
                 "find its history: the page shows an estimate for your area until it has one. The next best: "
                 + suggest_line(world, lat, lon, now, skip=of)], []
     if listed is None:
-        return [f"Note: public monitor {of} is not in AirGradient's public list, which leaves a monitor out once it stops "
-                "reporting: the page shows an estimate for your area until it returns. If it stays gone, the next best: "
+        return [f"Note: public monitor {of} is not on AirGradient's public map (the id is its map id): the page shows "
+                "an estimate for your area until it is. If it stays gone, the next best: "
                 + suggest_line(world, lat, lon, now, skip=of)], []
     name, km = publicmap.name_of(listed), publicmap.km_between(lat, lon, listed["latitude"], listed["longitude"])
     last = _when(listed.get("timestamp"))
@@ -181,7 +181,7 @@ def main(argv, env, root: Path = ROOT) -> int:
     ap.add_argument("--file", help="config file to check (default: CONFIG_FILE, else config.toml, else CONFIG_TOML)")
     ap.add_argument("--suggest", action="store_true",
                     help="list the nearby public outdoor monitors and print the source to choose without an outdoor monitor "
-                         "(asks AirGradient's public list)")
+                         "(one area request to AirGradient's public map)")
     args = ap.parse_args(argv)
 
     if args.file:
@@ -259,20 +259,27 @@ def main(argv, env, root: Path = ROOT) -> int:
 
 def outdoor_source_check(cfg, raw: dict, suggest: bool) -> tuple[list[str], list[str]]:
     """(lines, problems): the chosen source checked (cfg: an indoor-only home's config, or None) and, with suggest,
-    the source to choose at place.lat/lon. One request to AirGradient's public list; without an answer, a note."""
+    the source to choose at place.lat/lon. One area request on AirGradient's public map around the place (and the
+    chosen monitor by its id when it isn't in that area); without an answer, a note."""
+    place = raw.get("place") if isinstance(raw.get("place"), dict) else {}
+    lat, lon = (cfg.place.lat, cfg.place.lon) if cfg else (place.get("lat"), place.get("lon"))
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lat, lon)):
+        return ["Note: --suggest needs place.lat and place.lon."] if suggest else [], []
     try:
-        world = publicmap.fetch_world()
+        world = publicmap.fetch_area(lat, lon, AREA_KM + 1)
+        of = cfg.outdoor_from if cfg else None
+        if isinstance(of, int) and publicmap.find(world, of) is None:
+            try:
+                world = world + [publicmap.monitor_row(publicmap.fetch_place(of), publicmap.fetch_now(of))]
+            except Exception:   # not on the map (or no answer for it): source_lines says it isn't listed
+                pass
     except Exception as e:   # no network, AirGradient down, bad JSON: say so, the config itself may be fine
-        return [f"Note: AirGradient's public list didn't answer ({type(e).__name__}), so the outdoor source wasn't checked."], []
+        return [f"Note: AirGradient's public map didn't answer ({type(e).__name__}), so the outdoor source wasn't checked."], []
     world = world if isinstance(world, list) else []
     now = datetime.now(timezone.utc)
     lines, problems = source_lines(cfg, world, now) if cfg else ([], [])
     if suggest:
-        place = raw.get("place") if isinstance(raw.get("place"), dict) else {}
-        lat, lon = place.get("lat"), place.get("lon")
-        ok = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lat, lon))
-        lines += ((suggest_list(world, lat, lon, now) + [suggest_line(world, lat, lon, now)]) if ok
-                  else ["Note: --suggest needs place.lat and place.lon."])
+        lines += suggest_list(world, lat, lon, now) + [suggest_line(world, lat, lon, now)]
     return lines, problems
 
 

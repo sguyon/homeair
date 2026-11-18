@@ -1,6 +1,7 @@
-"""Home Air Quality: the Flask app, page, routes, config loading and startup."""
+"""Home Air: the Flask app, page, routes, config loading and startup."""
 
 import base64
+import gzip
 import hashlib
 import importlib
 import json
@@ -15,8 +16,10 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, g, jsonify, request, send_file, make_response, redirect, render_template
 
+import budgets
 import phrases
 import token_setup
+import upstream
 import summary as summary_rules
 from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, env_key, load_config, public_view,
                     real_value, route_path, write_env_key)
@@ -54,7 +57,7 @@ VISIBILITY_VERY_LOW_M, VISIBILITY_REDUCED_M, VISIBILITY_MODERATE_M = 2000, 5000,
 # digits: the longest ?monitor= read as an id (AirGradient's are 5-6 digits today); a longer one is junk, and past
 # about 4,300 digits Python's int() raises instead of reading it
 MONITOR_ID_MAX_DIGITS = 12
-APP_VERSION = "v0.1"   # the release shown on the page's build line (and the dev bar)
+APP_VERSION = upstream.APP_VERSION   # the release shown on the page's build line (and the dev bar), and in the User-Agent
 SAVED_NAMES_SHOWN = 4   # monitor names listed on the "connected" card; more become "and N more"
 
 
@@ -152,19 +155,92 @@ def get_build_info():
     return f"{APP_VERSION} · {commit} · {sources.local_now().strftime('%H:%M:%S %Z')}"
 
 
+_ASSET_HASHES = {}   # path -> ((mtime, size), hash): each file is hashed once, again only when it changes on disk
+
+
 def asset_version(rel_path):
-    """Short content hash of a file in static/, so a changed file gets a new URL and no cache serves the old one."""
+    """Short content hash of a file in static/, so a changed file gets a new URL and no cache serves the old one.
+    Hashed once per file and kept; a file edited while the server runs (local work) gets a new hash on its next use."""
     path = Path(__file__).parent / rel_path.lstrip("/")
     try:
-        return hashlib.sha1(path.read_bytes()).hexdigest()[:10]
+        st = path.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        known = _ASSET_HASHES.get(path)
+        if known and known[0] == stamp:
+            return known[1]
+        digest = hashlib.sha1(path.read_bytes()).hexdigest()[:10]
     except OSError:
         return "0"
+    _ASSET_HASHES[path] = (stamp, digest)
+    return digest
 
 
 def version_assets(html):
     """Add ?v=<hash> to the page's CSS, JS, icons and manifest, so a changed file gets a new URL. Safari keeps
     home-screen icons per URL, so a new icon needs a new URL to show."""
     return re.sub(r'"(/static/[\w./-]+\.(?:css|js|png|svg)|/manifest\.json)"', lambda m: f'"{m.group(1)}?v={asset_version(m.group(1))}"', html)
+
+
+# Responses a browser gets gzipped when it asks: the page, CSS, JS, JSON, SVG and the manifest. Images are compressed already.
+COMPRESSIBLE = re.compile(r"^(text/|application/(javascript|json|manifest\+json|geo\+json|xml)|image/svg\+xml)")
+COMPRESS_MIN_BYTES = 1024    # smaller bodies gain nothing worth the work
+COMPRESS_MAX_BYTES = 4 << 20   # a file sent from disk is read whole to compress it; the app's own are far smaller
+_GZIPPED = {}   # (path, ETag) -> gzipped body, for the files sent from disk (static/), which only change with a new ETag
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+@app.after_request
+def static_cache(resp):
+    """A /static/ URL with the file's current ?v=<hash> (version_assets) never changes, so a browser keeps it for a year
+    without asking. Any other /static/ request (no ?v=, or an old hash) keeps Flask's no-cache. Vercel's CDN serves
+    /static/ itself there (scripts/vercel_build.sh), so this is for the copies a home runs (gunicorn, Docker)."""
+    if (request.path.startswith("/static/") and resp.status_code in (200, 304)
+            and request.args.get("v") and request.args["v"] == asset_version(request.path)):
+        resp.headers["Cache-Control"] = IMMUTABLE
+    return resp
+
+
+@app.after_request
+def compress(resp):
+    """Gzip text answers for a browser that accepts it (the copies a home runs: gunicorn sends what Flask gives it).
+    Vercel compresses at its edge, so the demo there skips this. Brotli would need a dependency; gzip is in the standard
+    library and gets app.js from ~114 KB to ~30 KB."""
+    if (os.environ.get("VERCEL") == "1" or request.method == "HEAD" or resp.status_code != 200
+            or "Content-Encoding" in resp.headers or not COMPRESSIBLE.match(resp.mimetype or "")):
+        return resp
+    if resp.is_streamed and not resp.direct_passthrough:
+        return resp   # a generator's answer: compressing it would wait for all of it
+    size = resp.content_length
+    if size is not None and not (COMPRESS_MIN_BYTES <= size <= COMPRESS_MAX_BYTES):
+        return resp
+    resp.vary.add("Accept-Encoding")   # a cache in between must not hand the gzipped copy to a client that didn't ask
+    if request.accept_encodings["gzip"] <= 0:
+        return resp
+    etag = resp.headers.get("ETag")
+    key = (request.path, etag) if resp.direct_passthrough and etag else None
+    body = _GZIPPED.get(key) if key else None
+    if body is None:
+        source = resp.response
+        resp.direct_passthrough = False   # send_file's file is read here, once, then kept gzipped
+        data = resp.get_data()
+        if hasattr(source, "close"):
+            source.close()
+        if len(data) < COMPRESS_MIN_BYTES:
+            return resp
+        body = gzip.compress(data, compresslevel=6, mtime=0)
+        if key:
+            if len(_GZIPPED) > 64:
+                _GZIPPED.clear()
+            _GZIPPED[key] = body
+    elif hasattr(resp.response, "close"):
+        resp.response.close()   # the kept copy answers; the opened file is not read
+    resp.direct_passthrough = False
+    resp.set_data(body)
+    resp.headers["Content-Encoding"] = "gzip"
+    if etag and not etag.startswith("W/"):
+        # the gzipped bytes differ from the file's, so the tag becomes weak; If-None-Match still matches it (304)
+        resp.headers["ETag"] = "W/" + etag
+    return resp
 
 
 @app.after_request
@@ -212,8 +288,8 @@ def tag_env(html):
     if not env:
         return html
     html = re.sub(r'(<link rel="(?:icon|apple-touch-icon)"[^>]*href=")/static/icons/', rf'\1/static/icons/{env}/', html)
-    html = html.replace("<title>Home Air Quality</title>", f"<title>{ENV_LABEL[env]} · Home Air Quality</title>", 1)
-    html = html.replace('<meta name="apple-mobile-web-app-title" content="Air Quality">', f'<meta name="apple-mobile-web-app-title" content="AQ {ENV_LABEL[env]}">', 1)
+    html = html.replace("<title>Home Air</title>", f"<title>{ENV_LABEL[env]} · Home Air</title>", 1)
+    html = html.replace('<meta name="apple-mobile-web-app-title" content="Home Air">', f'<meta name="apple-mobile-web-app-title" content="HA {ENV_LABEL[env]}">', 1)
     return html
 
 
@@ -264,11 +340,38 @@ LINK_EXPIRED_ERROR = ("This page is from before the app restarted, so it can't c
                       "or restart the app to get one.")
 
 
+# The public demo's head only (never a copy a household runs): Vercel Web Analytics and Speed Insights (cookieless, nothing
+# personal; the app itself has no analytics) and the link preview shown when someone shares the demo's address. Vercel serves
+# the two scripts itself once the project has them on.
+DEMO_SITE = "https://homeair.app"
+DEMO_TITLE = "Home Air"
+DEMO_DESCRIPTION = ("See your air quality data next to the weather, pollen, smoke and traffic, "
+                    "with insights for your home and outside.")
+DEMO_HEAD_TAGS = (
+    '<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>'
+    '<script defer src="/_vercel/insights/script.js"></script>'
+    '<script>window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };</script>'
+    '<script defer src="/_vercel/speed-insights/script.js"></script>'
+    f'<meta name="description" content="{DEMO_DESCRIPTION}">'
+    f'<meta property="og:type" content="website"><meta property="og:site_name" content="{DEMO_TITLE}">'
+    f'<meta property="og:title" content="Open-source app for your AirGradient monitors">'
+    f'<meta property="og:description" content="{DEMO_DESCRIPTION}"><meta property="og:url" content="{DEMO_SITE}/">'
+    f'<meta property="og:image" content="{DEMO_SITE}/static/og-demo.png">'
+    '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:type" content="image/png">'
+    f'<meta property="og:image:alt" content="Home Air on a phone, with an action for each person at home">'
+    '<meta name="twitter:card" content="summary_large_image">')
+
+
+def demo_head_tags():
+    return DEMO_HEAD_TAGS if os.environ.get("VERCEL") == "1" and os.environ.get("DEMO") == "1" else ""
+
+
 def render_page(error=None, status=200, card=False):
     """The missing-token card works without JavaScript; no credential is ever embedded in the page.
     card: show the token card even without a valid setup cookie (an expired link explains itself instead of showing the demo)."""
     html_path = Path(__file__).parent / "index.html"
     html = inline_touch_icon(tag_env(version_assets(html_path.read_text())))
+    html = html.replace("</head>", demo_head_tags() + "</head>", 1)
     browser = None
     # A fresh copy (the demo, no home yet) shows only the card: the token box with its link, then "saved" until setup restarts it.
     saved = setup_mode() and MODE == "demo" and token_state.saved
@@ -281,6 +384,7 @@ def render_page(error=None, status=200, card=False):
         card = render_template("token_card.html", entry=entry and not saved, saved=saved,
                                found=token_state.saved["monitors"] if saved else [], shown=SAVED_NAMES_SHOWN, nonce=value, error=error,
                                instructions=token_setup.instructions(request), max_length=token_setup.TOKEN_MAX_LENGTH)
+        card = version_assets(card)
         html = html.replace('id="no-token" hidden', 'id="no-token"')
         html = html.replace("<!-- token-setup -->", card)
 
@@ -352,6 +456,8 @@ def save_token():
             return render_page("Couldn't save the token. Check that the app's folder is writable.", 500)
         os.environ["AIRGRADIENT_TOKEN"] = candidate
         TOKEN, MODE = candidate, server_mode(CFG, candidate)
+        budgets.clear("ag_current")   # a refused token's pause ends with a new one
+        budgets.clear("ag_history")
         token_state.code = None
         token_state.saved = {"monitors": accepted}   # the account's monitors and their kinds, for the "connected" card
         token_state.nonces.clear()
@@ -405,8 +511,8 @@ def manifest():
     env = icon_env()
     data = json.loads(path.read_text())
     if env:   # the installed app gets the DEV / PREVIEW icons and name too
-        data["name"] = f'{data.get("name", "Home Air Quality")} ({ENV_LABEL[env]})'
-        data["short_name"] = f"AQ {ENV_LABEL[env]}"
+        data["name"] = f'{data.get("name", "Home Air")} ({ENV_LABEL[env]})'
+        data["short_name"] = f"HA {ENV_LABEL[env]}"
     for ic in data.get("icons", []):
         src = str(ic.get("src", ""))
         if src.startswith("/static/icons/"):
@@ -445,12 +551,19 @@ def health():
     })
 
 
+@app.route("/api/usage")
+def usage():
+    """Today's calls to each outside API against its daily budget (budgets.py), and how often AirGradient is asked.
+    Counts only: no readings, no keys."""
+    return jsonify({**budgets.usage(), "refresh_seconds": sources.REFRESH_SECONDS})
+
+
 @app.route("/api/current")
 def current():
     if MODE == "no_token":   # a config but no token yet: the page says so; an expired token is a 502 below
         return jsonify({"state": "no_token"})
     try:
-        value, info = sources.cached("ag:current", lambda: sources.api_get("/locations/measures/current"), ttl=30, keep=900, force=sources._force())
+        value, info = sources.current_rows(force=sources._force())
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 502
     _note_cache(info)
@@ -499,11 +612,9 @@ def neighborhood():
     if not sources.source_on("nearby"):
         return jsonify([])
     try:
-        world, info = sources.cached("ag:world", sources._fetch_world, force=sources._force(), **sources.WORLD_CACHE)
-        value = sources._fetch_nearby(world)
+        value = sources._fetch_nearby()   # one area request on AirGradient's map, at most every 15 min per place
     except Exception as e:
         return jsonify({"error": sources._redact(f"Neighborhood data unavailable: {e}")}), 502
-    _note_cache(info)
     return jsonify(value)
 
 
@@ -652,7 +763,8 @@ def request_monitor():
 @app.route("/api/monitors")
 def monitors():
     """The demo's monitor picker: the public outdoor monitors nearest ?lat=&lon= (rounded again to 2 decimals, about
-    1 km), or nearest New York without them. Demo only."""
+    1 km), or nearest New York without them, within publicmap.PICKER_KM: one area request on AirGradient's map per
+    place, asked only when someone opens the picker or searches. Demo only."""
     if MODE != "demo":
         return jsonify({"error": "not found"}), 404
     import publicmap
@@ -669,10 +781,10 @@ def monitors():
             return jsonify({"error": "lat and lon must be a place's coordinates"}), 400
         near = "you"
     try:
-        world = demo_data.world_list()
+        rows = demo_data.picker_area(lat, lon)
     except demo_data.WORLD_ERRORS:
         return jsonify({"error": public.WORLD_DOWN}), 502
-    return jsonify({"near": near, "monitors": publicmap.nearest(world, lat, lon)})
+    return jsonify({"near": near, "monitors": publicmap.nearest(rows, lat, lon)})
 
 
 if MODE == "demo":   # every outside source becomes made-up data, generated per request (demo/data.py)
@@ -706,6 +818,6 @@ if __name__ == "__main__":
     write_pid_file()
     port = int(os.environ.get("PORT", 5555))
     host = os.environ.get("HOST", "127.0.0.1")   # HOST=0.0.0.0 to open it from a phone on the same network
-    print(f"Home Air Quality → http://localhost:{port}")
+    print(f"Home Air → http://localhost:{port}")
     print_setup_link(port)
     app.run(host=host, port=port, debug=False)

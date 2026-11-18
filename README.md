@@ -1,27 +1,27 @@
-# <img src="static/icons/icon.svg" alt="" width="28" height="28"> Home Air Quality
+# <img src="static/icons/icon.svg" alt="" width="28" height="28"> Home Air
 
 An app for your AirGradient monitors that tells you what to do about your air: when to open the window, when to keep it shut, when to go for a run. It combines your readings with the forecast, pollen, wildfire smoke and the public monitors around you.
 
-**[Try the demo](https://homeair.guyon.dev)** · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
+**[Try the demo](https://homeair.app)** · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
 
 <p align="center">
-  <img src="docs/hero-light.png" alt="Home Air Quality on a laptop and a phone" width="800">
+  <img src="docs/hero-light.png" alt="Home Air on a laptop and a phone" width="800">
 </p>
 
 <sub>Screenshots from the demo, with sample data.</sub>
 
 ## Demo
 
-[The demo](https://homeair.guyon.dev) shows an example home or the live readings of any public AirGradient monitor.
+[The demo](https://homeair.app) shows an example home or the live readings of any public AirGradient monitor.
 
 ## Installation
 
 You need one or two AirGradient monitors (indoor, outdoor or both) on AirGradient's cloud, and your API token. Works best in the US.
 
-**With a coding agent** (Claude Code, Codex, Cursor). Open your agent in an empty folder and paste:
+**With a coding agent** (Claude Code or Codex). Open your agent in an empty folder and paste:
 
 ```
-Clone https://github.com/sguyon/home-air-quality and set up Home Air Quality for my home by following its SETUP.md.
+Clone https://github.com/sguyon/homeair and set up Home Air for my home by following its SETUP.md.
 ```
 
 It connects AirGradient, asks your location and profiles, writes your config and runs the page on your computer. It can then keep it running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)).
@@ -58,8 +58,9 @@ It's minimal on purpose, and by necessity: I built it around what my own two mon
 
 ## Data and privacy
 
-- **Nothing is stored on the server.** No database, no accounts, no analytics: history comes from AirGradient's cloud each time, and the server's logs list which sources it called, never readings or keys.
+- **Nothing is stored on the server.** No database, no accounts, no analytics: history comes from AirGradient's cloud and is kept in the server's memory for a day at most, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
 - **What leaves your server:** your AirGradient token goes only to AirGradient. Your home's position, rounded to about 1 km by the app, goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
+- **Calls to AirGradient:** how often the app asks AirGradient, and how it keeps that low, is in [docs/api-usage.md](docs/api-usage.md).
 
 ## How it works
 
@@ -81,12 +82,14 @@ The server asks [Open-Meteo's Air Quality API](https://open-meteo.com/en/docs/ai
 
 ### Corrected PM2.5
 
-AirGradient monitors measure particles with a laser sensor (Plantower). Outdoors it reads high, more so in humid air, where particles swell with water. The US EPA compared these sensors with reference stations and published a correction that uses humidity and the sensor's non-linear response at high levels ([Barkjohn et al. 2021](https://amt.copernicus.org/articles/14/4617/2021/)). AirGradient says its indoor monitor's sensor (PMS5003) reads low in clean air, and may correct it differently ([AirGradient on low readings](https://www.airgradient.com/blog/low-readings-from-pms5003/)). AirGradient sends its own corrected value next to the raw one (`pm02_corrected` in [its API](https://api.airgradient.com/public/docs/api/v1/)): the EPA correction on an outdoor monitor; on an indoor one, whichever correction AirGradient applies to that sensor. The app shows that value for your monitors. For public outdoor monitors (the nearby ones, and the one an indoor-only home reads), AirGradient's public list gives only the raw value, so the app applies the same EPA formula, which gives the values on AirGradient's map ([AirGradient on the correction](https://meetingorganizer.copernicus.org/EGU25/EGU25-8701.html)). The rules compare these corrected values with the limits.
+AirGradient monitors measure particles with a laser sensor (Plantower). Outdoors it reads high, more so in humid air, where particles swell with water. The US EPA published a correction for this based on humidity ([Barkjohn et al. 2021](https://amt.copernicus.org/articles/14/4617/2021/)); indoors, AirGradient may correct its sensor differently ([AirGradient on low readings](https://www.airgradient.com/blog/low-readings-from-pms5003/)).
+
+The app always uses the corrected value: for your monitors, the `pm02_corrected` value [AirGradient's API](https://api.airgradient.com/public/docs/api/v1/) sends; for public outdoor monitors, the EPA-corrected value from AirGradient's map ([AirGradient on the correction](https://meetingorganizer.copernicus.org/EGU25/EGU25-8701.html)), or the same formula when only the raw value is there. The advice compares these corrected values with the limits.
 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The full Home Air Quality page from the demo: today's actions, the profiles, the day chart, the home monitors, local conditions and the neighborhood map" width="720">
+  <img src="docs/screenshot.png" alt="The full Home Air page from the demo: today's actions, the profiles, the day chart, the home monitors, local conditions and the neighborhood map" width="720">
 </p>
 
 ## Credits

@@ -51,6 +51,7 @@ def on(tmp_path, platform="darwin", run=None, check=lambda: 0, env=None):
 def repo(tmp_path, monkeypatch):
     (tmp_path / "repo").mkdir()
     monkeypatch.setattr(autostart, "RETRY_WAIT", 0)
+    monkeypatch.setattr(autostart, "STOP_WAIT", 0.5)   # the test's own child stays a zombie until reaped, so the real wait would run in full (10 s)
 
 
 def test_plist_starts_the_app_from_the_folder():
@@ -64,11 +65,11 @@ def test_plist_starts_the_app_from_the_folder():
     assert plist["StandardOutPath"] == plist["StandardErrorPath"] == "/x/a b/app.log"
 
 
-def test_unit_quotes_the_path():
+def test_unit_uses_an_unquoted_working_directory():
     unit = autostart.systemd_unit(Path("/x/a b"), 5600)
     assert 'ExecStart=/bin/sh "/x/a b/scripts/run.sh" server.py' in unit
     assert "Environment=PORT=5600" in unit
-    assert 'WorkingDirectory="/x/a b"' in unit
+    assert "WorkingDirectory=/x/a b" in unit.splitlines()
     assert "Restart=on-failure" in unit and "WantedBy=default.target" in unit
 
 
@@ -146,6 +147,7 @@ def test_off_removes_it_and_notices_a_moved_folder(tmp_path, capsys):
     assert "Start at login is off." in out and "no longer exists" in out
 
 
+@pytest.mark.xdist_group("app-pid")   # shares the repo's app.pid with test_startup's run of server.py; one worker runs both
 def test_server_writes_and_removes_its_pid():
     pid_file = ROOT / autostart.PID_FILE
     if pid_file.exists():

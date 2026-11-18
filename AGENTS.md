@@ -53,11 +53,12 @@ The setup (`SETUP.md`, `scripts/setup.py`, the token page) is a stranger's first
 - `phrases.py`: the sentences behind each explanation, filled from the readings and the limits.
 - `config.py`: reads `config.toml` (or the `CONFIG_TOML` or `CONFIG_FILE` variable) and checks it. `config.example.toml` is the commented starter.
 - `index.html` and `static/`: the page, with no build step. `app.js` (data, readings, charts), `summary.js` (the summary card), `home.js` (the home's profiles and road in words), `sky.js` (the live sky), `map.js` (the neighborhood map), `picker.js` (the demo's top area, its three ways in and the monitor picker).
+- Serving: the page's `/static/` URLs carry `?v=<content hash>` (`server.py` `version_assets`); a URL with the current hash is cached by browsers for a year (`immutable`), anything else revalidates. `sw.js` and `/manifest.json` are never immutable. Text answers are gzipped in the app (`compress`) for gunicorn and Docker; on Vercel its edge compresses and serves `/static/`. gunicorn stays at 1 worker: the server cache and the daily call limits live in that one process.
 - `DESIGN.md`: the page's design rules (cards, disabled states, colors that carry meaning, motion, the check before shipping); read it before changing the page.
-- `publicmap.py`: AirGradient's public monitors for any home or the demo: the outdoor ones in the world list, the nearest, the outdoor source an indoor-only home is offered at setup, a monitor's reading row, its place on the public map and its history there. No import of `demo/` or `server.py`.
+- `publicmap.py`: AirGradient's public monitors for any home or the demo: the ones in an area of its public map (one small request), the nearest, the outdoor source an indoor-only home is offered at setup, a monitor's reading row, its place on the public map and its history there. No import of `demo/` or `server.py`.
 - `demo/`: the demo's home (`config.toml`), its made-up data (`data.py`), its three moments and three hidden one-monitor cases (`moments.py`) and the public monitors' pages at `?monitor=<id>` (`public.py`).
 - `scripts/`: `setup.py` (prepares an empty token entry, discovers monitors, writes household choices with a backup, checks config and readings; `railway` transfers saved settings through stdin and `--live` checks a running page), `check_config.py`, `screenshot.sh` (the README's images, from the demo), `vercel_build.sh` (the demo's build on Vercel).
-- `Dockerfile`, `docker-compose.yml` and `.dockerignore`: the container (DEPLOYMENT.md, "Docker"). `.github/workflows/image.yml` publishes the image to `ghcr.io/sguyon/home-air-quality` from `main`.
+- `Dockerfile`, `docker-compose.yml` and `.dockerignore`: the container (DEPLOYMENT.md, "Docker"). `.github/workflows/image.yml` publishes the image to `ghcr.io/sguyon/homeair` from `main`, and to the old name `ghcr.io/sguyon/home-air-quality` so existing installs keep updating.
 - `tests/`: Python tests (pytest) and page tests (`*.test.mjs`, Node's test runner).
 
 ## Run
@@ -71,10 +72,10 @@ Then http://localhost:5555 (`PORT` changes the port). `scripts/run.sh server.py`
 ## Test
 
 ```bash
-pytest -q && node --test tests/*.test.mjs
+pytest -q -n auto --dist loadgroup && node --test tests/*.test.mjs
 ```
 
-Both must pass before a commit.
+Both must pass before a commit. While iterating, run only the tests the change touches (`pytest tests/test_x.py -x -q`). `-n auto` needs `pytest-xdist` (in `requirements-dev.txt`). A bare `pytest` runs `tests/` only (`pytest.ini`).
 
 ## The demo moments are the test fixtures
 

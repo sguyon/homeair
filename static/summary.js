@@ -1,4 +1,4 @@
-// Home Air Quality: the summary card (items, profiles, day chart, hover readout), drawn from /api/analyze's
+// Home Air: the summary card (items, profiles, day chart, hover readout), drawn from /api/analyze's
 // `summary` object. The rules in summary.py decide everything; this file only draws it.
 // Spec: internal/specs/summary-redesign-spec.md · visual reference: internal/design-archive/49-summary-needs-row.html, profiles as in 52 (B9 without the underline)
 (function (root) {

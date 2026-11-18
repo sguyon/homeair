@@ -297,7 +297,7 @@ def rush_windows(hourly, now):
 
 
 def profiles_on(profiles):
-    """Only the profiles the page's view turns on: the home's config, or a public monitor's (runner only, demo/public.py)."""
+    """Only the profiles the page's view turns on: the home's config, or a public monitor's (demo/public.py)."""
     on = runtime.page_view().get("profiles") or {}
     return [n for n in profiles if on.get(n["id"], True)]
 
@@ -346,7 +346,7 @@ def build_air_read(payload):
         pm_out = sources.pm_of(row) if row else None   # a public monitor's reading; an estimate has no "now" of its own
         # a public monitor's own temperature and humidity; else Open-Meteo's (the damp and dry rules keep working)
         rh_out = sources.fnum(row.get("rhum")) if row else sources.fnum(weather.get("relative_humidity_2m"))
-        # the world list gives atmp as measured, with no compensated temperature (checked 2026-11-09): kept as it is
+        # a public monitor's atmp is kept as AirGradient's map gives it
         t_out = sources.fnum(row.get("atmp")) if row else sources.fnum(weather.get("temperature_2m"))
     wind_direction = weather.get("wind_direction_10m")
     wind_toward = road_traffic(now.hour, wind_direction)["toward"]

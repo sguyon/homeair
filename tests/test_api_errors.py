@@ -27,6 +27,8 @@ def test_unreachable_has_no_url_or_token(secret, monkeypatch):
     for url in ("/api/current", "/api/history/1?from=2026-01-01T00:00:00Z&to=2026-01-01T01:00:00Z"):
         r = _get(secret, url)
         assert r.status_code == 502 and "SECRET123" not in r.get_data(as_text=True)
+    import budgets
+    budgets.clear()   # the failure above backs AirGradient off for 2 min; this asks again as if after the wait
     assert "unreachable (ConnectionError)" in _get(secret).get_json()["error"]
 
 

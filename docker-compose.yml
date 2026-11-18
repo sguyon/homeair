@@ -1,4 +1,4 @@
-# Home Air Quality for your home, on a home server or NAS: `docker compose up -d`, then http://localhost:8000.
+# Home Air for your home, on a home server or NAS: `docker compose up -d`, then http://localhost:8000.
 # DEPLOYMENT.md, "Docker", has the steps. config.toml and .env sit next to this file.
 services:
   home-air-quality:

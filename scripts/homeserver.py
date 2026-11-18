@@ -5,16 +5,17 @@ import os
 import shutil
 from pathlib import Path
 
-IMAGE = "ghcr.io/sguyon/home-air-quality:latest"   # published from main by .github/workflows/image.yml
+IMAGE = "ghcr.io/sguyon/homeair:latest"           # published from main by .github/workflows/image.yml
+OLD_IMAGE = "ghcr.io/sguyon/home-air-quality:latest"   # the same image under the old name, still published
 FOLDER = "home-server"                             # prepared in the repo folder; gitignored (it holds a copy of .env)
 SERVER_PORT = 8000                                 # the image's port (Dockerfile), opened to the home network
 
-COMPOSE = f"""# Home Air Quality on a home server. In this folder: docker compose up -d
+COMPOSE = f"""# Home Air on a home server. In this folder: docker compose up -d
 # Then open http://<this server>:{SERVER_PORT} from any device at home. Anyone on the home network can see the page.
 # Prepared by scripts/setup.py --home-server: config.toml and .env sit next to this file; keep them private.
 services:
   home-air-quality:
-    image: {IMAGE}
+    image: {IMAGE}   # if this can't be pulled, the same image is {OLD_IMAGE}
     ports:
       - "{SERVER_PORT}:{SERVER_PORT}"
     volumes:

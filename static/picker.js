@@ -1,4 +1,4 @@
-// Home Air Quality: the demo's top area (the name and pitch, then three ways in: the made-up home's samples 1 2 3, a public
+// Home Air: the demo's top area (the name and pitch, then three ways in: the made-up home's samples 1 2 3, a public
 // monitor near you, your own monitor) and its monitor picker. Demo only: app.js draws it where showsTop says (window.APP has
 // `now`, a sample, or `public`, a monitor's page; never in screenshots). Also gives every /api call its URL (apiUrl).
 // Mocks: internal/design-archive/93-demo-top-area (concept E), public-monitor/ (the picker, README round 4).
@@ -12,9 +12,9 @@
   const PM_WHOLE_FROM = 10;         // µg/m³: as the page's rings, one decimal below 10 (3.9), whole numbers from 10 up
   const GEO_TIMEOUT_MS = 10000;     // how long "Near me" waits for the browser's location before saying it's off
   const GEO_MAX_AGE_MS = 600000;    // a location the browser found in the last 10 minutes is good enough
-  const REPO_URL = 'https://github.com/sguyon/home-air-quality';
-  const SOURCE_URL = `${REPO_URL}#installation`;   // the README's setup steps: the "Setup" button
-  // GitHub's mark (Octicons mark-github, MIT), drawn before "Setup" so the button says where it goes
+  const REPO_URL = 'https://github.com/sguyon/homeair';
+  const SOURCE_URL = `${REPO_URL}#installation`;
+  // GitHub's mark (Octicons mark-github, MIT), drawn before "Setup guide" so the button says where it goes
   const GH_MARK = '<svg class="dt-gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>';
   const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
   const DEFAULT_PLACE = 'New York';   // demo/public.py DEFAULT_LIST: the list before anyone gives a location
@@ -56,33 +56,39 @@
   };
   const OUT_ICON = '<svg class="dt-bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>';
   const FOLD_KEY = 'aq-demo-top';   // localStorage: 'folded' once the visitor hid the top area
-  // The fold button's words: Hide with a chevron up while open, Show with a chevron down once folded
-  const foldLabel = folded => `${folded ? 'Show' : 'Hide'}<svg class="dt-fi" viewBox="0 0 24 24" aria-hidden="true"><path d="${folded ? 'm6 9 6 6 6-6' : 'm18 15-6-6-6 6'}"/></svg>`;
+  const foldLabel = folded => `${folded ? 'Show' : 'Hide'}<svg class="dt-fi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14 ${folded ? 'm-6-6 6 6 6-6' : 'M6 11l6-6 6 6'}"/></svg>`;
+
+  // An unknown monitor can fall back to a sample; a live monitor has no selected sample.
+  function selectedSample(app) {
+    if (app.public && !app.public.error) return null;
+    return app.now?.moments?.find(m => m.key === app.now.moment);
+  }
 
   // The demo's top area (mock 93, E): the name and pitch, then the three ways in, each a title, one line and its control.
-  // See a demo: the samples (the shown one marked and named; none on a monitor's page). See a live monitor near you: the
+  // See a demo: the samples (the shown one marked; none on a live monitor's page). See a live monitor: the
   // picker's button (the chosen monitor's name, or "Select a monitor"). Set up your own monitor: the README's setup steps.
   // Folded ({folded: true}, Sacha, 2026-11-13): one slim line, the logo, the name, DEMO and Show (app.css, .is-folded).
   function topHTML(app, { folded = false } = {}) {
     const pub = app.public || null;
     const listed = (app.now && app.now.moments) || [];
     const samples = listed.length ? listed : SAMPLES.map(n => ({ n }));
-    const shown = (!pub || pub.error) && app.now ? app.now.moment : null;   // an unknown monitor's page ({id, error}) shows the sample
-    const links = samples.map(m => `<a href="?sample=${m.n}"${m.label ? ` title="${esc(m.label)}"` : ''}${m.key && m.key === shown ? ' aria-current="page"' : ''}>${m.n}</a>`).join('');
+    const shown = selectedSample(app);
+    const links = samples.map(m => `<a href="?sample=${m.n}"${m.label ? ` title="${esc(m.label)}"` : ''}${m === shown ? ' aria-current="page"' : ''}>${m.n}</a>`).join('');
     const name = pub && !pub.error && pub.name ? esc(pub.name) : '';
-    const way = (cls, tone, icon, title, line, control) => `<div class="dt-way${cls}"><p class="dt-t"><span class="dt-ico dt-${tone}">${WAY_ICON[icon]}</span>${title}</p>` +
+    const pickStyle = name ? ' is-chosen' : '';
+    const way = (cls, icon, title, line, control) => `<div class="dt-way${cls}"><p class="dt-t"><span class="dt-ico">${WAY_ICON[icon]}</span>${title}</p>` +
       `<p class="dt-s">${line}</p><div class="dt-ctl">${control}</div></div>`;
-    return `<div class="dt-in">
-  <button type="button" class="dt-fold" id="dt-fold" aria-expanded="${!folded}" aria-label="${folded ? 'Show the demo\'s top area' : 'Hide the demo\'s top area'}">${foldLabel(folded)}</button>
-  <div class="dt-brand"><h1 class="dt-name">${MARK}Home Air Quality <span class="dt-tag">Demo</span></h1>
-    <p class="dt-pitch">An <a href="${REPO_URL}">open-source</a> app for your AirGradient monitors. <span>It adds the weather forecast, pollen and more, and tells you what to do for profiles like young kids, allergies or running.</span></p></div>
-  ${way(' dt-w1', 'ink', 'home', 'See a demo',
-    '<span class="dt-gen">Sample data from a made\u2011up home.</span>',   // \u2011: a hyphen that never ends a line
+    return `<button type="button" class="dt-fold" id="dt-fold" aria-expanded="${!folded}" aria-label="${folded ? 'Show the demo\'s top area' : 'Hide the demo\'s top area'}">${foldLabel(folded)}</button>
+<div class="dt-in">
+  <div class="dt-brand"><h1 class="dt-name">${MARK}Home Air <span class="dt-tag">Demo</span></h1>
+    <p class="dt-pitch"><a href="${REPO_URL}">Open-source</a> app for your AirGradient monitors: <span>see your air quality next to the weather, pollen, smoke and traffic, with insights for your home and outside.</span></p></div>
+  ${way(' dt-w1', 'home', 'See a demo',
+    'Sample data from an example home.',
     `<span class="dt-lab" id="dt-lab">Sample</span><nav class="dt-seg" aria-labelledby="dt-lab">${links}</nav>`)}
-  ${way('', 'sky', 'pin', 'See a live monitor near you', 'Real readings from a public AirGradient monitor.',
-    `<span class="dt-pickwrap" id="db-pickwrap"><button type="button" class="dt-pick${name ? ' is-chosen' : ''}" id="db-pick"${name ? ` aria-label="Monitor: ${name}. Change monitor"` : ''} aria-haspopup="dialog" aria-expanded="false" aria-controls="db-pop"><i class="live" aria-hidden="true"></i><span class="dt-pick-t">${name || 'Select a monitor'}</span>${ICON.chev}</button></span>`)}
-  ${way('', 'good', 'monitor', 'Set up your own monitor', 'You install it, with a coding agent or Docker.',
-    `<a class="dt-btn" href="${SOURCE_URL}" target="_blank" rel="noopener" aria-label="Setup, on GitHub">${GH_MARK}Setup${OUT_ICON}</a>`)}
+  ${way('', 'pin', 'See a live monitor', 'Live data from public monitors near you.',
+    `<span class="dt-pickwrap" id="db-pickwrap"><button type="button" class="dt-pick${pickStyle}" id="db-pick"${name ? ` aria-label="Monitor: ${name}. Change monitor"` : ''} aria-haspopup="dialog" aria-expanded="false" aria-controls="db-pop"><i class="live" aria-hidden="true"></i><span class="dt-pick-t">${name || 'Select a monitor'}</span>${ICON.chev}</button></span>`)}
+  ${way('', 'monitor', 'Set up your own monitor', 'Install it with your coding agent. Self-host at home or in the cloud.',
+    `<a class="dt-btn" href="${SOURCE_URL}" target="_blank" rel="noopener" aria-label="Setup guide on GitHub">${GH_MARK}Setup guide${OUT_ICON}</a>`)}
 </div>`;
   }
 
@@ -133,20 +139,19 @@
   const $ = id => document.getElementById(id);
   const st = { app: null, rows: null, all: false, near: DEFAULT_PLACE, defaultRows: null, seq: 0, loading: false };
 
-  const panelHTML = () => `<div class="pm-pop" id="db-pop" role="dialog" aria-label="Public AirGradient monitors" hidden>
+  const panelHTML = () => `<div class="pm-pop" id="db-pop" role="dialog" aria-labelledby="pm-title" hidden>
   <p class="pm-note pm-error" id="pm-error" hidden></p>
-  <div class="pop-head"><div><b>Public AirGradient monitors</b><span>Live readings from monitors their owners share on AirGradient's map. Pick one to see its readings on this page.</span></div>
+  <div class="pop-head"><div><b id="pm-title">Public AirGradient monitors</b><span>Shared by community members on <a href="${MAP_URL}" target="_blank" rel="noopener">AirGradient's map</a>, under CC BY-SA.</span></div>
     <button type="button" class="pop-close" id="pm-close" aria-label="Close">${ICON.close}</button></div>
   <div class="pm-find">
     <button type="button" class="pm-near" id="pm-near" aria-pressed="false">${ICON.near}Near me</button>
     <form class="pm-place" id="pm-place" role="search">${ICON.search}<input type="text" id="pm-q" placeholder="Or type a place" aria-label="Find monitors near a place" autocomplete="off" enterkeyhint="search"></form>
   </div>
-  <p class="pm-note" id="pm-note" hidden></p>
+  <p class="pm-note" id="pm-find-note" hidden></p>
   <div class="pm-head"><span id="pm-near-h">Nearest to ${esc(DEFAULT_PLACE)}</span><span>PM2.5 now</span></div>
   <ul class="pm-list" id="pm-list"></ul>
   <p class="pm-msg" id="pm-msg" hidden></p>
   <button type="button" class="pm-more" id="pm-more" hidden></button>
-  <p class="pm-credit">From <a href="${MAP_URL}" target="_blank" rel="noopener">AirGradient's public map</a>. Each owner shares their readings under CC BY-SA; the name on each row is the credit.</p>
 </div>`;
 
   const note = (id, text) => { const el = $(id); el.textContent = text || ''; el.hidden = !text; };
@@ -190,9 +195,9 @@
   }
 
   function nearMe() {
-    const off = () => { note('pm-note', offNote(st.near || DEFAULT_PLACE)); $('pm-near').setAttribute('aria-pressed', 'false'); $('pm-q').focus(); };
+    const off = () => { note('pm-find-note', offNote(st.near || DEFAULT_PLACE)); $('pm-near').setAttribute('aria-pressed', 'false'); $('pm-q').focus(); };
     if (!navigator.geolocation) return off();
-    note('pm-note', '');
+    note('pm-find-note', '');
     navigator.geolocation.getCurrentPosition(p => {
       $('pm-near').setAttribute('aria-pressed', 'true');
       load('you', p.coords.latitude, p.coords.longitude);
@@ -202,14 +207,14 @@
   async function findPlace(q) {
     q = q.trim();
     if (!q) return;
-    note('pm-note', '');
+    note('pm-find-note', '');
     try {
       const hit = await geocode(q);
-      if (!hit) return note('pm-note', `No place called "${q}" found. Try another name.`);
+      if (!hit) return note('pm-find-note', `No place called "${q}" found. Try another name.`);
       $('pm-near').setAttribute('aria-pressed', 'false');
       load(hit.name, hit.lat, hit.lon);
     } catch {
-      note('pm-note', "The place search didn't answer. Try again in a moment.");
+      note('pm-find-note', "The place search didn't answer. Try again in a moment.");
     }
   }
 
@@ -237,6 +242,14 @@
   // Draw the top area (index.html #demo-top) and wire the picker: it opens under the top area, from its button.
   function mount(top, app) {
     st.app = app;
+    const sample = selectedSample(app);
+    const place = $('home-place');
+    const title = place?.querySelector('[data-app="home-name"]');
+    if (sample && title) {
+      title.textContent = 'Sample home';
+      title.title = title.textContent;
+      place.classList.toggle('sample-place', true);
+    }
     let folded = false;
     try { folded = localStorage.getItem(FOLD_KEY) === 'folded'; } catch {}
     top.innerHTML = topHTML(app, { folded });

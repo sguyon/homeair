@@ -1,4 +1,4 @@
-// Home Air Quality: the Neighborhood map. Loaded only when the section nears the screen.
+// Home Air: the Neighborhood map. Loaded only when the section nears the screen.
 // MapLibre (open source) draws OpenFreeMap tiles: free, no key. The road's path is the config's route file (/api/road/route),
 // from OpenStreetMap routing. Without a road: no route, no plume.
 // Uses $, APP, apiUrl, state, has, PM_FINE, TZ and the table rows (data-id) from app.js, and bearingIn, selfWords and nbPm from home.js.

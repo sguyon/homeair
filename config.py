@@ -30,7 +30,7 @@ APPLIANCES = ("dehumidifier", "ac_dry")
 DEFAULT_APPLIANCES = ()  # no equipment assumed: a home opts in to the appliances it has.
 TEMP_UNITS = ("C", "F")  # [home] temp_unit: the unit the page starts in (setup sets F for a US home); a viewer can still switch.
 DEFAULT_TEMP_UNIT = "C"
-# the named ways to get outdoor PM2.5 without an outdoor monitor of your own ([sources] outdoor_from); the other way is a public monitor's id
+# the named ways to get outdoor PM2.5 without an outdoor monitor of your own ([sources] outdoor_from); the other way is a public monitor's id on AirGradient's map
 OUTDOOR_FROM_KINDS = ("area", "model")
 
 
@@ -143,7 +143,7 @@ class Config:
     pollen_seasons: tuple[dict, ...]
     sources: dict[str, bool]
     appliances: tuple[str, ...] = DEFAULT_APPLIANCES
-    outdoor_from: int | str | None = None   # without an outdoor monitor: a public monitor's locationId, "area" or "model"
+    outdoor_from: int | str | None = None   # without an outdoor monitor: a public monitor's id on AirGradient's map, "area" or "model"
     temp_unit: str = DEFAULT_TEMP_UNIT
 
 

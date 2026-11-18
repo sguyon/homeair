@@ -1,5 +1,5 @@
 """An indoor-only home's outdoor PM2.5 (server.outdoor_source): a nearby public monitor, the area's public monitors, or
-the model, with the fallbacks monitor → area → model. Made-up world lists and map answers: no test touches the network."""
+the model, with the fallbacks monitor → area → model. Made-up map answers: no test touches the network."""
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -57,10 +57,10 @@ def map_rows(value, hours=24):
 
 @pytest.fixture
 def home(monkeypatch, canned):
-    """An indoor-only home on made-up upstreams. Returns (set_world, calls): set the world list (None: AirGradient down)
-    and see which upstreams were asked."""
+    """An indoor-only home on made-up upstreams. Returns (set_world, calls): set the public monitors on AirGradient's
+    map (None: the map down) and see which upstreams were asked."""
     before = server.CFG
-    calls = {"world": 0, "map_id": [], "history": []}
+    calls = {"area": 0, "place": [], "history": []}
     state = {"world": []}
     monkeypatch.setattr(sources, "_cache", {})
     monkeypatch.setattr(sources, "_inflight", {})
@@ -69,23 +69,27 @@ def home(monkeypatch, canned):
     hours = [NOW.replace(minute=0) + timedelta(hours=h) for h in range(-24, 13)]
     monkeypatch.setattr(sources, "get_air_forecast", lambda *a, **k: {t.strftime("%Y-%m-%dT%H:00"): MODEL_PM for t in hours})
 
-    def world():
-        calls["world"] += 1
+    def area(lat, lon, km):   # the map's monitors around the home, as rows (publicmap.from_map's shape)
+        calls["area"] += 1
         if state["world"] is None:
-            raise requests.ConnectionError("AirGradient down")
-        return state["world"]
+            raise requests.ConnectionError("map down")
+        return [{**m, "mapId": m["locationId"]} for m in state["world"]]
 
-    def map_id(mon):
-        calls["map_id"].append(mon["locationId"])
-        return mon["locationId"] + 1_000_000
+    def place(mid):   # one monitor by its map id: {} when the map has none
+        calls["place"].append(mid)
+        if state["world"] is None:
+            raise requests.ConnectionError("map down")
+        return next((m for m in state["world"] if m.get("locationId") == mid), {})
 
     def history(mid, hours, now=None, measures=publicmap.MAP_MEASURES):
-        calls["history"].append((mid - 1_000_000, hours, tuple(measures)))
-        value = PINNED_PM if mid - 1_000_000 == PINNED else AREA_PM
+        calls["history"].append((mid, hours, tuple(measures)))
+        value = PINNED_PM if mid == PINNED else AREA_PM
         return [{k: v for k, v in r.items() if k == "timestamp" or k in measures.values()} for r in map_rows(value, hours)]
 
-    monkeypatch.setattr(sources, "_fetch_world", world)
-    monkeypatch.setattr(publicmap, "map_id", map_id)
+    monkeypatch.setattr(publicmap, "fetch_area", area)
+    monkeypatch.setattr(publicmap, "fetch_place", place)
+    monkeypatch.setattr(publicmap, "fetch_now", lambda mid: {})   # the tests' rows carry their reading already
+    monkeypatch.setattr(publicmap, "monitor_row", lambda place, now: {**place, **now, "mapId": place["locationId"]})
     monkeypatch.setattr(publicmap, "history", history)
     monkeypatch.setattr(server, "MODE", "live")
     monkeypatch.setattr(sources, "api_get", lambda path, params=None: [{"locationId": 1, "locationType": "indoor", "rco2": 900}])
@@ -170,7 +174,7 @@ def test_monitor_missing_from_the_list_keeps_its_name(home):
     set_world([monitor(PINNED, 1.1, "Cedar & 2nd Ave"), monitor(2, 4, "North"), monitor(3, -6, "South")])
     assert sources.outdoor_source(NOW)["kind"] == "monitor"
     sources._cache.clear()
-    set_world([monitor(2, 4, "North"), monitor(3, -6, "South")])   # it stopped reporting: the list drops it
+    set_world([monitor(2, 4, "North"), monitor(3, -6, "South")])   # gone from the map
     src = sources.outdoor_source(NOW)
     assert src["kind"] == "area" and src["fallback"] == "monitor" and src["name"] == "Cedar & 2nd Ave"
 
@@ -194,31 +198,26 @@ def test_area_scales_the_model(home, client):
 
 
 def test_area_on_a_slow_map_resolves_within_the_budget(home, monkeypatch):
-    """Every monitor's map id, then every history, is asked at once: three monitors at 0.4 s a request take about
-    0.8 s, not 2.4 s, so a 1.5 s budget gives "area" on the first call and the same kind on the next."""
+    """Every history is asked at once: three monitors at 0.4 s a request take about 0.4 s, not 1.2 s, so a 0.9 s
+    budget gives "area" on the first call and the same kind on the next."""
     import time
     set_world, calls = home
     use("area")
     set_world([monitor(2, 4, "North"), monitor(3, -6, "South"), monitor(5, 8, "East")])
-    fast_id, fast_history = publicmap.map_id, publicmap.history
-
-    def slow_id(mon):
-        time.sleep(.4)
-        return fast_id(mon)
+    fast_history = publicmap.history
 
     def slow_history(*a, **k):
         time.sleep(.4)
         return fast_history(*a, **k)
-    monkeypatch.setattr(publicmap, "map_id", slow_id)
     monkeypatch.setattr(publicmap, "history", slow_history)
-    monkeypatch.setattr(sources, "SOURCE_BUDGET", 1.5)
+    monkeypatch.setattr(sources, "SOURCE_BUDGET", .9)
     t0 = time.monotonic()
     first = sources.outdoor_source(NOW)
-    assert time.monotonic() - t0 < 1.5
+    assert time.monotonic() - t0 < .9
     assert first["kind"] == "area" and first["area_count"] == 3
     second = sources.outdoor_source(NOW)
     assert (second["kind"], second["area_count"]) == ("area", 3)
-    assert len(calls["map_id"]) == 3 and len(calls["history"]) == 3   # the second call read the cache
+    assert calls["area"] == 1 and len(calls["history"]) == 3   # the second call read the cache
 
 
 def test_area_counts_only_monitors_reporting_now(home):
@@ -226,7 +225,7 @@ def test_area_counts_only_monitors_reporting_now(home):
     use("area")
     set_world([monitor(2, 4, "North"), monitor(3, -6, "South"), monitor(5, 2, "Quiet", age=timedelta(hours=3))])
     src = sources.outdoor_source(NOW)
-    assert src["area_count"] == 2 and 5 not in calls["map_id"]
+    assert src["area_count"] == 2 and 5 not in [c[0] for c in calls["history"]]
 
 
 def test_current_skips_the_monitor_history(home, client):
@@ -256,7 +255,7 @@ def test_model_fetches_nothing_more(home, client):
     assert r["outdoor_source"]["kind"] == "model"
     assert r["summary"]["timeline"]["pm"]["source"] == "model"   # the model's past on the chart
     client.get("/api/current")
-    assert calls == {"world": 0, "map_id": [], "history": []}
+    assert calls == {"area": 0, "place": [], "history": []}
 
 
 def test_model_reads_as_a_forecast_estimate(home, client):
@@ -279,24 +278,24 @@ def test_fallback_names_the_chosen_monitor(home, client):
 
 
 @pytest.mark.parametrize("chosen", [PINNED, "area"])
-def test_world_list_down_is_the_model(home, client, chosen):
+def test_map_down_is_the_model(home, client, chosen):
     set_world, calls = home
     use(chosen)
     set_world(None)
     src = sources.outdoor_source(NOW)
-    # the chosen monitor may be reporting: it's AirGradient's list that didn't answer, and the fallback says so
+    # the chosen monitor may be reporting: it's AirGradient's map that didn't answer, and the fallback says so
     assert src["kind"] == "model" and src["fallback"] == ("list" if chosen == PINNED else False)
     assert client.get("/api/current").status_code == 200
     assert read(client)["outdoor_source"]["kind"] == "model"
 
 
-def test_world_list_down_doesnt_say_the_chosen_monitor_isnt_reporting(home, client):
+def test_map_down_doesnt_say_the_chosen_monitor_isnt_reporting(home, client):
     set_world, calls = home
     use(PINNED)
     set_world([monitor(PINNED, 1.1, "Cedar & 2nd Ave")])
     assert sources.outdoor_source(NOW)["kind"] == "monitor"   # seen once: its name is known
     set_world(None)
-    sources._cache.clear()   # past the world list's keep: nothing cached to fall back on
+    sources._cache.clear()   # past the map's keep: nothing cached to fall back on
     src = sources.outdoor_source(NOW)
     assert src["kind"] == "model" and src["fallback"] == "list" and src["name"] == "Cedar & 2nd Ave"
     pm = next(i for i in read(client)["summary"]["items"] if i["id"] == "pm")
@@ -309,9 +308,9 @@ def test_map_down_falls_back_to_the_model(home, monkeypatch):
     use(PINNED)
     set_world([monitor(PINNED, 1.1, "Cedar & 2nd Ave", offline=True), monitor(2, 4, "North"), monitor(3, -6, "South")])
 
-    def down(mon):
+    def down(*a, **k):
         raise requests.ConnectionError("map down")
-    monkeypatch.setattr(publicmap, "map_id", down)
+    monkeypatch.setattr(publicmap, "history", down)
     src = sources.outdoor_source(NOW)
     assert src["kind"] == "model" and src["fallback"] == "monitor" and src["name"] == "Cedar & 2nd Ave"
 
@@ -348,10 +347,11 @@ def ex_monitor(lid, km_north, name, age=timedelta(minutes=10), offline=False, mo
 def check(tmp_path, capsys, monkeypatch, world, text=EXAMPLE, argv=()):
     asked = []
 
-    def fetch():
+    def fetch(*a, **k):
         asked.append(1)
         return world
-    monkeypatch.setattr(check_config.publicmap, "fetch_world", fetch)
+    monkeypatch.setattr(check_config.publicmap, "fetch_area", fetch)
+    monkeypatch.setattr(check_config.publicmap, "fetch_place", lambda mid: {})   # not on the map outside the area either
     (tmp_path / "config.toml").write_text(text, encoding="utf-8")
     code = check_config.main(list(argv), {}, tmp_path)
     return code, capsys.readouterr().out, len(asked)
@@ -409,9 +409,9 @@ def test_suggest_model(tmp_path, capsys, monkeypatch):
 
 
 def test_suggest_without_network_is_a_note(tmp_path, capsys, monkeypatch):
-    def down():
+    def down(*a, **k):
         raise requests.ConnectionError("offline")
-    monkeypatch.setattr(check_config.publicmap, "fetch_world", down)
+    monkeypatch.setattr(check_config.publicmap, "fetch_area", down)
     (tmp_path / "config.toml").write_text(EXAMPLE, encoding="utf-8")
     code = check_config.main(["--suggest"], {}, tmp_path)
     out = capsys.readouterr().out
@@ -433,7 +433,7 @@ def test_pinned_reporting(tmp_path, capsys, monkeypatch):
 def test_pinned_absent_gets_the_next_best(tmp_path, capsys, monkeypatch):
     world = [ex_monitor(12, 5, "A"), ex_monitor(13, -9, "B")]
     out = check(tmp_path, capsys, monkeypatch, world, text=ex_indoor_only(11))[1]
-    assert "public monitor 11 is not in AirGradient's public list" in out and 'Suggested outdoor_from = "area"' in out
+    assert "public monitor 11 is not on AirGradient's public map" in out and 'Suggested outdoor_from = "area"' in out
 
 
 def test_model_and_two_monitor_homes_ask_nothing(tmp_path, capsys, monkeypatch):
@@ -463,7 +463,7 @@ def test_pinned_indoor_or_without_position(tmp_path, capsys, monkeypatch):
     assert code == 1 and "public monitor 11 is not an outdoor monitor" in out
     unplaced = {**ex_monitor(11, 1, "Somewhere"), "latitude": None, "longitude": None}
     code, out, _ = check(tmp_path, capsys, monkeypatch, [unplaced, ex_monitor(12, 2, "Next")], text=ex_indoor_only(11))
-    assert code == 0 and "public monitor 11 has no position in AirGradient's public list" in out
+    assert code == 0 and "public monitor 11 has no position on AirGradient's public map" in out
     assert "The next best: Suggested outdoor_from = 12" in out and "not an outdoor monitor" not in out
 
 

@@ -1,9 +1,11 @@
 """The demo's public monitors (?monitor=<id>): any public AirGradient outdoor monitor, live, at its own place.
-No test calls the network: requests.get is faked, by URL, with a small world list of four monitors."""
+No test calls the network: requests.get is faked, by URL, with AirGradient's map answering from a small table of four
+monitors (WORLD, kept in the old world-list shape so each test reads as before; as_map turns a row into the map's)."""
 import hashlib
 import importlib
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -46,6 +48,21 @@ WEATHER = {"current": {"time": "2026-11-09T16:30", "temperature_2m": 17.0, "rela
 MODEL = {"hourly": {"time": ["2026-11-09T16:00", "2026-11-09T17:00"], "pm2_5": [5.0, 6.0]}}
 
 
+def as_map(m):
+    """A WORLD row as AirGradient's map gives it: the EPA-corrected PM2.5 as pm25, no raw pm02, no street."""
+    return {"locationId": m["locationId"], "locationName": (m.get("publicLocationName") or m["locationName"]).strip(),
+            "latitude": m["latitude"], "longitude": m["longitude"],
+            "pm25": summary_rules.corrected_pm(m["pm02"], m["rhum"]) if m.get("rhum") is not None else m["pm02"],
+            "pm10": m.get("pm10"), "atmp": m.get("atmp"), "rhum": m.get("rhum"), "rco2": m.get("rco2"),
+            "measuredAt": m["timestamp"], "ownerName": m.get("publicContributorName"), "url": m.get("publicPlaceUrl"),
+            "timezone": m.get("timezone"), "dataSource": "AirGradient", "sensorType": "Small Sensor"}
+
+
+def on_map(world):
+    """The monitors AirGradient's map shows: the outdoor ones."""
+    return [as_map(m) for m in world if not str(m.get("model", "")).startswith("I-")]
+
+
 class FakeResponse:
     def __init__(self, payload=None, status=200, text=""):
         self.payload, self.status_code, self.text = payload, status, text
@@ -72,12 +89,13 @@ def demo():
 
 @pytest.fixture
 def net(demo, monkeypatch):
-    """Fake upstreams, by URL; `calls` records each URL asked for. Set net["world_down"] to make the world list fail,
-    net["world"] or net["model"] to answer with another world list or PM2.5 model (a function of the request's params
-    answers by place). AirGradient's public map: net["area"] (its monitors around a point; none by default) and
-    net["history"] (measure → [{"timebucket", "value"}]); either set to a status code or an exception fails that call."""
+    """Fake upstreams, by URL; `calls` records each URL asked for. AirGradient's public map answers from net["world"]
+    (on_map: its outdoor monitors; an area call returns the ones in its box); net["world_down"] makes every map call
+    but history fail. net["area"] answers area calls instead (map-shaped rows, a status code or an exception);
+    net["history"] (measure → [{"timebucket", "value"}]) likewise; net["model"] another PM2.5 model (a function of the
+    request's params answers by place)."""
     sources._cache.clear()
-    state = {"calls": [], "world_down": False, "world": WORLD, "model": MODEL, "area": [], "history": {}}
+    state = {"calls": [], "world_down": False, "world": WORLD, "model": MODEL, "area": None, "history": {}}
 
     def map_answer(answer, payload):
         if isinstance(answer, int):
@@ -86,14 +104,30 @@ def net(demo, monkeypatch):
             raise answer
         return FakeResponse({"data": payload(answer), "total": None})
 
+    def in_box(m, p):
+        return p["xmin"] <= m["longitude"] <= p["xmax"] and p["ymin"] <= m["latitude"] <= p["ymax"]
+
     def get(url, params=None, **kw):
         state["calls"].append(url)
         if url == f"{publicmap.MAP_API}/measurements/current/area":
-            return map_answer(state["area"], lambda a: a)
+            if state["area"] is not None:
+                return map_answer(state["area"], lambda a: a)
+            if state["world_down"]:
+                return FakeResponse(status=503)
+            return FakeResponse({"data": [m for m in on_map(state["world"]) if in_box(m, params)]})
         if url.startswith(f"{publicmap.MAP_API}/locations/") and url.endswith("/measures/history"):
             return map_answer(state["history"], lambda h: h.get(params["measure"], []))
-        if "/world/locations/measures/current" in url:
-            return FakeResponse(status=503) if state["world_down"] else FakeResponse(state["world"])
+        one = re.search(r"/locations/(\d+)(/measures/current)?$", url)
+        if url.startswith(publicmap.MAP_API) and one:   # one monitor's place, or its measures now
+            if state["world_down"]:
+                return FakeResponse(status=503)
+            m = next((m for m in on_map(state["world"]) if m["locationId"] == int(one.group(1))), None)
+            if m is None:
+                return FakeResponse(status=404)
+            keys = ({"locationId", "pm25", "pm10", "atmp", "rhum", "rco2", "measuredAt", "sensorType", "dataSource"}
+                    if one.group(2) else {"locationId", "locationName", "latitude", "longitude", "ownerName", "url",
+                                          "timezone", "dataSource"})
+            return FakeResponse({k: v for k, v in m.items() if k in keys})
         if "air-quality-api.open-meteo.com" in url:
             return FakeResponse(state["model"](params) if callable(state["model"]) else state["model"])
         if "api.open-meteo.com" in url:
@@ -139,7 +173,7 @@ def test_find_is_outdoor_only():
 
 def test_view_of_a_monitor(demo):
     roof = public.view_of(publicmap.find(WORLD, ROOF), demo.APP_VIEW)
-    assert roof["profiles"] == {"toddler": False, "sinus": False, "runner": True}
+    assert roof["profiles"] == {"toddler": True, "sinus": True, "runner": True}   # the demo's three, as in the samples
     assert roof["sources"] == {"pollen": False, "road": False, "smoke": True, "nearby": True}   # booleans, like the config's
     assert roof["links"]["forecast"].startswith("https://forecast.weather.gov/")
     assert roof["road"] is None
@@ -177,7 +211,7 @@ def test_here_and_current_rows():
 
 @pytest.mark.parametrize("tz", [None, "", "Mars/Base", "../etc/passwd", "/abs", 5])
 def test_here_falls_back_to_utc(tz):
-    """The world list's timezone is AirGradient's data: one that names no real zone reads UTC, never a crash later."""
+    """The map's timezone is AirGradient's data: one that names no real zone reads UTC, never a crash later."""
     assert public.here_of({**publicmap.find(WORLD, BANGKOK), "timezone": tz}).tz == "UTC"
 
 
@@ -187,7 +221,7 @@ def test_monitor_page_and_api(c, net):
     app = app_of(page)
     assert app["public"]["id"] == ROOF and "error" not in app["public"]
     assert "now" not in app
-    assert app["profiles"] == {"toddler": False, "sinus": False, "runner": True}
+    assert app["profiles"] == {"toddler": True, "sinus": True, "runner": True}
     assert page.headers["Cache-Control"] == "public, max-age=60, s-maxage=300"
 
     cur = c.get(f"/api/current?monitor={ROOF}")
@@ -204,10 +238,10 @@ def test_monitor_page_and_api(c, net):
     assert not any("pollen.googleapis.com" in u for u in net["calls"])
 
     nb = c.get(f"/api/neighborhood?monitor={ROOF}").get_json()
-    assert [n["locationId"] for n in nb][:2] == [ROOF, INDOOR]   # the real filter around the monitor
+    assert [n["locationId"] for n in nb] == [ROOF]   # the real filter around the monitor (the map shows no indoor one)
     assert all("distance_km" in n for n in nb)
     # its own row in the table reads what its card reads: the corrected PM2.5 (Task 6c)
-    assert nb[0]["pm02_corrected"] == rows[0]["pm02_corrected"] == 4.8 and nb[0]["pm02"] == 4.2
+    assert nb[0]["pm02_corrected"] == rows[0]["pm02_corrected"] == 4.8 and "pm02" not in nb[0]   # the map has no raw
     assert nb[0]["map_url"].startswith("https://www.airgradient.com/map?zoom=15&long=-73.9007&lat=40.7772&")
 
 
@@ -216,11 +250,13 @@ def test_monitor_data_is_cached_per_monitor(c, net, demo):
         c.get(f"/api/context?monitor={ROOF}")
         c.get(f"/api/current?monitor={ROOF}")
     weather = [u for u in net["calls"] if "api.open-meteo.com/v1/forecast" in u]
-    world = [u for u in net["calls"] if "/world/" in u]
-    assert len(weather) == 1 and len(world) == 1
+    place = [u for u in net["calls"] if u.endswith(f"/locations/{ROOF}")]   # where it is, its name
+    one = [u for u in net["calls"] if u.endswith(f"/locations/{ROOF}/measures/current")]   # its reading now
+    assert len(weather) == 1 and len(place) == 1 and len(one) == 1
+    assert not [u for u in net["calls"] if u.endswith("/measurements/current/area")]   # no area call for a page
     c.get(f"/api/context?monitor={BANGKOK}")
     assert len([u for u in net["calls"] if "api.open-meteo.com/v1/forecast" in u]) == 2
-    assert {f"wx:m{ROOF}", f"aq:m{ROOF}", f"wx:m{BANGKOK}", "ag:world"} <= set(sources._cache)
+    assert {f"wx:m{ROOF}", f"aq:m{ROOF}", f"wx:m{BANGKOK}", f"ag:place:{ROOF}", f"ag:now:{ROOF}"} <= set(sources._cache)
     assert "wx" not in sources._cache   # the home's key stays untouched
 
 
@@ -288,7 +324,7 @@ def test_huge_monitor_id_is_junk(c, net):
     assert not any("/world/" in u for u in net["calls"])
 
 
-def test_world_list_down(c, net):
+def test_map_down(c, net):
     net["world_down"] = True
     page = c.get(f"/?monitor={ROOF}")
     assert page.status_code == 200
@@ -298,11 +334,11 @@ def test_world_list_down(c, net):
     sample_answers(c, ROOF)
 
 
-def test_world_list_bug_is_not_a_map_outage(c, monkeypatch, demo):
+def test_map_bug_is_not_a_map_outage(c, monkeypatch, demo):
     """Only a failed or timed-out fetch reads as "the map didn't answer"; a bug in our code still raises."""
-    def broken():
+    def broken(mid):
         raise KeyError("a bug")
-    monkeypatch.setitem(demo.demo_data._REAL, "_fetch_world", broken)
+    monkeypatch.setattr(publicmap, "fetch_place", broken)
     with pytest.raises(KeyError):
         c.get(f"/?monitor={ROOF}")
 
@@ -392,7 +428,7 @@ def test_samples_unchanged(demo, monkeypatch):
 def test_monitor_analyze_answers(c):
     """The summary itself is Task 4's; here the read runs at the monitor's place without failing."""
     row = c.get(f"/api/current?monitor={ROOF}").get_json()[0]
-    body = {"format": "read", "outdoor_pm25": row["pm02"], "outdoor_humidity": row["rhum"], "outdoor_temp_c": row["atmp"],
+    body = {"format": "read", "outdoor_pm25": row["pm02_corrected"], "outdoor_humidity": row["rhum"], "outdoor_temp_c": row["atmp"],
             "outdoor_location_id": row["locationId"]}
     resp = c.post(f"/api/analyze?monitor={ROOF}", json=body)
     assert resp.status_code == 200 and resp.get_json()["status"] in ("good", "warn", "bad")
@@ -420,7 +456,7 @@ def model_at(tz, value):
 
 
 def world_with(mid=ROOF, **changes):
-    """The world list with one monitor's row changed."""
+    """The monitors with one monitor's row changed."""
     return [{**m, **changes} if m["locationId"] == mid else m for m in WORLD]
 
 
@@ -432,17 +468,26 @@ def read_of(c, mid=ROOF):
     """What the page posts for a public monitor (its one outdoor row, PM2.5 corrected first, as app.js picks it), and
     the server's answer."""
     row = c.get(f"/api/current?monitor={mid}").get_json()[0]
-    body = {"format": "read", "outdoor_pm25": row.get("pm02_corrected", row["pm02"]), "outdoor_humidity": row["rhum"], "outdoor_temp_c": row["atmp"],
+    body = {"format": "read", "outdoor_pm25": row.get("pm02_corrected", row.get("pm02")), "outdoor_humidity": row["rhum"], "outdoor_temp_c": row["atmp"],
             "outdoor_location_id": row["locationId"], "indoor_location_id": None}
     return c.post(f"/api/analyze?monitor={mid}", json=body).get_json()
 
 
-def test_runner_only(c, net, pinned):
+def by_id(profiles):
+    return {n["id"]: n for n in profiles}
+
+
+def test_the_demos_three_profiles(c, net, pinned):
+    """A public monitor's page shows the samples' three profiles, read as an outdoor-only home's: the toddler waits
+    for an indoor monitor, the sinus profile has only pollen (none for a public monitor), the runner reads the monitor."""
     net["world"], net["model"] = world_with(timestamp=ago(0.1)), model_at("America/New_York", lambda k: 5.0)
     read = read_of(c)
-    assert [n["id"] for n in read["summary"]["profiles"]] == ["runner"]
-    assert [n["id"] for n in read["profiles"]] == ["runner"]
-    assert read["summary"]["profiles"][0]["facts"]["pm_now"] == 4.8   # a fresh reading is the reading now (4.2 raw, 37 % RH)
+    assert [n["id"] for n in read["summary"]["profiles"]] == ["toddler", "sinus", "runner"]
+    assert [n["id"] for n in read["profiles"]] == ["toddler", "sinus", "runner"]
+    s = by_id(read["summary"]["profiles"])
+    assert s["toddler"]["state"] == "Needs an indoor monitor" and s["toddler"]["ok"] is None
+    assert s["sinus"]["state"] == "No reading" and "pollen only" in s["sinus"]["why"]
+    assert s["runner"]["facts"]["pm_now"] == 4.8   # a fresh reading is the reading now (4.2 raw, 37 % RH)
 
 
 def test_monitor_chart_past_is_the_model(c, net, pinned):
@@ -475,7 +520,8 @@ def test_monitor_has_no_road(c, net, demo, pinned):
     pm = next(i for i in read["summary"]["items"] if i["id"] == "pm")
     assert "cause" not in pm["facts"] and pm["ctx"] == "Peak 12 AM · now 5"   # no ", BQE rush" cause (now: 4.8 corrected)
     # at 10 PM a home with a road says "Run tonight or before 7 AM"; without one, the run verdict has no rush to name
-    assert read["profiles"][0]["action"] == "Fine to run" and read["profiles"][0]["why"] == "The air outside is clean."
+    run = by_id(read["profiles"])["runner"]
+    assert run["action"] == "Fine to run" and run["why"] == "The air outside is clean."
 
 
 def test_monitor_pm_timing_names_this_monitor(c, net, pinned):
@@ -488,19 +534,19 @@ def test_monitor_pm_timing_names_this_monitor(c, net, pinned):
     assert "balcony" not in pm["why"] and "your" not in pm["why"] and "scaled" not in pm["why"]
 
 
-@pytest.mark.parametrize("changes", [{"timestamp": ago(3)}, {"timestamp": ago(0.1), "offline": True}])
+@pytest.mark.parametrize("changes", [{"timestamp": ago(3)}, {"timestamp": ago(48)}])   # the map has no offline flag
 def test_stale_public_reading_ignored(c, net, pinned, changes):
     net["world"] = world_with(**changes)
     net["model"] = model_at("America/New_York", lambda k: 30.0 if 1 <= k <= 4 else 5.0)
     read = read_of(c)
     pm = next(i for i in read["summary"]["items"] if i["id"] == "pm")
     assert pm["forecast"] is True and "pm_now" not in pm["facts"]
-    assert read["summary"]["profiles"][0]["facts"]["pm_now"] is None
-    assert read["profiles"][0]["action"] == "No outdoor reading"
+    assert by_id(read["summary"]["profiles"])["runner"]["facts"]["pm_now"] is None
+    assert by_id(read["profiles"])["runner"]["action"] == "No outdoor reading"
 
 
 # ── Real history from AirGradient's public map (Task 5b) ──
-# The map has its own ids: the roof monitor is MAP_ROOF there, found by its name and place.
+# A monitor's id is its id on the map (any id here: the history calls take it as given).
 
 MAP_ROOF = 98000001
 ROOF_MON = publicmap.find(WORLD, ROOF)
@@ -524,25 +570,22 @@ def fake_map(monkeypatch, area=None, history=None):
         if url.endswith("/measures/history"):
             return FakeResponse({"data": (history or {}).get(params["measure"], []), "total": None})
         raise AssertionError(f"unexpected call to {url}")
-    monkeypatch.setattr(publicmap.requests, "get", get)
+    monkeypatch.setattr(sources.requests, "get", get)
     return calls
 
 
-def test_map_id_matches_by_name_then_distance(monkeypatch):
+def test_area_call_asks_one_box_and_keeps_airgradient_monitors(monkeypatch):
     named, other, elsewhere = map_entry(1, "Oak & Elm st", 80), map_entry(2, "Roof two", 20), \
         map_entry(3, "Oak & Elm st", 0, source="OpenAQ")
-    calls = fake_map(monkeypatch, area=[other, named, elsewhere])
-    assert publicmap.map_id(ROOF_MON) == 1   # its name (the world list's has a trailing space), though another is nearer
+    calls = fake_map(monkeypatch, area=[other, named, elsewhere, {"locationId": 4, "dataSource": "AirGradient"}])
+    rows = publicmap.fetch_area(ROOF_MON["latitude"], ROOF_MON["longitude"], 15)
+    assert [r["locationId"] for r in rows] == [2, 1]   # AirGradient's, with a place; the map's order
+    assert rows[0]["pm02_corrected"] == 1 and "pm02" not in rows[0] and rows[0]["publicContributorName"] is None
     (url, params), = calls
-    assert url == f"{publicmap.MAP_API}/measurements/current/area" and params["measure"] == "pm25"
-    assert params["xmin"] == pytest.approx(ROOF_MON["longitude"] - publicmap.MATCH_BOX)
-    assert params["ymax"] == pytest.approx(ROOF_MON["latitude"] + publicmap.MATCH_BOX)
-    fake_map(monkeypatch, area=[other, elsewhere, map_entry(4, "Roof four", 60)])
-    assert publicmap.map_id(ROOF_MON) == 2   # no name matches: the nearest AirGradient entry
-    fake_map(monkeypatch, area=[map_entry(5, "Oak & Elm st", 150), map_entry(6, "Roof six", 120), elsewhere])
-    assert publicmap.map_id(ROOF_MON) is None   # none within MATCH_KM
-    fake_map(monkeypatch, area=[])
-    assert publicmap.map_id(ROOF_MON) is None
+    assert url == f"{publicmap.MAP_API}/measurements/current/area"
+    assert params["measure"] == "pm25" and params["dataSources"] == "AirGradient"
+    assert params["ymax"] - params["ymin"] == pytest.approx(30 / publicmap.KM_PER_DEG, abs=1e-4)
+    assert params["xmin"] < ROOF_MON["longitude"] < params["xmax"]
 
 
 def test_history_rows_are_numbers(monkeypatch):
@@ -579,7 +622,6 @@ def gp_history(value):
 
 def test_monitor_chart_uses_real_history(c, net, demo, pinned):
     net["world"], net["model"] = world_with(timestamp=ago(0.1)), model_at("America/New_York", lambda k: 5.0)
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
     net["history"] = gp_history(lambda k: 2.0 + k / 10)
     tl = read_of(c)["summary"]["timeline"]
     pm, t0, tz = tl["pm"], datetime.fromisoformat(tl["t0"]), ZoneInfo("America/New_York")
@@ -589,8 +631,8 @@ def test_monitor_chart_uses_real_history(c, net, demo, pinned):
     assert pm["past"] == want
     # cached per monitor and range: a second read asks the map nothing
     read_of(c)
-    assert {f"ag:mapid:m{ROOF}", f"ag:maphist:m{ROOF}:24h"} <= set(sources._cache)
-    assert len([u for u in net["calls"] if u.endswith("/measurements/current/area")]) == 1
+    assert f"ag:maphist:m{ROOF}:24h" in sources._cache
+    assert not [u for u in net["calls"] if u.endswith("/measurements/current/area")]   # its id is its map id
     assert len([u for u in net["calls"] if u.endswith("/measures/history")]) == len(publicmap.MAP_MEASURES)
     # the History card's rows: the asked span, the fields it charts
     frm, to = NOW - timedelta(hours=6), NOW
@@ -602,11 +644,10 @@ def test_monitor_chart_uses_real_history(c, net, demo, pinned):
 
 
 @pytest.mark.parametrize("fail", [
-    {"area": 503}, {"area": sources.requests.ConnectionError("down")}, {"history": 404},
-    {"history": sources.requests.Timeout("slow")}, {"area": []}])
+    {"history": 503}, {"history": sources.requests.ConnectionError("down")}, {"history": 404},
+    {"history": sources.requests.Timeout("slow")}, {"history": {}}])
 def test_history_falls_back(c, net, pinned, fail):
     net["world"], net["model"] = world_with(timestamp=ago(0.1)), model_at("America/New_York", lambda k: 5.0)
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
     net["history"] = gp_history(lambda k: 2.0)
     net.update(fail)
     assert c.get(f"/api/history/{ROOF}?monitor={ROOF}").get_json() == []
@@ -616,7 +657,6 @@ def test_history_falls_back(c, net, pinned, fail):
 
 def test_history_bug_still_raises(c, net, monkeypatch):
     """Only a failed fetch falls back; a bug in our code still raises."""
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
     monkeypatch.setattr(publicmap, "history", lambda *a, **k: {}["a bug"])
     with pytest.raises(KeyError):
         c.get(f"/api/history/{ROOF}?monitor={ROOF}")
@@ -679,29 +719,29 @@ def test_summary_is_on_the_corrected_basis(c, net, pinned):
     the chart's past and the forecast's calibration all use the corrected numbers."""
     net["world"] = world_with(timestamp=ago(0.1), pm02=12.0)
     net["model"] = model_at("America/New_York", lambda k: 10.0)
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
     net["history"] = gp_history(lambda k: 4.5)
     read = read_of(c)
-    assert read["summary"]["profiles"][0]["facts"]["pm_now"] == 8.8   # 0.524·12 − 0.0862·37 + 5.75
+    assert by_id(read["summary"]["profiles"])["runner"]["facts"]["pm_now"] == 8.8   # 0.524·12 − 0.0862·37 + 5.75
     pm = read["summary"]["timeline"]["pm"]
     assert "source" not in pm and {v for _, v in pm["past"]} == {4.5}
     k = (4.5 + .5) / (10.0 + .5)   # calibrate_forecast's median ratio against the corrected past
     assert pm["fc"] and {v for _, v in pm["fc"]} == {round(10.0 * k, 1)}
 
 
-def test_each_range_gets_its_own_cache_key(c, net, demo):
-    """The route builds from = now − h a moment before the range is picked: a few seconds late still gets h."""
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
+def test_ranges_up_to_a_day_share_one_cache_key(c, net, demo):
+    """The route builds from = now − h a moment before the range is picked: a few seconds late still gets h. The
+    ranges up to a day are cut from one day of history (one map fetch for all three); the week has its own."""
     net["history"] = gp_history(lambda k: 2.0)
     for h in (1, 6, 24, 168):
-        sources._cache.pop(f"ag:maphist:m{ROOF}:{h}h", None)
+        for k in [k for k in sources._cache if k.startswith("ag:maphist:")]:
+            sources._cache.pop(k, None)
         now = datetime.now(timezone.utc)
         frm = now - timedelta(hours=h, seconds=30)
         before = {k for k in sources._cache if k.startswith("ag:maphist:")}
         resp = c.get(f"/api/history/{ROOF}?monitor={ROOF}&from={frm.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                      f"&to={now.strftime('%Y-%m-%dT%H:%M:%SZ')}")
         assert resp.status_code == 200
-        assert {k for k in sources._cache if k.startswith("ag:maphist:")} - before == {f"ag:maphist:m{ROOF}:{h}h"}, h
+        assert {k for k in sources._cache if k.startswith("ag:maphist:")} - before == {f"ag:maphist:m{ROOF}:{24 if h <= 24 else h}h"}, h
 
 
 def test_map_calls_wait_briefly(c, net, demo, monkeypatch):
@@ -712,21 +752,20 @@ def test_map_calls_wait_briefly(c, net, demo, monkeypatch):
         seen[key] = kw.get("wait")
         return real(key, fetch, **kw)
     monkeypatch.setitem(demo.demo_data._REAL, "cached", spy)
-    net["area"] = [map_entry(MAP_ROOF, "Oak & Elm st", 10)]
     c.get(f"/api/history/{ROOF}?monitor={ROOF}")
-    assert seen[f"ag:mapid:m{ROOF}"] == seen[f"ag:maphist:m{ROOF}:24h"] == publicmap.MAP_WAIT
+    assert seen[f"ag:maphist:m{ROOF}:24h"] == publicmap.MAP_WAIT
 
 
 def test_monitor_upstreams_keep_to_the_request_budget(c, net, demo, monkeypatch):
     """In the demo a monitor's upstreams run one after another: each waits MONITOR_WAIT at most, and all of a request's
-    waits fit in REQUEST_BUDGET (Vercel stops it at 30 s). Here every upstream but the world list times out after
-    its whole wait: the page still answers, without them, inside the budget."""
+    waits fit in REQUEST_BUDGET (Vercel stops it at 30 s). Here every upstream but the monitor's place and reading
+    times out after its whole wait: the page still answers, without them, inside the budget."""
     from demo import data as demo_data
     clock, waits = [0.0], {}
     real = demo_data._REAL["cached"]
 
     def slow(key, fetch, **kw):
-        if key == "ag:world":
+        if key.startswith(("ag:place:", "ag:now:")):
             return real(key, fetch, **kw)
         waits[key] = kw["wait"]
         clock[0] += kw["wait"]   # it took its whole wait, then timed out

@@ -1,7 +1,7 @@
 # Security
 
 To report a vulnerability, use GitHub's private reporting:
-https://github.com/sguyon/home-air-quality/security/advisories/new
+https://github.com/sguyon/homeair/security/advisories/new
 
 Please don't open a public issue for a security problem.
 

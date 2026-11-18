@@ -32,8 +32,8 @@ TONIGHT_FROM = 18                  # hour: a chart starting at or after 6 PM is 
 #   50 ≤ raw < 210:  0.786·raw − 0.0862·RH + 5.75
 #   210 ≤ raw < 260: blends to the high form (f = raw/50 − 21/5)
 #   raw ≥ 260:       2.966 + 0.69·raw + 8.84e-4·raw²
-# never below 0; a raw 0 stays 0. The world list gives the raw pm02; a home's API answer has pm02_corrected. Used for
-# the neighbors (server._fetch_nearby) and the demo's public monitors (demo/public.py), so every PM2.5 shares one basis.
+# never below 0; a raw 0 stays 0. AirGradient's map and a home's API answer give the corrected value already; this
+# corrects a row that has only the raw pm02 (the demo's made-up samples), so every PM2.5 shares one basis.
 EPA_BANDS = (30, 50, 210, 260)   # µg/m³ raw: where the formula's pieces meet
 EPA_SLOPE_LOW, EPA_SLOPE_MID, EPA_SLOPE_HIGH = 0.524, 0.786, 0.69   # the raw PM2.5 slope below 30, 50–210, from 260
 EPA_RH = 0.0862   # µg/m³ per % relative humidity, subtracted

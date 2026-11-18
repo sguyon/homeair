@@ -30,7 +30,7 @@ def test_dev_looking_address_is_not_special(client, monkeypatch):
 def test_app_env_preview(client, monkeypatch):
     monkeypatch.setenv("APP_ENV", "preview")
     html = page(client, "someone.up.railway.app").get_data(as_text=True)
-    assert "<title>PREVIEW · Home Air Quality</title>" in html
+    assert "<title>PREVIEW · Home Air</title>" in html
     assert app_env(html) == '"preview"'
 
 

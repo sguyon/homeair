@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo
 from flask import request
 import requests
 
+import budgets
 import publicmap
+import upstream
 import summary as summary_rules
 from config import Here, airgradient_map, env_key
 
@@ -37,11 +39,11 @@ log = logging.getLogger("aq.cache")
 _REFRESH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cache")   # background refreshes of stale cache entries
 _cache, _inflight, _cache_lock = {}, {}, threading.Lock()
 
-API_BASE = "https://api.airgradient.com/public/api/v1"   # AirGradient's public API: the monitors and the world map
+API_BASE = "https://api.airgradient.com/public/api/v1"   # AirGradient's public API: the home's monitors
 # A stand-in for AirGradient's API (a test server with made-up monitors), for simulated setups; unset everywhere else
 API_BASE = os.environ.get("AIRGRADIENT_API_BASE", "").rstrip("/") or API_BASE
 NEARBY_RADIUS_KM = 15   # km: public monitors closer than this show as Nearby monitors (the source note says 15 km)
-MAP_LINK_DECIMALS = 4   # a neighbor's link on AirGradient's map: its coordinates to about 10 m (the list gives 14 digits)
+MAP_LINK_DECIMALS = 4   # a neighbor's link on AirGradient's map: its coordinates to about 10 m (the map gives more digits)
 SECRET_ENV = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY")   # keys that ride in request URLs, so in error text
 # NOAA's Hazard Mapping System: the day's smoke polygons, one KML file per day
 HMS_KML = "https://satepsanone.nesdis.noaa.gov/pub/FIRE/web/HMS/Smoke_Polygons/KML/{y}/{m}/hms_smoke{d}.kml"
@@ -52,23 +54,49 @@ SMOKE_RANK = {"Light": 1, "Medium": 2, "Heavy": 3}   # NOAA HMS densities, light
 # (gunicorn) never sets the variable and stores nothing.
 DEV_CACHE_DIR = Path(__file__).parent / ".cache"
 HIST_KEEP = ("timestamp", "pm02", "pm02_corrected", "rco2", "rco2_corrected", "rhum", "rhum_corrected")   # history fields the charts and rules read
-# the History ranges (hours) and how long each is cached: (fresh, then served stale while refreshing), in seconds
-HIST_TTL = {1: (60, 240), 6: (60, 240), 24: (60, 240), 168: (300, 1800)}
+# ── How often AirGradient is asked (docs/api-usage.md) ──
+# The monitors' readings are fetched at most once per REFRESH_SECONDS, shared by every open tab and visitor: a page
+# reads the server's cache, so the calls grow with homes, not with people looking. Nothing is fetched while no one has
+# the app open. AirGradient's history comes in 5-minute buckets, so 5 minutes is as fresh as a chart can get; a Wi-Fi
+# monitor posts every minute, which is why REFRESH_FLOOR_SECONDS (and the Refresh button's floor) is one minute.
+REFRESH_FLOOR_SECONDS = 60
+
+
+def refresh_seconds(env=os.environ):
+    """AIRGRADIENT_REFRESH_SECONDS (default 300), never under REFRESH_FLOOR_SECONDS; junk reads as the default."""
+    try:
+        value = int(env.get("AIRGRADIENT_REFRESH_SECONDS") or 300)
+    except ValueError:
+        value = 300
+    return max(REFRESH_FLOOR_SECONDS, value)
+
+
+REFRESH_SECONDS = refresh_seconds()
+# the History ranges (hours) and how long each is cached: (fresh, then served stale while refreshing), in seconds.
+# 1, 6 and 24 h are cut from one day of rows per monitor (HIST_DAY), extended with only the readings since its newest
+# one; the week is asked again at most hourly.
+HIST_TTL = {1: (REFRESH_SECONDS, 0), 6: (REFRESH_SECONDS, 0), 24: (REFRESH_SECONDS, 0), 168: (3600, 3600)}
+HIST_DAY = 24   # h: the rows kept per monitor for the ranges up to a day
+HIST_OVERLAP = timedelta(minutes=10)   # an extension starts this far before the newest row: its bucket may have grown
 HIST_SLACK = timedelta(minutes=2)   # how far a History range's start may sit before its hours and still read as that range
-# The world list's cache (s): fresh 2 min (as the neighborhood always was), then served stale up to 15 min while it
-# refreshes, kept 1 h when AirGradient fails; a request waits up to 20 s for it (it's ~1.5 MB).
-WORLD_CACHE = {"ttl": 120, "swr": 900, "keep": 3600, "wait": 20}
+# Public monitors near the home come from AirGradient's map, one area request (publicmap.fetch_area, about 6 KB) that
+# lists the monitors within AREA_SEARCH_KM with their PM2.5 now. It is asked only when something needs it (the Nearby
+# card shown, an indoor-only home's area estimate) and at most every NEARBY_REFRESH_SECONDS (15 min, the Refresh button
+# included): nearby monitors are context, not the home's own readings. Nothing downloads every monitor in the world.
+NEARBY_REFRESH_SECONDS = 15 * 60
+AREA_SEARCH_KM = max(NEARBY_RADIUS_KM, publicmap.AREA_KM) + 1   # km each way: one box for Nearby and the area estimate
+AREA_CACHE = {"ttl": NEARBY_REFRESH_SECONDS, "keep": 3600, "force_floor": NEARBY_REFRESH_SECONDS, "wait": publicmap.MAP_WAIT}
 # ── An indoor-only home's outdoor PM2.5 ([sources] outdoor_from) ────────
 # A public monitor's id (its reading and its history on AirGradient's map, like an own outdoor monitor), "area" (the
 # public monitors around tune the model) or "model" (Open-Meteo's alone). Chosen once at setup; when the chosen monitor
 # isn't reporting, the area stands in (fallback), and the model when the area can't. publicmap.py has the radii.
 AREA_MAX_MONITORS = 5   # the nearest area monitors read: a median over 5 shrugs off one bad sensor, in few map requests
 SOURCE_HOURS = 24   # h: the history a source is read over, the day calibrate_forecast compares the model with
-# s: the most one request waits on the map in all for its source. Every monitor's map id is asked at once, then every
-# history at once; past the budget, what isn't cached yet goes on in the background for the next request
+# s: the most one request waits on the map in all for its source; past the budget, what isn't cached yet goes on in
+# the background for the next request
 SOURCE_BUDGET = 10
-# a monitor's map id in the cache (s): it doesn't change, so a stale one is served while it refreshes, for a day more
-MAP_ID_CACHE = {"ttl": publicmap.MAP_ID_TTL, "swr": publicmap.MAP_ID_TTL, "keep": publicmap.MAP_ID_TTL}
+# a chosen monitor's name and place (s): they rarely change, so a stale one is served while it refreshes, for a day more
+PLACE_CACHE = {"ttl": publicmap.LOCATION_TTL, "swr": publicmap.LOCATION_TTL, "keep": 7 * 24 * 3600}
 # a source's day of history for the summary and the area (s): fresh as publicmap.HISTORY_TTL, then served at once
 # while it refreshes for up to 3 h (a day's ratio barely moves in that time), so a warm-ish cache never makes a
 # request wait on the map; kept 3 h when the map fails
@@ -79,7 +107,7 @@ CHART_HIST_CACHE = {"ttl": publicmap.HISTORY_TTL, "swr": 1800, "keep": 3 * 3600}
 SOURCE_ERRORS = (requests.RequestException, RuntimeError, TimeoutError)
 # the facts the page and the summary get about a source; the row and the history stay on the server
 SOURCE_FACTS = ("kind", "id", "name", "street", "contributor", "url", "distance_km", "area_count", "fallback")
-_SOURCE_SEEN = {}   # public monitor id → its last row in the world list, to name it once it drops out of the list
+_SOURCE_SEEN = {}   # public monitor id → its last row, to name it while the map doesn't answer
 
 
 def _call_with_deadline(fn, *args, deadline_s=5, default=None, **kwargs):
@@ -94,6 +122,8 @@ def _call_with_deadline(fn, *args, deadline_s=5, default=None, **kwargs):
     except FuturesTimeout:
         fut.cancel()
         return default
+    except budgets.BudgetExceeded:   # over budget or paused: no call was made, so no failure to remember
+        raise
     except Exception:
         return default
 
@@ -102,6 +132,8 @@ def _cache_run(key, fetch):
     t0 = time.time()
     try:
         value = fetch()
+    except budgets.BudgetExceeded:   # no call was made; budgets.py logged the pause or the cap once
+        raise
     except Exception as e:
         log.warning("upstream %s failed after %.2fs: %s", key, time.time() - t0, _redact(e)[:160])
         raise
@@ -143,6 +175,9 @@ def cached(key, fetch, ttl, swr=0, keep=0, force=False, force_floor=15, wait=15)
         if entry and age < keep:
             return entry[1], {"state": "fallback", "age": age}
         raise
+
+
+_shared_cached = cached   # the server's own cache, even where the demo replaces `cached` for its seams (area_monitors)
 
 
 def _force():
@@ -195,7 +230,8 @@ def validate_token(token):
     """One uncached call, without changing the running credential or exposing upstream bodies/errors.
     None: AirGradient refused the token. A list (maybe empty): accepted, with the account's monitors as
     {"name": ..., "kind": "indoor" | "outdoor" | None}, for the page's "connected" card."""
-    response = requests.get(f"{API_BASE}/locations/measures/current", params={"token": token}, timeout=10, allow_redirects=False)
+    response = requests.get(f"{API_BASE}/locations/measures/current", params={"token": token}, timeout=10, allow_redirects=False,
+                            headers=upstream.headers())
     if response.status_code in (400, 401, 403):
         return None
     response.raise_for_status()
@@ -217,24 +253,32 @@ def monitor_kind(row):
     return "outdoor" if model.startswith(publicmap.OUTDOOR_PREFIX) else "indoor" if model.startswith("I-") else None
 
 
+def api_budget(path):
+    """The budget an AirGradient token call counts against: history ("/measures/past") or current readings."""
+    return "ag_history" if path.rstrip("/").endswith("/measures/past") else "ag_current"
+
+
 def api_get(path, params=None):
     p = {"token": runtime.TOKEN}
     if params:
         p.update(params)
     try:
-        r = requests.get(f"{API_BASE}{path}", params=p, timeout=10)
+        r = upstream.get(f"{API_BASE}{path}", api_budget(path), params=p, timeout=10)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code
+        if status == 401:   # a refused token pauses both token budgets: asking again won't help until a new token is saved
+            budgets.fail("ag_current", budgets.AUTH_PAUSE_S)
+            budgets.fail("ag_history", budgets.AUTH_PAUSE_S)
         raise RuntimeError(_redact(f"AirGradient API returned {status}: {e.response.text[:300]}")) from None
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"AirGradient API unreachable ({type(e).__name__})") from None
 
 
 def _fetch_weather(here):
-    r = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
+    r = upstream.get(
+        "https://api.open-meteo.com/v1/forecast", "weather",
         params={
             "latitude": here.lat,
             "longitude": here.lon,
@@ -275,8 +319,8 @@ def no_weather():
 
 def _fetch_air_forecast(here):
     """Outdoor PM2.5 for the next 24 hours from Open-Meteo's air-quality model (CAMS, free, no key)."""
-    r = requests.get(
-        "https://air-quality-api.open-meteo.com/v1/air-quality",
+    r = upstream.get(
+        "https://air-quality-api.open-meteo.com/v1/air-quality", "air_quality",
         params={"latitude": here.lat, "longitude": here.lon, "hourly": "pm2_5",
                 "forecast_hours": 24, "past_hours": 24,   # the past day calibrates the forecast to the backyard monitor
                 "timezone": here.tz},
@@ -341,7 +385,7 @@ def _fetch_smoke():
         day = now - timedelta(days=back)
         url = HMS_KML.format(y=day.strftime("%Y"), m=day.strftime("%m"), d=day.strftime("%Y%m%d"))
         try:
-            r = requests.get(url, timeout=12)
+            r = upstream.get(url, "smoke", timeout=12)
         except requests.exceptions.RequestException:
             continue
         if r.status_code != 200 or "<Placemark>" not in r.text:
@@ -376,8 +420,8 @@ def get_smoke_data():
 
 
 def _fetch_pollen_raw(lat, lon, api_key):
-    r = requests.get(
-        "https://pollen.googleapis.com/v1/forecast:lookup",
+    r = upstream.get(
+        "https://pollen.googleapis.com/v1/forecast:lookup", "pollen", counted=True,
         params={
             "key": api_key,
             "location.latitude": lat,
@@ -410,9 +454,11 @@ def _fetch_pollen():
         return {"today": [], "tomorrow": []}
     # Hard deadline: DNS stalls on pollen.googleapis.com have been observed at ~30s
     # even with requests timeout set — that blocked the whole /api/context response.
+    budgets.spend("pollen")   # here, not in the deadline's thread: a paused or spent budget raises to the caller
     data = _call_with_deadline(_fetch_pollen_raw, runtime.HOME_LAT, runtime.HOME_LON, api_key, deadline_s=5, default=None)
     daily = (data or {}).get("dailyInfo") or []
     if not daily:
+        budgets.fail("pollen", budgets.POLLEN_PAUSE_S)   # don't ask again for 10 minutes
         raise RuntimeError("Google Pollen did not answer")
     return {"today": _pollen_types(daily[0]), "tomorrow": _pollen_types(daily[1]) if len(daily) > 1 else []}
 
@@ -512,40 +558,114 @@ def _iso(ts):
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
-def history_rows(location_id, hours, force=False):
-    """The last `hours` of readings for one monitor, trimmed to the fields the page and the summary use."""
+def _row_time(row):
+    try:
+        return _iso(str(row["timestamp"]))
+    except (KeyError, ValueError):
+        return None
+
+
+def _past(location_id, frm, to):
+    rows = api_get(f"/locations/{int(location_id)}/measures/past", {
+        "from": frm.strftime("%Y-%m-%dT%H:%M:%SZ"), "to": to.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    return [{k: r.get(k) for k in HIST_KEEP if r.get(k) is not None} for r in rows or [] if isinstance(r, dict)]
+
+
+def merge_rows(old, new, start):
+    """old and new rows by timestamp (a new row replaces an old one at the same time), oldest first, from `start` on."""
+    by_time = {}
+    for row in list(old) + list(new):
+        t = _row_time(row)
+        if t is not None and t >= start:
+            by_time[t] = row
+    return [by_time[t] for t in sorted(by_time)]
+
+
+def _day_fetch(location_id, key):
+    """A monitor's last HIST_DAY hours: the cached day extended with the readings since its newest row (one small
+    request), or the whole day when there's nothing cached yet or the cached day is too old to extend."""
     def fetch():
         now = datetime.now(timezone.utc)
-        rows = api_get(f"/locations/{int(location_id)}/measures/past", {
-            "from": (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ"), "to": now.strftime("%Y-%m-%dT%H:%M:%SZ")})
-        return [{k: r.get(k) for k in HIST_KEEP if r.get(k) is not None} for r in rows or [] if isinstance(r, dict)]
-    ttl, swr = HIST_TTL.get(hours, (60, 240))
-    return cached(f"ag:hist:{int(location_id)}:{hours}h", fetch, ttl=ttl, swr=swr, keep=3600, force=force)
+        start = now - timedelta(hours=HIST_DAY)
+        with _cache_lock:
+            entry = _cache.get(key)
+        old = entry[1] if entry and isinstance(entry[1], list) else []
+        times = [t for t in map(_row_time, old) if t is not None]
+        newest = max(times) if times else None
+        if newest is None or newest < start:
+            return _past(location_id, start, now)
+        return merge_rows(old, _past(location_id, newest - HIST_OVERLAP, now), start)
+    return fetch
 
 
-def _fetch_world():
-    """Every public AirGradient monitor in the world, as the API lists them. Cached by the caller, in the request
-    thread: a fetch that cached() runs in the pool must never call cached() itself (it would wait on its own pool)."""
-    return publicmap.fetch_world()
+def history_rows(location_id, hours, force=False):
+    """The last `hours` of readings for one monitor, trimmed to the fields the page and the summary use. Up to a day,
+    they're cut from the monitor's cached day (_day_fetch); longer ranges are asked for as a whole."""
+    ttl, swr = HIST_TTL.get(hours, (REFRESH_SECONDS, 0))
+    if hours <= HIST_DAY:
+        key = f"ag:hist:{int(location_id)}:{HIST_DAY}h"
+        rows, info = cached(key, _day_fetch(location_id, key), ttl=ttl, swr=swr, keep=3600, force=force,
+                            force_floor=REFRESH_FLOOR_SECONDS)
+        if hours < HIST_DAY:
+            start = datetime.now(timezone.utc) - timedelta(hours=hours)
+            rows = [r for r in rows if (_row_time(r) or start) >= start]
+        return rows, info
+
+    def fetch():
+        now = datetime.now(timezone.utc)
+        return _past(location_id, now - timedelta(hours=hours), now)
+    return cached(f"ag:hist:{int(location_id)}:{hours}h", fetch, ttl=ttl, swr=swr, keep=3600, force=force,
+                  force_floor=REFRESH_FLOOR_SECONDS)
 
 
-def _fetch_nearby(world, here=None):
-    """The monitors of the world list within NEARBY_RADIUS_KM of a place (the home by default), nearest first.
-    A plain filter: no cache, no network. Each gets its distance, its link on AirGradient's map and, when it has the
-    humidity to correct with, pm02_corrected: the world list gives the raw pm02, and the page compares neighbors with
-    a home's own monitors on the corrected basis (summary.corrected_pm). The raw pm02 stays as it came."""
-    here = here or home_here()
-    nearby = []
-    for loc in world:
-        lat, lon = loc.get("latitude"), loc.get("longitude")
-        if lat and lon:
+def current_rows(force=False):
+    """Every monitor's current reading on the home's token: one request for all of them, at most once per
+    REFRESH_SECONDS (the Refresh button: once a minute at most), shared by every tab."""
+    return cached("ag:current", lambda: api_get("/locations/measures/current"), ttl=REFRESH_SECONDS, keep=3600,
+                  force=force, force_floor=REFRESH_FLOOR_SECONDS)
+
+
+def area_monitors(lat, lon):
+    """The public monitors within AREA_SEARCH_KM of a point with their PM2.5 now (publicmap.fetch_area), from the
+    server's own cache: one map request per place (rounded to about 1 km) every NEARBY_REFRESH_SECONDS at most.
+    Raises when the map doesn't answer and nothing recent is cached."""
+    lat, lon = round(lat, 2), round(lon, 2)
+    value, _ = _shared_cached(f"ag:area:{lat:.2f},{lon:.2f}", lambda: publicmap.fetch_area(lat, lon, AREA_SEARCH_KM),
+                              force=_force(), **AREA_CACHE)
+    return value or []
+
+
+def _within_km(rows, here, km):
+    """The rows within `km` of a place, nearest first, as (distance km, row)."""
+    out = []
+    for loc in rows or []:
+        lat, lon = (loc.get("latitude"), loc.get("longitude")) if isinstance(loc, dict) else (None, None)
+        if lat is not None and lon is not None:
             d = haversine_km(here.lat, here.lon, lat, lon)
-            if d < NEARBY_RADIUS_KM:
-                pm = summary_rules.corrected_pm(loc.get("pm02"), loc.get("rhum"))
-                link = airgradient_map(round(lat, MAP_LINK_DECIMALS), round(lon, MAP_LINK_DECIMALS))
-                nearby.append({**loc, "distance_km": round(d, 1), "map_url": link,   # a copy: the cached list stays as it came
-                               **({"pm02_corrected": pm} if pm is not None else {})})
-    nearby.sort(key=lambda x: x["distance_km"])
+            if d < km:
+                out.append((d, loc))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _fetch_nearby(here=None, rows=None, skip_own=True):
+    """The public monitors within NEARBY_RADIUS_KM of a place (the home by default), nearest first, from the area
+    request (area_monitors) unless `rows` are given. With skip_own, a monitor within publicmap.OWN_KM of the place is
+    the home's own outdoor monitor and isn't listed (the demo's public monitor lists itself first). Each gets its distance, its link on AirGradient's map and pm02_corrected (the map's, or
+    the raw pm02 corrected when it has the humidity): the page compares neighbors with a home's own monitors on the
+    corrected basis (summary.corrected_pm). The map gives no owner's name for most monitors; a row then has none."""
+    here = here or home_here()
+    rows = area_monitors(here.lat, here.lon) if rows is None else rows
+    nearby = []
+    for d, loc in _within_km(rows, here, NEARBY_RADIUS_KM):   # copies: the cached list stays as it came
+        if skip_own and d < publicmap.OWN_KM:
+            continue
+        lat, lon = loc["latitude"], loc["longitude"]
+        pm = loc.get("pm02_corrected")
+        pm = pm if pm is not None else summary_rules.corrected_pm(loc.get("pm02"), loc.get("rhum"))
+        link = airgradient_map(round(lat, MAP_LINK_DECIMALS), round(lon, MAP_LINK_DECIMALS))
+        nearby.append({**loc, "distance_km": round(d, 1), "map_url": link,
+                       **({"pm02_corrected": pm} if pm is not None else {})})
     return nearby
 
 
@@ -555,15 +675,6 @@ def outdoor_from():
     if runtime.CFG is None or runtime.CFG.demo or runtime.CFG.place is None or runtime.CFG.place.outdoor is not None:
         return None
     return runtime.CFG.outdoor_from
-
-
-def _world_list():
-    """The world list ("ag:world", fetched in the request thread), or None when AirGradient doesn't answer."""
-    try:
-        world, _ = cached("ag:world", _fetch_world, force=_force(), **WORLD_CACHE)
-        return world
-    except SOURCE_ERRORS:
-        return None
 
 
 def _map_start(key, fetch, **kw):
@@ -585,19 +696,16 @@ def _map_wait(key, fetch, deadline, **kw):
 
 
 def source_histories(mons, hours, deadline, measures=publicmap.MAP_MEASURES, cache=SOURCE_HIST_CACHE):
-    """Each public monitor's last `hours` on AirGradient's map as /api/history rows, oldest first; [] for one the map
-    has no entry for or that didn't answer in time. Through the cache, in the request thread, under keys that carry
-    each monitor's id (and the measures, when not all of them): every map id is asked at once, then every history at
-    once, and the waits share one deadline, so five monitors take about as long as one."""
+    """Each public monitor's last `hours` on AirGradient's map as /api/history rows, oldest first; [] for one without
+    a map id or that didn't answer in time. Through the cache, in the request thread, under keys that carry each
+    monitor's map id (and the measures, when not all of them): every history is asked at once and the waits share one
+    deadline, so five monitors take about as long as one."""
     tag = "" if measures is publicmap.MAP_MEASURES else ":" + ",".join(measures)
-    id_jobs = [(f"src:mapid:{m['locationId']}", lambda m=m: publicmap.map_id(m)) for m in mons]
-    for key, fetch in id_jobs:
-        _map_start(key, fetch, **MAP_ID_CACHE)
     hist_jobs = []
-    for m, (key, fetch) in zip(mons, id_jobs):
-        mid = _map_wait(key, fetch, deadline, **MAP_ID_CACHE)
-        hist_jobs.append(None if mid is None else (f"src:maphist:{m['locationId']}:{hours}h{tag}",
-                                                   lambda mid=mid: publicmap.history(mid, hours, measures=measures)))
+    for m in mons:
+        mid = m.get("mapId")
+        hist_jobs.append(None if not isinstance(mid, int) else (f"src:maphist:{mid}:{hours}h{tag}",
+                                                                lambda mid=mid: publicmap.history(mid, hours, measures=measures)))
     for job in filter(None, hist_jobs):
         _map_start(*job, **cache)
     return [[dict(r) for r in (_map_wait(*job, deadline, **cache) or [])] if job else [] for job in hist_jobs]
@@ -638,12 +746,36 @@ def _monitor_facts(mon):
             "distance_km": round(publicmap.km_between(runtime.HOME_LAT, runtime.HOME_LON, mon["latitude"], mon["longitude"]), 1)}
 
 
-def _area_source(world, now, deadline):
+def public_monitor(map_id, deadline):
+    """The public monitor with this map id as a row, with its reading now: its name and place (PLACE_CACHE, a day) and
+    its measures (every REFRESH_SECONDS, like an own monitor), both asked at once. {} when the map has no such monitor
+    (gone, or not an AirGradient one), None when it didn't answer in time."""
+    place_job = (f"src:place:{map_id}", lambda: publicmap.fetch_place(map_id))
+    now_job = (f"src:now:{map_id}", lambda: publicmap.fetch_now(map_id))
+    now_cache = {"ttl": REFRESH_SECONDS, "keep": 3600, "force": _force(), "force_floor": REFRESH_FLOOR_SECONDS}
+    _map_start(*place_job, **PLACE_CACHE)
+    _map_start(*now_job, **now_cache)
+    place = _map_wait(*place_job, deadline, **PLACE_CACHE)
+    now = _map_wait(*now_job, deadline, **now_cache)
+    if place is None:
+        return None
+    try:
+        return publicmap.monitor_row(place, now) if place else {}
+    except RuntimeError:
+        return {}
+
+
+def _area_source(now, deadline):
     """The area estimate: the nearest AREA_MAX_MONITORS reporting outdoor monitors within AREA_KM, each one's hourly
     PM2.5 over the last day, their median per hour, and its median ratio to the model (calibrate_forecast's factor:
     the median of a per-hour median ratio is the ratio of the per-hour median, as the ratio is linear in the value).
     The model instead with fewer than AREA_MIN_MONITORS with history, or too few hours to compare."""
-    near = [m for _, m in publicmap.within(world, runtime.HOME_LAT, runtime.HOME_LON, publicmap.AREA_KM, now)][:AREA_MAX_MONITORS]
+    # the area request lists the monitors around with their reading now; the reporting ones are kept (publicmap.within)
+    try:
+        rows = area_monitors(runtime.HOME_LAT, runtime.HOME_LON)
+    except SOURCE_ERRORS:
+        return _source("model")
+    near = [m for _, m in publicmap.within(rows, runtime.HOME_LAT, runtime.HOME_LON, publicmap.AREA_KM, now)][:AREA_MAX_MONITORS]
     series = []
     for rows in source_histories(near, SOURCE_HOURS, deadline, measures=publicmap.PM_ONLY):
         hourly = {}
@@ -673,7 +805,7 @@ def outdoor_source(now=None, with_history=True):
     monitor's, kept when it falls back), "row" (its reading, with pm02_corrected; kind monitor only), "history" (its
     /api/history rows over SOURCE_HOURS, or the area's hourly medians), "area_count" (area monitors used),
     "area_factor" (the area's ratio to the model), "fallback" (why the chosen monitor's reading isn't used: "monitor",
-    it isn't reporting; "list", AirGradient's world list didn't answer, so whether it reports is unknown; else False)}.
+    it isn't reporting; "list", AirGradient's map didn't answer, so whether it reports is unknown; else False)}.
     with_history=False skips a public monitor's own history (/api/current shows only its reading); the area still reads
     its monitors', as they decide whether it is "area" or "model".
     Facts only: the page and phrases.py word them. Never raises for an upstream: monitor → area → model."""
@@ -683,20 +815,19 @@ def outdoor_source(now=None, with_history=True):
     if of == "model":
         return _source("model")
     now = now or local_now()
-    world = _world_list()
-    deadline = time.monotonic() + SOURCE_BUDGET
+    deadline = time.monotonic() + SOURCE_BUDGET   # the monitors' readings now and their histories, in all
     about, fallback = {}, False
-    if isinstance(of, int):
-        mon = publicmap.find(world, of)
-        if mon is not None:
+    if isinstance(of, int):   # a public monitor's id on AirGradient's map, chosen at setup: read alone, never searched
+        mon = public_monitor(of, deadline)
+        if mon:
             _SOURCE_SEEN[of] = mon
         known = mon or _SOURCE_SEEN.get(of)
         about = _monitor_facts(known) if known else {"id": of}
-        if mon is not None and outdoor_current(mon, now):
+        if mon and outdoor_current(mon, now):
             return _source("monitor", **about, row=publicmap.reading_row(mon),
                            history=source_history(mon, SOURCE_HOURS, deadline) if with_history else [])
-        fallback = "list" if world is None else "monitor"
-    src = _area_source(world, now, deadline) if world is not None else _source("model")
+        fallback = "list" if mon is None else "monitor"
+    src = _area_source(now, deadline)
     return {**src, **about, "fallback": fallback}
 
 
@@ -715,11 +846,11 @@ def source_monitor(src):
 
 def source_history_rows(location_id, frm, to):
     """The chosen public monitor's rows between frm and to (UTC datetimes) from AirGradient's map, for /api/history:
-    from the shortest History range (HIST_TTL's hours) that reaches back to frm, the longest at most. [] when it isn't
-    in the world list (nor seen since start) or the map doesn't answer."""
-    mon = publicmap.find(_world_list(), location_id) or _SOURCE_SEEN.get(location_id)
-    if mon is None:
+    from the shortest History range (HIST_TTL's hours) that reaches back to frm, the longest at most. [] for any other
+    id, or when the map doesn't answer."""
+    if location_id != outdoor_from() or not isinstance(location_id, int):
         return []
+    mon = {"locationId": location_id, "mapId": location_id}
     ranges = sorted(HIST_TTL)
     back = (datetime.now(timezone.utc) - frm - HIST_SLACK).total_seconds() / 3600
     hours = next((h for h in ranges if h >= back), ranges[-1])

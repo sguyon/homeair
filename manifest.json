@@ -1,6 +1,6 @@
 {
-  "name": "Home Air Quality",
-  "short_name": "Air Quality",
+  "name": "Home Air",
+  "short_name": "Home Air",
   "description": "Your home's indoor and outdoor air, with a summary written for your household",
   "start_url": "/",
   "display": "standalone",

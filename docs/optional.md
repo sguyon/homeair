@@ -17,7 +17,7 @@ The key comes from Google's Pollen API. It needs a Google Cloud project with bil
 
    ```bash
    gcloud services enable pollen.googleapis.com apikeys.googleapis.com
-   gcloud services api-keys create --key-id=home-air-pollen --display-name="Home Air Quality pollen" \
+   gcloud services api-keys create --key-id=home-air-pollen --display-name="Home Air pollen" \
      --api-target=service=pollen.googleapis.com >/dev/null 2>&1
    gcloud services api-keys describe home-air-pollen --format='value(displayName)'
    K="$(gcloud services api-keys get-key-string home-air-pollen --format='value(keyString)')" \

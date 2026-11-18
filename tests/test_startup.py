@@ -94,6 +94,7 @@ def test_dotenv_skips_lines_without_a_key():
     assert server_module.parse_dotenv("=x\nexport =y\n  = z\nA=1\n") == {"A": "1"}
 
 
+@pytest.mark.xdist_group("app-pid")   # runs server.py, which writes the repo's app.pid: same worker as test_autostart's pid test
 def test_main_binds_localhost_unless_host_is_set(monkeypatch, capsys):
     import runpy
     import flask
@@ -106,7 +107,7 @@ def test_main_binds_localhost_unless_host_is_set(monkeypatch, capsys):
     monkeypatch.setenv("HOST", "0.0.0.0")
     runpy.run_path(path, run_name="__main__")
     assert [c["host"] for c in calls] == ["127.0.0.1", "0.0.0.0"] and calls[0]["port"] == 5599
-    assert "Home Air Quality → http://localhost:5599" in capsys.readouterr().out
+    assert "Home Air → http://localhost:5599" in capsys.readouterr().out
 
 
 def test_expired_token_is_not_no_token(reloaded, monkeypatch):

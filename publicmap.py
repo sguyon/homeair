@@ -1,32 +1,34 @@
-"""AirGradient's public monitors, for any home or the demo: which monitors of the world list are outdoor, the nearest
-ones, a monitor's place name, its reading row, and its history from AirGradient's public map backend.
+"""AirGradient's public monitors, for any home or the demo: the monitors in an area, the nearest ones, a monitor's place
+name, its reading row, and its history, all from AirGradient's public map backend (map.airgradient.com, open source:
+https://github.com/airgradienthq/airgradient-map), with no token.
 
-Pure functions over the world list (GET /world/locations/measures/current, no token), plus the two map requests
-(map_id, history). The documented API shares a public monitor's history only with its owner's token; the map's backend
-shares it without one. No import of demo/ or server.py.
+Only what's near is asked for: the area around a place (fetch_area, one small request), or one monitor by its map id
+(fetch_place, fetch_now). Rows come shaped like the documented API's public monitor rows (locationId, latitude,
+longitude, pm02_corrected, rhum, timestamp...), with locationId the map's id. No import of demo/ or server.py.
 """
 import math
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-import requests
-
+import upstream
 from summary import corrected_pm   # AirGradient's EPA correction: one home for the demo and every home's neighbors
 
 OUTDOOR_PREFIX = "O-"   # AirGradient model names: "O-..." outdoor (Open Air), "I-..." indoor
 PICKER_COUNT = 20   # monitors in the picker's list, nearest first
+PICKER_KM = 50   # km each way: the demo picker's one area request around a place (a big city's monitors in ~10 KB)
 # lat min, lat max, lon min, lon max: North America, what NOAA HMS smoke maps cover; outside it there is no smoke check
 # and no NWS forecast link (NWS covers the US only, so a monitor in Canada or Mexico still gets a link that won't help)
 NORTH_AMERICA = (15, 75, -170, -50)
 EARTH_RADIUS_KM = 6371   # km: mean Earth radius, for distances between monitors
 
-# AirGradient's public map backend (map.airgradient.com, open source: airgradienthq/airgradient-map). Not the documented
-# API: it gives a public monitor's history without a token, under its own location ids.
+# AirGradient's public map backend (map.airgradient.com, open source: airgradienthq/airgradient-map), the same routes
+# the map itself uses. Its location ids are its own (not the documented API's).
 MAP_API = "https://map-data.airgradient.com/map/api/v1"
+AREA_URL = f"{MAP_API}/measurements/current/area"   # the monitors in a box, with their PM2.5 now: about 6 KB for 15 km
 MAP_SOURCE = "AirGradient"   # the map's entries from AirGradient monitors (it lists other networks' sensors too)
-MATCH_BOX = 0.003   # degrees around the monitor searched for its map entry (about 300 m)
-MATCH_KM = 0.1   # km: the farthest a map entry may be and still be this monitor
-MAP_ID_TTL = 24 * 3600   # s: how long a monitor's map id stays cached (a monitor's ids don't change)
+OWN_KM = 0.1   # km: a map monitor this close to the home is the home's own outdoor monitor, never listed as a neighbor
+KM_PER_DEG = 111.32   # km per degree of latitude (and of longitude at the equator)
+LOCATION_TTL = 24 * 3600   # s: how long a monitor's name and place stay cached (they rarely change)
 HISTORY_TTL = 300   # s: how long a monitor's history stays fresh in the cache (5 min, like its weather)
 MAP_WAIT = 5   # s: how long a request waits on the map (its id, then its history) before drawing the model's past instead
 # the map's measure → /api/history's field; the map's pm25 is EPA-corrected (getEpaCorrectedPM.ts), like a home's pm02_corrected
@@ -34,8 +36,6 @@ MAP_MEASURES = {"pm25": "pm02_corrected", "rhum": "rhum", "atmp": "atmp", "rco2"
 FINE_HOURS = 24   # h: ranges up to this get the map's 15-minute buckets (FINE_BUCKET), longer ones hourly (COARSE_BUCKET)
 FINE_BUCKET, COARSE_BUCKET = "15m", "1h"
 PM_ONLY = {"pm25": "pm02_corrected"}   # history's measures when only PM2.5 is read (the area estimate): one request, not four
-
-WORLD_URL = "https://api.airgradient.com/public/api/v1/world/locations/measures/current"   # every public monitor, no token
 
 # An indoor-only home's outdoor PM2.5 ([sources] outdoor_from, chosen once at setup: internal spec "one monitor", Decided)
 NEARBY_SOURCE_KM = 3   # km: a public outdoor monitor this close counts as nearby; setup suggests the nearest one as the source
@@ -47,17 +47,81 @@ PINNED_OFFLINE_DAYS = 7   # days: a chosen public monitor silent this long gets 
 STALE_READING = timedelta(hours=2)   # a reading older than this counts as no reading now (a monitor gone quiet)
 
 
-def fetch_world():
-    """The world list: every public AirGradient monitor, as the API lists them (it drops one that stops reporting).
-    Raises when AirGradient doesn't answer."""
-    r = requests.get(WORLD_URL, timeout=15)
+def _num(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def from_map(entry, place=None):
+    """A map entry (an area row, or a location's current measures merged over `place`, its /locations/{id} answer) as
+    a public monitor row, or None when it isn't an AirGradient monitor with an id and a place. The map's pm25 is
+    EPA-corrected (getEpaCorrectedPM.ts), so it is the row's pm02_corrected; there is no raw pm02. The map gives no
+    owner's name for most monitors: publicContributorName is then None and the page shows none."""
+    e = {**(place or {}), **{k: v for k, v in entry.items() if v is not None}}
+    lid, lat, lon = e.get("locationId"), _num(e.get("latitude")), _num(e.get("longitude"))
+    if e.get("dataSource") != MAP_SOURCE or not isinstance(lid, int) or isinstance(lid, bool) or lat is None or lon is None:
+        return None
+    name = e.get("locationName")
+    row = {"locationId": lid, "mapId": lid, "locationName": name, "publicLocationName": name,
+           "latitude": lat, "longitude": lon, "timestamp": e.get("measuredAt"), "offline": False,
+           "publicContributorName": e.get("ownerName"), "publicPlaceUrl": e.get("url"), "timezone": e.get("timezone")}
+    for field, out in (("pm25", "pm02_corrected"), ("pm10", "pm10"), ("rhum", "rhum"), ("atmp", "atmp"), ("rco2", "rco2")):
+        if _num(e.get(field)) is not None:
+            row[out] = _num(e.get(field))
+    return row
+
+
+def box(lat, lon, km):
+    """The map's bounding box params around a point: km each way."""
+    dlat = km / KM_PER_DEG
+    dlon = km / (KM_PER_DEG * max(math.cos(math.radians(lat)), 0.01))
+    return {"xmin": round(lon - dlon, 5), "ymin": round(lat - dlat, 5), "xmax": round(lon + dlon, 5), "ymax": round(lat + dlat, 5)}
+
+
+def fetch_area(lat, lon, km):
+    """The public AirGradient monitors within a box `km` each way of a point, with their PM2.5 now: one request to
+    the map (AREA_URL). Raises when the map doesn't answer."""
+    r = upstream.get(AREA_URL, "ag_map_area", timeout=15,
+                     params={"measure": "pm25", "dataSources": MAP_SOURCE, **box(lat, lon, km)})
     r.raise_for_status()
-    return r.json()
+    return [m for m in (from_map(e) for e in _map_rows(r.json())) if m]
+
+
+def fetch_place(map_id):
+    """A monitor's name, place, timezone and owner on the map (/locations/{id}); {} when the map has no such monitor;
+    raises when it doesn't answer."""
+    r = upstream.get(f"{MAP_API}/locations/{int(map_id)}", "ag_map", timeout=10)
+    if r.status_code == 404:
+        return {}
+    r.raise_for_status()
+    place = r.json()
+    return place if isinstance(place, dict) and place.get("locationId") == int(map_id) else {}
+
+
+def fetch_now(map_id):
+    """A monitor's measures now on the map (/locations/{id}/measures/current), or raises."""
+    r = upstream.get(f"{MAP_API}/locations/{int(map_id)}/measures/current", "ag_map", timeout=10)
+    r.raise_for_status()
+    now = r.json()
+    if not isinstance(now, dict):
+        raise RuntimeError("AirGradient's map answered without that monitor's measures")
+    return now
+
+
+def monitor_row(place, now):
+    """fetch_place and fetch_now as one public monitor row (from_map), or raises when it isn't one we can show."""
+    row = from_map({**(now or {}), "locationId": (place or {}).get("locationId")}, place)
+    if row is None:
+        raise RuntimeError("Not an AirGradient monitor on the map")
+    return row
 
 
 def outdoor(world):
-    """The outdoor monitors of the world list that have a place."""
-    return [m for m in world or [] if isinstance(m, dict) and str(m.get("model") or "").startswith(OUTDOOR_PREFIX)
+    """The monitors that have a place: every map monitor is outdoor; a row naming an indoor model ("I-...") isn't."""
+    return [m for m in world or [] if isinstance(m, dict) and str(m.get("model") or OUTDOOR_PREFIX).startswith(OUTDOOR_PREFIX)
             and m.get("latitude") is not None and m.get("longitude") is not None]
 
 
@@ -132,16 +196,18 @@ def in_north_america(monitor):
 
 
 def reading_row(monitor):
-    """A public monitor's one outdoor reading, as the world list gives it, with pm02_corrected (the basis the page and
-    the summary read first) when it has the humidity to correct with."""
-    pm = corrected_pm(monitor.get("pm02"), monitor.get("rhum"))
+    """A public monitor's one outdoor reading, with pm02_corrected (the basis the page and the summary read first):
+    the map's own, or the raw pm02 corrected when it has the humidity to correct with."""
+    pm = monitor.get("pm02_corrected")
+    pm = pm if pm is not None else corrected_pm(monitor.get("pm02"), monitor.get("rhum"))
     return {**monitor, "locationName": name_of(monitor), "locationType": "outdoor",
             **({"pm02_corrected": pm} if pm is not None else {})}
 
 
 def _picker_pm(monitor):
     """A picker row's PM2.5: corrected, or the raw pm02 when there's no humidity to correct with (as the map does)."""
-    pm = corrected_pm(monitor.get("pm02"), monitor.get("rhum"))
+    pm = monitor.get("pm02_corrected")
+    pm = pm if pm is not None else corrected_pm(monitor.get("pm02"), monitor.get("rhum"))
     return pm if pm is not None else monitor.get("pm02")
 
 
@@ -155,29 +221,6 @@ def _utc(t):
     return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def map_id(monitor):
-    """The monitor's id on AirGradient's public map, or None: the AirGradient entry within MATCH_KM that has its name
-    (stripped, any case), else the nearest one within MATCH_KM. Raises when the map doesn't answer."""
-    lat, lon = monitor["latitude"], monitor["longitude"]
-    r = requests.get(f"{MAP_API}/measurements/current/area", timeout=15, params={
-        "measure": "pm25", "xmin": round(lon - MATCH_BOX, 6), "ymin": round(lat - MATCH_BOX, 6),
-        "xmax": round(lon + MATCH_BOX, 6), "ymax": round(lat + MATCH_BOX, 6)})
-    r.raise_for_status()
-    names = {str(monitor.get(k) or "").strip().casefold() for k in ("locationName", "publicLocationName")} - {""}
-    close = []   # (not named alike, km, map id): the named ones first, then the nearest
-    for e in _map_rows(r.json()):
-        lid = e.get("locationId")
-        if e.get("dataSource") != MAP_SOURCE or not isinstance(lid, int) or isinstance(lid, bool):
-            continue
-        try:
-            km = km_between(lat, lon, float(e["latitude"]), float(e["longitude"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if km <= MATCH_KM:
-            close.append((str(e.get("locationName") or "").strip().casefold() not in names, km, lid))
-    return min(close)[2] if close else None
-
-
 def history(map_id, hours, now=None, measures=MAP_MEASURES):
     """The last `hours` of a monitor's readings on the map, as /api/history rows ("timestamp" in UTC with a Z, then
     pm02_corrected, rhum, atmp, rco2 when the map has them, as numbers), oldest first. One request per measure
@@ -188,7 +231,7 @@ def history(map_id, hours, now=None, measures=MAP_MEASURES):
             "bucketSize": FINE_BUCKET if hours <= FINE_HOURS else COARSE_BUCKET}
     rows = {}
     for measure, field in measures.items():
-        r = requests.get(f"{MAP_API}/locations/{int(map_id)}/measures/history", params={**base, "measure": measure},
+        r = upstream.get(f"{MAP_API}/locations/{int(map_id)}/measures/history", "ag_map", params={**base, "measure": measure},
                          timeout=15)
         r.raise_for_status()
         for p in _map_rows(r.json()):

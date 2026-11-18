@@ -46,7 +46,7 @@ def test_nearby_around_a_place(monkeypatch):
         {"locationId": 2, "latitude": 13.9, "longitude": 100.55},     # ~5.4 km
         {"locationId": 3, "latitude": 40.7, "longitude": -74.0},      # far
     ]
-    found = sources._fetch_nearby(world, BANGKOK)
+    found = sources._fetch_nearby(BANGKOK, rows=world)
     assert {m["locationId"] for m in found} == {1, 2}
     assert all("distance_km" in m for m in found)
     assert [m["distance_km"] for m in found] == sorted(m["distance_km"] for m in found)
@@ -67,8 +67,10 @@ def test_home_keys_unchanged(monkeypatch):
     sources.get_open_meteo_data(BANGKOK)
     assert keys == ["wx:m1"]
     keys.clear()
+    monkeypatch.setattr(sources, "_shared_cached", spy)
     server.app.test_client().get("/api/neighborhood")
-    assert keys == ["ag:world"]
+    home = sources.home_here()
+    assert keys == [f"ag:area:{home.lat:.2f},{home.lon:.2f}"]   # one area request on the map, by place
 
 
 def test_neighborhood_for_the_home_end_to_end(monkeypatch):
@@ -78,7 +80,7 @@ def test_neighborhood_for_the_home_end_to_end(monkeypatch):
         {"locationId": 2, "latitude": home.lat + 0.02, "longitude": home.lon},
         {"locationId": 3, "latitude": -home.lat, "longitude": home.lon + 90},
     ]
-    monkeypatch.setattr(sources, "cached", lambda key, fetch, **kw: (world, {"state": "hit", "age": 0}))
+    monkeypatch.setattr(sources, "_shared_cached", lambda key, fetch, **kw: (world, {"state": "hit", "age": 0}))
     got = server.app.test_client().get("/api/neighborhood").get_json()
     assert [m["locationId"] for m in got] == [1, 2]
     assert all(m["distance_km"] < sources.NEARBY_RADIUS_KM for m in got)
@@ -89,23 +91,23 @@ def test_neighborhood_for_the_home_end_to_end(monkeypatch):
 
 def test_nearby_rows_carry_corrected_pm():
     world = [{"locationId": 1, "latitude": 13.95, "longitude": 100.5, "pm02": 12.0, "rhum": 60}]
-    row, = sources._fetch_nearby(world, BANGKOK)
+    row, = sources._fetch_nearby(BANGKOK, rows=world)
     assert row["pm02"] == 12.0   # the raw reading stays as it came
     assert row["pm02_corrected"] == summary_rules.corrected_pm(12.0, 60) == 6.9   # 0.524·12 − 0.0862·60 + 5.75
-    assert "pm02_corrected" not in world[0]   # the cached world list is left as it came
+    assert "pm02_corrected" not in world[0]   # the cached area list is left as it came
 
 
 def test_nearby_without_humidity_stays_raw():
     world = [{"locationId": 1, "latitude": 13.95, "longitude": 100.5, "pm02": 12.0},
              {"locationId": 2, "latitude": 13.9, "longitude": 100.55, "rhum": 60}]
-    found = sources._fetch_nearby(world, BANGKOK)
+    found = sources._fetch_nearby(BANGKOK, rows=world)
     assert all("pm02_corrected" not in n for n in found)
     assert {n["locationId"]: n.get("pm02") for n in found} == {1: 12.0, 2: None}
 
 
 def test_nearby_rows_link_to_airgradients_map():
     world = [{"locationId": 1, "latitude": 13.95123456789012, "longitude": 100.50341234567891, "pm02": 3.0, "rhum": 50}]
-    row, = sources._fetch_nearby(world, BANGKOK)
+    row, = sources._fetch_nearby(BANGKOK, rows=world)
     assert row["map_url"] == airgradient_map(13.9512, 100.5034)   # to about 10 m, not the list's 14 digits
     assert row["map_url"].startswith("https://www.airgradient.com/map?zoom=15&long=100.5034&lat=13.9512&")
 
@@ -168,7 +170,7 @@ def test_neighborhood_error_carries_no_keys(monkeypatch):
     monkeypatch.setenv("GOOGLE_POLLEN_API_KEY", "FAKEPOLLENKEY12345")
     def boom(*a, **k):
         raise RuntimeError("failed url ...?key=FAKEPOLLENKEY12345")
-    monkeypatch.setattr(sources, "cached", boom)
+    monkeypatch.setattr(sources, "_shared_cached", boom)
     monkeypatch.setattr(sources, "source_on", lambda name: True)
     r = server.app.test_client().get("/api/neighborhood")
     assert r.status_code == 502 and b"FAKEPOLLENKEY12345" not in r.data

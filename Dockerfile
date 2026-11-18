@@ -1,8 +1,8 @@
-# Home Air Quality in a container. docker-compose.yml runs it; DEPLOYMENT.md, "Docker", has the steps.
+# Home Air in a container. docker-compose.yml runs it; DEPLOYMENT.md, "Docker", has the steps.
 FROM python:3.12-slim-bookworm
 
-# links the published image (ghcr.io/sguyon/home-air-quality) to its repo
-LABEL org.opencontainers.image.source="https://github.com/sguyon/home-air-quality" \
+# links the published image (ghcr.io/sguyon/homeair) to its repo
+LABEL org.opencontainers.image.source="https://github.com/sguyon/homeair" \
       org.opencontainers.image.description="A page that reads your AirGradient monitors and says what to do about the air at home" \
       org.opencontainers.image.licenses="MIT"
 

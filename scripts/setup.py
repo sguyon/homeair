@@ -29,14 +29,14 @@ import sources  # installs the request-log filter that hides query credentials
 from config import (ENV_FILE_MODE, PLACE_DECIMALS, PROFILES, ConfigError, defines,
                     env_key, load_config, parse_dotenv, public_view, write_env_key)
 
-REPO_URL = "https://github.com/sguyon/home-air-quality"
-USER_AGENT = f"home-air-quality-setup/1.0 (+{REPO_URL})"  # Nominatim requires an identifying User-Agent.
+from upstream import USER_AGENT  # Nominatim requires an identifying User-Agent: the app's, HomeAir/<version>.
 NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
 OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"  # timezone=auto resolves a point's timezone.
 LOOKUP_RESULTS = 3  # matches: enough to catch a name shared by different states.
 AMBIGUOUS_SHOWN = 3  # matches shown when a place needs its city or state.
 LOOKUP_TIMEOUT = 15  # seconds per place or timezone request.
+LIVE_RETRY_SECONDS = 10  # --live keeps trying this long when the page doesn't answer yet: an app started a moment ago (a Codex run checked 5 times too early).
 LIVE_TIMEOUT = 30  # seconds: a running page may be waiting on its outside sources.
 DEFAULT_PORT = 5555  # server.py's local port without PORT.
 AREA_CATEGORIES = ("place", "boundary")  # Nominatim's area names, rather than buildings or streets.
@@ -50,11 +50,14 @@ STATUS_TIMEOUT = 15  # seconds for --status's one readings request: AirGradient 
 RUN = "scripts/run.sh"  # how SETUP.md runs every command: uv, else installing uv, else Python 3.11+ (the uv ladder).
 SETUP_CMD = f"{RUN} scripts/setup.py"
 SERVER_CMD = f"{RUN} server.py"
-START_CMD = f"nohup {SERVER_CMD} > app.log 2>&1 < /dev/null &"  # in the background, so it outlives the agent's session; its log in app.log
+START_CMD = f"{RUN} scripts/setup.py --start"  # starts it in the background, so it outlives the agent's session, and waits for the address; the log is in app.log
 HOME_CMD = f'{SETUP_CMD} --address "<neighborhood or address>" --profiles <toddler,sinus,runner or none>'
 STATUS_CMD = f"{SETUP_CMD} --status"
 WAIT_TOKEN_CMD = f"{SETUP_CMD} --wait-token"
 WAIT_TOKEN_SECONDS = 90  # one wait: under the shortest default command limit we know (Claude Code stops a command after 120 s).
+PORT_FILE = "app.port"  # the port --start chose, in the repo folder (ignored by git)
+FALLBACK_PORT = 5600  # the first port --start tries when the usual one is taken.
+FALLBACK_TRIES = 20  # ports tried from FALLBACK_PORT.
 STARTUP_WAIT = 30  # seconds for the page to answer after the system starts it at login (uv may install packages first).
 WAIT_POLL_SECONDS = 2  # how often --wait-token looks for the saved token: the user sees the agent move on within 2 s.
 
@@ -286,7 +289,7 @@ class TokenRefused(SetupError):
 def account_rows(token, timeout=LOOKUP_TIMEOUT):
     try:
         response = requests.get(f"{sources.API_BASE}/locations/measures/current", params={"token": token},
-                                timeout=timeout, allow_redirects=False)
+                                timeout=timeout, allow_redirects=False, headers=sources.upstream.headers())
         if response.status_code in (401, 403):
             raise TokenRefused("AirGradient refused the token. Enter it again on the token page, then try again.")
         response.raise_for_status()
@@ -353,14 +356,15 @@ def choose_monitors(rows, args):
 
 
 def outdoor_source(place):
+    """An indoor-only home's outdoor source, chosen once: the nearest public monitor reporting within
+    publicmap.NEARBY_SOURCE_KM (its id on AirGradient's map, saved as outdoor_from; the app then reads that one monitor
+    alone), "area" or "model". One area request on AirGradient's public map around the home."""
     try:
-        world = publicmap.fetch_world()
-        if not isinstance(world, list):
-            raise ValueError("No public list")
+        world = publicmap.fetch_area(place.lat, place.lon, publicmap.AREA_KM + 1)
         pick, _, _ = publicmap.suggest(world, place.lat, place.lon, datetime.now(timezone.utc))
         return pick
     except Exception:  # optional public discovery must never block household setup
-        print("AirGradient's public list didn't answer. Outdoor air will be an estimate from Open-Meteo's forecast.")
+        print("AirGradient's public map didn't answer. Outdoor air will be an estimate from Open-Meteo's forecast.")
         return "model"
 
 
@@ -486,7 +490,8 @@ def age_words(ts, now):
     return now - t, f"last reading {words}"
 
 
-def live(url, env, root, get=None, now=None):
+def live(url, env, root, get=None, now=None, wait=0):
+    """The read-only check of a running page. `wait` seconds of retries when it doesn't answer yet (an app just started)."""
     get = get or (lambda u: requests.get(u, timeout=LIVE_TIMEOUT))
     now = now or datetime.now(timezone.utc)
     base = url.rstrip("/")
@@ -496,14 +501,23 @@ def live(url, env, root, get=None, now=None):
         problems.append(text)
         print(f"Problem: {text}")
 
-    try:
-        health = get(f"{base}/health").json()
-    except Exception as e:   # not running, wrong port, not this app
-        print(f"The page doesn't answer at {base} ({type(e).__name__}). Start it (SETUP.md, Start and verify), or pass its address: "
+    end = time.monotonic() + wait
+    while True:
+        try:
+            health = get(f"{base}/health").json()
+            break
+        except Exception:   # not running, wrong port, not this app
+            if time.monotonic() < end:
+                time.sleep(WAIT_POLL_SECONDS)
+                continue
+            health = None
+            break
+    if health is None:
+        print(f"The page doesn't answer at {base}. Start it (SETUP.md, Start and verify), or pass its address: "
               "setup.py --live http://localhost:<port>")
         return 1
     if not isinstance(health, dict) or health.get("status") != "ok":
-        print(f"{base}/health didn't say ok: is this Home Air Quality?")
+        print(f"{base}/health didn't say ok: is this Home Air?")
         return 1
     print(f"Page: answers at {base}")
     token = bool(health.get("airgradient_token_set"))
@@ -520,7 +534,7 @@ def live(url, env, root, get=None, now=None):
     except Exception:
         app = None
     if app is None:
-        problem("the page has no settings (window.APP): is this Home Air Quality?")
+        problem("the page has no settings (window.APP): is this Home Air?")
     elif "now" in app:
         problem("the page runs the demo (made-up data). Restart it from the folder with config.toml.")
     elif cfg is not None:
@@ -607,7 +621,7 @@ def current_check(get, base, cfg, now, problem):
         else:
             print("outdoor source: Open-Meteo's forecast for your area")
         if s.get("fallback"):
-            print("Note: the chosen public monitor isn't reporting now (or AirGradient's list didn't answer): the page "
+            print("Note: the chosen public monitor isn't reporting now (or AirGradient's map didn't answer): the page "
                   "shows the estimate for your area until it's back.")
 
 
@@ -631,7 +645,7 @@ def status(env, root):
     prepared = token_set or any(defines(line, "AIRGRADIENT_TOKEN") for line in text.splitlines())
     step("1. Token entry (.env)", prepared, "" if prepared else "no AIRGRADIENT_TOKEN line yet", SETUP_CMD)
     step("2. AirGradient connected", token_set, "" if token_set else "no token yet",
-         f"{START_CMD} (then open the ?setup= link it writes to app.log; the user enters the token on that page)")
+         f"{START_CMD} (then open the setup link it prints; the user enters the token on that page)")
 
     cfg, problem = None, None
     # where load_config reads the home from, in its order: the variables win over the file
@@ -664,7 +678,7 @@ def status(env, root):
             step("4. Readings come in", False, f"couldn't check: AirGradient didn't answer within {STATUS_TIMEOUT} s; try again in a minute", STATUS_CMD)
         except TokenRefused:
             step("4. Readings come in", False, "AirGradient refused the token",
-                 f"{START_CMD} (then open the ?setup= link it writes to app.log and enter the token again)")
+                 f"{START_CMD} (then open the setup link it prints and enter the token again)")
         except SetupError:
             step("4. Readings come in", False, "couldn't check: AirGradient's answer couldn't be read; try again in a minute", STATUS_CMD)
         else:
@@ -718,6 +732,54 @@ def page_answers(url, env, root):
     return 1
 
 
+def started_port(env, root):
+    """The port --start chose, else PORT or 5555: so a bare --live checks the copy just started."""
+    try:
+        port = int((root / PORT_FILE).read_text().strip())
+        return port if 0 < port < 65536 else port_from(env)
+    except (OSError, ValueError):
+        return port_from(env)
+
+
+def start_app(env, root):
+    """Start the app in the background and wait until it answers, so the next step can't run before it is up. A copy
+    setup started before is stopped first, and a taken port moves to a free one."""
+    import autostart
+    autostart.stop_setup_copy(root)
+    port = port_from(env)
+    tries = iter(range(FALLBACK_PORT, FALLBACK_PORT + FALLBACK_TRIES))
+    while autostart.port_answers(port):
+        port = next(tries, None)
+        if port is None:
+            print(f"No free port from {FALLBACK_PORT} to {FALLBACK_PORT + FALLBACK_TRIES - 1}. Stop what's using them, or set PORT.")
+            return 1
+    log = root / "app.log"
+    with open(log, "wb") as out:
+        child = subprocess.Popen([str(root / RUN), "server.py"], cwd=root, env={**env, "PORT": str(port)}, stdin=subprocess.DEVNULL,
+                                 stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    end = time.monotonic() + STARTUP_WAIT
+    while time.monotonic() < end:
+        if child.poll() is not None:
+            tail = log.read_text(errors="replace").strip().splitlines()[-5:]
+            print("The app stopped right after starting. Last lines of app.log:\n" + "\n".join(tail))
+            return 1
+        try:
+            if requests.get(f"http://127.0.0.1:{port}/health", timeout=WAIT_POLL_SECONDS).ok:
+                break
+        except requests.RequestException:
+            pass
+        time.sleep(1)
+    else:
+        print(f"The app isn't answering yet at http://localhost:{port}. See app.log, then run {START_CMD} again.")
+        return 1
+    (root / PORT_FILE).write_text(f"{port}\n")   # so `--live` with no address checks this copy, not another app on 5555
+    print(f"Started: http://localhost:{port} (log: app.log)")
+    link = re.search(r"http\S*\?setup=\S+", log.read_text(errors="replace"))
+    if link:
+        print(f"Connect AirGradient here: {link.group(0)}")
+    return 0
+
+
 def start_at_login(state, env, root):
     import autostart
     run = lambda cmd: subprocess.run(cmd, capture_output=True).returncode
@@ -742,6 +804,7 @@ def parser():
     ap.add_argument("--timezone", help="a correction using an IANA timezone name")
     ap.add_argument("--live", nargs="?", const="", metavar="URL", help="check the running page with GET requests")
     ap.add_argument("--status", action="store_true", help="list what's done and the next command; changes nothing")
+    ap.add_argument("--start", action="store_true", help="start the app in the background and wait until it answers")
     ap.add_argument("--start-at-login", choices=("on", "off"),
                     help="start the app by itself at login (a Mac or Linux with systemd), or stop doing so")
     ap.add_argument("--home-server", action="store_true",
@@ -768,10 +831,12 @@ def main(argv, env, root=ROOT):
         if args.home_server:
             import homeserver
             return homeserver.prepare(root)
+        if args.start:
+            return start_app(env, root)
         if args.start_at_login:
             return start_at_login(args.start_at_login, env, root)
         if args.live is not None:
-            return live(args.live or f"http://localhost:{port_from(env)}", env, root)
+            return live(args.live or f"http://localhost:{started_port(env, root)}", env, root, wait=LIVE_RETRY_SECONDS)
         if not args.address and args.lat is None and args.lon is None:
             prepare_env(root)
             token = env_key("AIRGRADIENT_TOKEN", env) or env_key("AIRGRADIENT_TOKEN", saved_keys(root))
