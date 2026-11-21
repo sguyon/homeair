@@ -5,7 +5,7 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 **[Try the demo](https://homeair.app)** · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
 
 <p align="center">
-  <img src="docs/hero-light.png" alt="Home Air on a laptop and a phone" width="800">
+  <img src="docs/hero-light.png" alt="Home Air's page next to its phone view" width="800">
 </p>
 
 <sub>Screenshots from the demo, with sample data.</sub>
@@ -99,7 +99,7 @@ The app always uses the corrected value: for your monitors, the `pm02_corrected`
 - Pollen: [Google Pollen API](https://developers.google.com/maps/documentation/pollen) (optional, needs a key).
 - Wildfire smoke: NOAA's [Hazard Mapping System](https://www.ospo.noaa.gov/products/land/hms.html).
 - Map: [MapLibre](https://maplibre.org), with tiles from [OpenFreeMap](https://openfreemap.org) and map data from [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
-- Device frames in the screenshot: [Devices.css](https://github.com/picturepan2/devices.css) (MIT, `scripts/vendor/`).
+- Device frame in the link-preview images: [Devices.css](https://github.com/picturepan2/devices.css) (MIT, `scripts/vendor/`).
 
 ## Contributing
 
