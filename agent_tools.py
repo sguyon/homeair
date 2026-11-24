@@ -13,6 +13,7 @@ MAX_HOURS = 168       # hours of history one call may ask for: the page's longes
 DEFAULT_HOURS = 12    # hours of history when the assistant doesn't say: "last night" from the morning.
 UNITS = "PM2.5 ug/m3, CO2 ppm, humidity %, temperature C"
 CACHED_HOURS = (1, 6, 24, 168)   # the page's History ranges, which the server caches (sources.HIST_TTL): asked for, then trimmed
+STALE_READING_MINUTES = 30   # minutes: a newest reading older than this is stale, and the answer starts by saying when
 STALE_SECONDS = 15 * 60   # a newest reading older than this ends the history window (the demo's fixed clock, a monitor offline)
 
 # The fields read for each measure, first one present wins: the corrected value when the monitor sends it (as static/app.js).
@@ -141,11 +142,12 @@ def now(fetch, settings):
               "action": (it.get("action") or {}).get("text"), "when": (it.get("action") or {}).get("when"),
               "why": it.get("why")} for it in summary.get("items") or []]
     profiles = [{k: p.get(k) for k in ("name", "state", "ok", "why")} for p in summary.get("profiles") or []]
-    for r in (i, o) if settings.get("real_clock", True) else ():   # how old each reading is, so an assistant
+    for r in (i, o) if settings.get("real_clock", True) else ():   # when each reading was taken, so an assistant
         if r and r.get("at"):                                       # without the skill sees a monitor gone quiet;
             # not on the demo's fixed clock, where every reading would look months old
             try:
-                r["age_minutes"] = max(0, round((datetime.now(timezone.utc) - _utc(r["at"])).total_seconds() / 60))
+                r["minutes_ago"] = max(0, round((datetime.now(timezone.utc) - _utc(r["at"])).total_seconds() / 60))
+                r["stale"] = r["minutes_ago"] > STALE_READING_MINUTES
             except ValueError:
                 pass
     for r in (i, o):   # the cloud id (or a placeholder for a monitor read on the Wi-Fi) only feeds the read above:

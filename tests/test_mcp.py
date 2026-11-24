@@ -2,7 +2,9 @@
 another site, or hand over the token, coordinates or serial numbers."""
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
+import agent_tools
 import server
 import sources
 from test_sources import wifi  # noqa: F401  (the fixture: a home with serials and a stub poller)
@@ -49,7 +51,12 @@ def test_answer_has_readings_but_no_token_coordinates_or_serial(client, monkeypa
     monkeypatch.setattr(sources, "current_rows", lambda force=False: ([row], {"state": "fresh", "age": 0}))
     result = rpc(client, "tools/call", {"name": "home_air_now", "arguments": {}}).get_json()["result"]
     assert result["isError"] is False and result["structuredContent"]["readings"]["indoor"]["co2"] == 1250
-    assert result["structuredContent"]["readings"]["indoor"]["age_minutes"] >= 0   # a quiet monitor shows as old
+    indoor = result["structuredContent"]["readings"]["indoor"]
+    # days old: the server says it's stale, so the agent says when before anything else (not a rule in two prompts)
+    assert indoor["minutes_ago"] > agent_tools.STALE_READING_MINUTES and indoor["stale"] is True and "age_minutes" not in indoor
+    row["timestamp"] = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    fresh = rpc(client, "tools/call", {"name": "home_air_now", "arguments": {}}).get_json()["result"]["structuredContent"]
+    assert fresh["readings"]["indoor"]["minutes_ago"] == 5 and fresh["readings"]["indoor"]["stale"] is False
     # an agent took ids 1 and 2 (placeholders for monitors read on the Wi-Fi) for the demo's data (23 Nov): no ids, and
     # the answer says whether it's the demo
     assert "id" not in result["structuredContent"]["readings"]["indoor"] and result["structuredContent"]["home"]["demo"] is False

@@ -1,74 +1,62 @@
 # Connect your AI assistant
 
-An AI assistant can answer from your home's monitors in two ways, while Home Air is running:
+**Context:** Home Air is an app for your AirGradient air quality monitors: a page with your readings, the weather, pollen and smoke, and what to do about them (open a window, run a purifier). The steps below connect an AI assistant to a Home Air you already run, so the assistant answers from your home's readings. No Home Air yet: [install it first](../README.md#installation).
 
-- **The skill**, in `skills/home-air-quality`: short instructions plus a small Python script that gets the readings from the app. For agents that run commands on the computer where Home Air runs. With it, the agent can also change your settings (`config.toml`), only when you ask and say yes.
-- **The MCP server**, at `/mcp` on the running app: two read-only tools, `home_air_now` and `home_air_history`. For any assistant that can reach the app's address.
+> [!WARNING]
+> **Experimental.** The skill and the MCP server are only partly tested: the skill has been tried with Claude Code and Codex, and the other assistants on this page haven't been tried. If a step fails, please [open an issue](https://github.com/sguyon/homeair/issues) with the assistant's name, the step and what the assistant said.
 
-Both give the same answers: the readings, your home's limits and the actions, each with a why. Never your token, the home's coordinates or the monitors' serial numbers; an outdoor reading from a public monitor names its street and distance, as the page does. Anyone who can reach the app's address can read them, as they can open the page.
+## Which one for your assistant
 
-The examples use `http://localhost:5555`. If setup printed another port, use that one.
+| Your assistant | Use | Start with |
+|---|---|---|
+| Claude Code, Codex, Cursor or Gemini CLI, on the computer with Home Air's folder | [The skill](#the-skill) | `./homeair skill add` in Home Air's folder |
+| Another agent that runs commands: OpenClaw, Hermes, or one on another computer | [The MCP server](#the-mcp-server) | Ask the agent: "Add Home Air's MCP server at `<address>/mcp`, following https://github.com/sguyon/homeair/blob/main/docs/agents.md" |
+| claude.ai, Claude Desktop or Claude's phone apps | [The MCP server](#the-mcp-server), with Home Air [online](../DEPLOYMENT.md#railway) | Put Home Air online, then add a custom connector with `https://<name>.up.railway.app/mcp` |
+| Claude Desktop, with Home Air on this computer or on a home server | [The MCP server](#the-mcp-server) | The last row of the MCP server table |
+
+`<address>` is where Home Air runs: see [Your Home Air address](#your-home-air-address).
+
+The skill and the MCP server give the same answers: the readings, your home's limits and the actions, each with a why. Never your token, the home's coordinates or the monitors' serial numbers. Anyone who can open the page can read the same answers. Both need Home Air running.
+
+## Your Home Air address
+
+| Where Home Air runs | `<address>` | Who can reach it |
+|---|---|---|
+| This computer | `http://localhost:5555`, or the port `./homeair status` shows | This computer only |
+| This computer, after `HOST=0.0.0.0 ./homeair start-at-login on` | `http://<the computer's name>.local:5555` | Every device on your Wi-Fi |
+| A home server, with Docker | `http://<the server's name or IP address>:8000` | Every device on your Wi-Fi |
+| Online, on Railway ([DEPLOYMENT.md](../DEPLOYMENT.md#railway)) | `https://<name>.up.railway.app` (`railway domain list --service homeair`) | Anyone, including Claude's apps |
 
 ## The skill
 
-`./homeair skill add` (offered at the end of setup) links the skill into the skills folders of the coding agents on this computer (Claude Code's `~/.claude/skills`, and the shared `~/.agents/skills` that Codex, Cursor and Gemini CLI read). These are links to this folder, so updating Home Air updates the skill. The command never replaces a skill that's already there.
+For coding agents on a computer with Home Air's folder. With it, the agent can also change your settings (`config.toml`), only when you ask and say yes.
 
-- See the links: `./homeair skill status`
-- Remove the Home Air skill from your agents: `./homeair skill remove`. Only the links made during setup are removed.
-- To add the skill later, or for another agent: `./homeair skill add`, run by that agent.
-- Home Air on a home server or online: `./homeair skill add --url <its address>`, and the skill reads that one (`--url local` goes back to this computer's).
-- On Windows with WSL: run setup where the agent runs. Links made in WSL's home aren't seen by an agent running on Windows itself.
+1. In Home Air's folder, run `./homeair skill add`. It links the skill into `~/.agents/skills` (Codex, Cursor, Gemini CLI) and `~/.claude/skills` (Claude Code), and never replaces a skill that is already there. When Home Air runs on a home server or online, run `./homeair skill add --url <address>` instead. To read Home Air on this computer again: `./homeair skill add --url local`.
+2. Open a new session in the agent and ask "How is the air inside now?": the agent answers from your home's readings.
 
-## Other agents on this computer: the MCP server
+- **On another computer:** `git clone https://github.com/sguyon/homeair`, then `./homeair skill add --url <address>` in the `homeair` folder.
+- **Check or remove:** `./homeair skill status`; `./homeair skill remove` removes the links `skill add` made and the saved `--url` address.
+- **Hermes:** `ln -s "$PWD/skills/home-air-quality" ~/.hermes/skills/home-air-quality` from Home Air's folder ([docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)).
+- **OpenClaw** copies skills, and its copy reads only `http://localhost:5555`: use the MCP server instead.
+- **Windows:** an agent that runs on Windows itself doesn't read the skills folder of Linux on Windows (WSL): use the MCP server instead.
 
-Add the address `http://localhost:5555/mcp` (or the port setup printed) to the agent:
+## The MCP server
 
-- **Claude Code** ([docs](https://code.claude.com/docs/en/mcp)), in every project:
+Two read-only tools at `<address>/mcp`: `home_air_now` and `home_air_history`. The MCP server is part of Home Air, so there is nothing to install.
 
-  ```bash
-  claude mcp add --transport http --scope user homeair http://localhost:5555/mcp
-  ```
+| Assistant | Add it with |
+|---|---|
+| Claude Code ([docs](https://code.claude.com/docs/en/mcp)) | `claude mcp add --transport http --scope user homeair <address>/mcp` |
+| Codex ([docs](https://learn.chatgpt.com/docs/extend/mcp)) | `codex mcp add homeair --url <address>/mcp` |
+| Gemini CLI ([docs](https://geminicli.com/docs/tools/mcp-server/)) | `gemini mcp add --transport http --scope user homeair <address>/mcp` |
+| Cursor ([docs](https://cursor.com/docs/mcp)) | in `~/.cursor/mcp.json`: `{"mcpServers": {"homeair": {"url": "<address>/mcp"}}}` |
+| OpenClaw ([docs](https://docs.openclaw.ai/tools/mcp)) | `openclaw mcp add homeair --url <address>/mcp --transport streamable-http` |
+| Hermes ([docs](https://hermes-agent.nousresearch.com/docs)) | in `~/.hermes/config.yaml`: `mcp_servers: {homeair: {url: "<address>/mcp"}}` |
+| claude.ai, Claude Desktop, Claude's phone apps ([help](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)) | Home Air online only: a custom connector with `<address>/mcp`. Claude reaches it from Anthropic's servers. Untested with Home Air. |
+| Claude Desktop, Home Air on this computer or on a home server ([docs](https://modelcontextprotocol.io/docs/develop/connect-local-servers)) | Through the bridge `mcp-remote`, which needs Node: the lines below, in Settings › Developer › Edit Config. Then quit Claude Desktop and open it again. |
 
-- **Codex** ([docs](https://learn.chatgpt.com/docs/extend/mcp)), saved in `~/.codex/config.toml`:
+```json
+{"mcpServers": {"homeair": {"command": "npx", "args": ["-y", "mcp-remote", "<address>/mcp", "--allow-http"]}}}
+```
 
-  ```bash
-  codex mcp add homeair --url http://localhost:5555/mcp
-  ```
-
-- **Gemini CLI** ([docs](https://geminicli.com/docs/tools/mcp-server/)):
-
-  ```bash
-  gemini mcp add --transport http --scope user homeair http://localhost:5555/mcp
-  ```
-
-- **Cursor** ([docs](https://cursor.com/docs/mcp)): add this to `~/.cursor/mcp.json`:
-
-  ```json
-  {"mcpServers": {"homeair": {"url": "http://localhost:5555/mcp"}}}
-  ```
-
-- **Claude Desktop** ([docs](https://modelcontextprotocol.io/docs/develop/connect-local-servers)): its settings can only start programs on your computer, so it reaches the address through a small bridge, `mcp-remote`, which needs Node. In Settings › Developer › Edit Config, add the lines below, then quit and reopen it. Claude Desktop's skills run on Anthropic's servers, so they can't reach your computer: use this instead of the skill.
-
-  ```json
-  {"mcpServers": {"homeair": {"command": "npx", "args": ["-y", "mcp-remote", "http://localhost:5555/mcp"]}}}
-  ```
-
-Both the skill and the MCP server need Home Air running: `./homeair start`, or `./homeair start-at-login on` so Home Air starts each time you log in.
-
-## OpenClaw and Hermes
-
-**On this computer**, the skill works as for the agents above:
-
-- OpenClaw: `openclaw skills install ./skills/home-air-quality --global` from the Home Air folder (copies it into `~/.openclaw/skills`; [docs](https://docs.openclaw.ai/cli/skills)).
-- Hermes: `ln -s "$PWD/skills/home-air-quality" ~/.hermes/skills/home-air-quality` from the Home Air folder (Hermes reads `~/.hermes/skills`; [docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)).
-
-Or the MCP server:
-
-- OpenClaw: `openclaw mcp add homeair --url http://localhost:5555/mcp --transport streamable-http` ([docs](https://docs.openclaw.ai/tools/mcp)).
-- Hermes: in `~/.hermes/config.yaml`, under `mcp_servers:`, add `homeair:` with `url: "http://localhost:5555/mcp"` ([docs](https://hermes-agent.nousresearch.com/docs)).
-
-**On another machine at home** (a home server or a Raspberry Pi running the agent): Home Air has to listen on the home network. Start Home Air with `HOST=0.0.0.0 ./homeair start`, or run it with Docker on the home server ([DEPLOYMENT.md](../DEPLOYMENT.md)). Then use `http://<the computer's name>.local:5555/mcp` as the MCP address, or run `./homeair skill add --url http://<the computer's name>.local:5555` for the skill. Anyone on that Wi-Fi can then read it too.
-
-## claude.ai and ChatGPT
-
-They reach an MCP server from their companies' servers, by its public address ([claude.ai](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)), so they can't reach Home Air on your computer or your home network. Home Air put online ([DEPLOYMENT.md](../DEPLOYMENT.md)) has a public address; its `/mcp`, like its page, has no sign-in, so anyone with the address can read it. In claude.ai, add it as a custom connector with the address `https://<your Home Air online>/mcp` ([claude.ai's help](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)). Adding it to these apps hasn't been tested yet.
+`--allow-http` lets `mcp-remote` use an `http://` address other than localhost ([mcp-remote](https://github.com/geelen/mcp-remote)).

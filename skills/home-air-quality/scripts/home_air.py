@@ -35,6 +35,11 @@ STOPPED_OR_SANDBOX = ("Either Home Air is stopped (start it: ./homeair start in 
                       "HOME_AIR_URL), or this command runs in a sandbox without network access, which blocks "
                       "localhost too (Codex's default sandbox does): then run the command again with network access "
                       "allowed.")
+REPO = "https://github.com/sguyon/homeair"   # where Home Air and its setup live, for a skill installed on its own
+ALONE = ("No Home Air answers at {}. This skill reads a running Home Air, and the skill's files aren't in a Home Air "
+         "folder. If Home Air is installed on this computer, start it (./homeair start in its folder), and set HOME_AIR_URL "
+         "to the address ./homeair status shows if it isn't http://localhost:5555. If it runs on a home server or online, "
+         "set HOME_AIR_URL to its address. To install Home Air: " + REPO)
 
 
 class Fail(Exception):
@@ -94,6 +99,9 @@ def call(path):
         except ValueError:
             raise Fail(f"{base} answered, but not as Home Air does. Check HOME_AIR_URL.")
     sandboxed = os.environ.get(NO_NETWORK_VAR)
+    alone = not os.environ.get("HOME_AIR_URL", "").strip() and not (HOME_AIR / "server.py").is_file()
+    if alone and not sandboxed:
+        raise Fail(ALONE.format(", ".join(tried)))
     raise Fail(f"Home Air is not answering at {', '.join(tried)}. "
                + (SANDBOX.format(NO_NETWORK_VAR) if sandboxed else STOPPED_OR_SANDBOX))
 

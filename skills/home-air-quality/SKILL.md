@@ -40,7 +40,7 @@ curl -s "${HOME_AIR_URL:-http://localhost:5555}/api/agent/history?hours=12&where
 
 ## Reading the answer
 
-`now` returns `readings` (indoor, outdoor; each with `at`, the time in UTC, and `age_minutes`), `home.limits` (this home's thresholds) and `read`. `home.demo: true` means it's Home Air's demo with made-up readings, not this person's home: say so first.
+`now` returns `readings` (indoor, outdoor; each with `at`, the time in UTC, `minutes_ago`, and `stale`: true when it was taken more than 30 minutes ago), `home.limits` (this home's thresholds) and `read`. `home.demo: true` means it's Home Air's demo with made-up readings, not this person's home: say so first.
 
 In `read`:
 
@@ -62,7 +62,7 @@ In `read`:
    - Plain sentences: no tables, boxes, columns or emoji that carry meaning, so the answer reads the same in a terminal, on a phone, in a messaging app or aloud. Bold, if any, only on the first sentence.
    - Two to four sentences, about 60 words, unless asked for more. No list, even for several numbers.
 6. A "should I" about one room: the monitors are per home, not per room. Say which monitor the number comes from.
-7. If the last reading was taken more than 30 minutes ago (`age_minutes` over 30), start by saying when: "the last reading is from 9:10 PM".
+7. If a reading is stale (`stale: true`), start by saying when it was taken: "the last reading is from 9:10 PM".
 8. This is information about the air, not medical advice. For symptoms, point to a clinician.
 
 ## Changing the home
@@ -78,6 +78,7 @@ When the user asks you to remove the Home Air skill (or to undo what was added d
 The script prints `{"error": "..."}` and exits 1.
 
 - "not answering": either the server is stopped, or your commands run in a sandbox without network access (Codex's default sandbox blocks even localhost). If you are sandboxed, run the command again with network access (ask to run it outside the sandbox; in Codex, `network_access = true` under `[sandbox_workspace_write]` in `~/.codex/config.toml` allows it for good) before saying the server is down. Never guess the air from outdoor knowledge, and never answer from a reading seen earlier in this conversation: say the script failed and why. Offer to start Home Air (`./homeair start` in the Home Air folder) only if the user asks.
+- "No Home Air answers … the skill's files aren't in a Home Air folder": the skill was installed on its own. Say that the skill reads a running Home Air, and pass on the error's steps: start the user's Home Air, set HOME_AIR_URL to its address, or install Home Air from the link in the error.
 - `python3` itself fails to start, for example "couldn't create cache file '/tmp/xcrun_db…' (Operation not permitted)" on a Mac: that's your sandbox, not Home Air. Ask to run the command outside the sandbox.
 - "older than the skill": the running Home Air predates these routes. Say so and give the update step the error names.
 - "something else answers": that port is another program, not Home Air. Check `HOME_AIR_URL` or the port chosen during setup.
