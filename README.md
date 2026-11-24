@@ -39,8 +39,6 @@ The agent finds your monitors on the Wi-Fi, writes your settings and runs the pa
 
 ### On your phone
 
-On the same Wi-Fi: in Home Air's folder, run `HOST=0.0.0.0 ./homeair start-at-login on` (Home Air then starts at each login, and anyone on that Wi-Fi can open the page), then open `http://<the computer's name>.local:5555` on the phone. After `./homeair home-server`, the address is `http://<the server>:8000`. Away from home, use Home Air online ([DEPLOYMENT.md](DEPLOYMENT.md)).
-
 To add the page to the home screen: Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); the page then opens like an app. It works offline only on https, which Home Air online (on Railway) has.
 
 ## Features
