@@ -74,6 +74,11 @@ def test_sinus_pill_by_state():
     assert "30%" in pill_why("sinus", {"rh": 24}, ok=False, state="Too dry")
     assert "Tree pollen is 4 of 5" in pill_why("sinus", {"pollen_index": 4, "pollen_type": "tree"}, ok=False, state="Pollen high")
     assert "item above" not in pill_why("sinus", {"rh": 64, "pollen_index": 4}, ok=False, state="Damp + pollen")
+    # a CO₂ or humidity airing in the actions: "windows shut" names it as its exception, never contradicts it
+    damp = pill_why("sinus", {"rh": 64, "pollen_index": 4, "dehumidifier": True, "airing_for": "for CO₂"}, ok=False, state="Damp + pollen")
+    assert damp == "Damp inside and pollen outside: dehumidify with the windows shut, except a short airing for CO₂."
+    high = pill_why("sinus", {"pollen_index": 4, "pollen_type": "tree", "airing_for": "for CO₂"}, ok=False, state="Pollen high")
+    assert high == "Tree pollen is 4 of 5 today: keep the windows shut, except a short airing for CO₂."
 
 
 def test_runner_pill_by_state():

@@ -82,10 +82,16 @@ PILLS = {
     "sinus": {"Too damp": "Humidity is over {rh_damp}%: mold and dust mites like it, and both set off allergies.",
               "Too dry": "Humidity is under {rh_dry}%: dry air irritates the nose and sinuses.",
               # {no_indoor_on}: a home without an indoor monitor, so pollen only
-              "Pollen high": ["{no_indoor_on}{pollen_type_cap} pollen is {pollen_index} of 5 today: keep the windows shut (pollen only: no indoor monitor for humidity).",
+              # {airing_for}: a CO₂ or humidity airing in the actions, the one exception to "windows shut" (summary.with_airing)
+              "Pollen high": ["{pollen_type_cap} pollen is {pollen_index} of 5 today: keep the windows shut, except a short airing {airing_for}.",
+                              "Pollen is high today: keep the windows shut, except a short airing {airing_for}.",
+                              "{no_indoor_on}{pollen_type_cap} pollen is {pollen_index} of 5 today: keep the windows shut (pollen only: no indoor monitor for humidity).",
                               "{no_indoor_on}Pollen is high today: keep the windows shut (pollen only: no indoor monitor for humidity).",
                               "{pollen_type_cap} pollen is {pollen_index} of 5 today: keep the windows shut.", "Pollen is high today: keep the windows shut."],
-              "Damp + pollen": ["{dehumidifier_on}Damp inside and pollen outside: dehumidify with the windows shut.",
+              "Damp + pollen": ["{dehumidifier_on}Damp inside and pollen outside: dehumidify with the windows shut, except a short airing {airing_for}.",
+                                "{ac_dry_on}Damp inside and pollen outside: run the AC’s dry mode with the windows shut, except a short airing {airing_for}.",
+                                "Damp inside and pollen outside: keep the windows shut, except a short airing {airing_for}.",
+                                "{dehumidifier_on}Damp inside and pollen outside: dehumidify with the windows shut.",
                                 "{ac_dry_on}Damp inside and pollen outside: run the AC’s dry mode with the windows shut.",
                                 "Damp inside and pollen outside: keep the windows shut."],
               "All fine": "Humidity is between {rh_dry} and {rh_damp}%.",   # no pollen reading: nothing to say about it

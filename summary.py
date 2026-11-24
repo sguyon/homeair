@@ -292,16 +292,18 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
 
 
 AIRING = ("Open a window", "Air the room")   # the action texts that open a window for a few minutes
-AIRING_FOR = {"co2": "CO₂", "rh": "the humidity"}   # what each airing is for, in the pollen action's exception
+AIRING_FOR = {"co2": "for CO₂", "rh": "to dry the room"}   # what each airing is for, in the pollen action's exception
 
 
 def with_airing(items):
     """A CO₂ or humidity airing wins over high pollen (a few minutes of pollen against hours of stale or damp air), so the
-    pollen action names it as its one exception instead of contradicting it. Pollen is a daily index: no better hour."""
+    pollen action names it as its one exception instead of contradicting it. Pollen is a daily index: no better hour.
+    Returns what the airing is for ("for CO₂"), or None: the sinus profile's sentence names the same exception."""
     airing = next((it for it in items if it["id"] in AIRING_FOR and (it["action"]["text"] or "").startswith(AIRING)), None)
     for it in items:
         if it["id"] == "pollen" and airing:
-            it["action"]["text"] = f"Keep windows shut except a short airing for {AIRING_FOR[airing['id']]}"
+            it["action"]["text"] = f"Keep windows shut except a short airing {AIRING_FOR[airing['id']]}"
+    return AIRING_FOR[airing["id"]] if airing else None
 
 
 def profiles_row(r, outlook, pollen_today, smoke, night, now, indoor=True):
@@ -538,13 +540,13 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
             home = {"forecast_fit": fit, **({"monitor_label": monitor_label} if monitor_label else {}), **source_facts}
         it["why"] = phrases.why(it["id"], {**f, **home})
         it["facts"] = f
-    with_airing(items)
+    airing_for = with_airing(items)
 
     profiles = profiles_row(r, outlook, pollen_today, smoke, night, now, indoor)
     # the appliances pick the damp-room words, and the home's monitors the words for a missing one; like `home` above,
     # not kept as facts
     words = {**{a: True for a in APPLIANCES}, **({"source_kind": source["kind"]} if source else {}),
-             **({} if indoor else {"no_indoor": True})}
+             **({} if indoor else {"no_indoor": True}), **({"airing_for": airing_for} if airing_for else {})}
     for n in profiles:
         n["why"] = phrases.pill_why(n["id"], {**n["facts"], **words}, n["ok"], n["state"])
     show_rh = any(i["id"] == "rh" and not i["facts"].get("dry") for i in items)

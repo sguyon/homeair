@@ -300,6 +300,8 @@ def test_indoor_near_story(c):
     profiles = profiles_of(s)
     assert profiles["runner"]["state"] == "Run after 11 AM"
     assert profiles["toddler"]["state"] == "Stale indoors" and profiles["sinus"]["state"] == "Damp + pollen"
+    # the sinus sentence keeps the CO₂ airing beside its "windows shut", as the pollen card does
+    assert "except a short airing for CO₂" in profiles["sinus"]["why"], profiles["sinus"]["why"]
 
 
 def test_indoor_model_story(c):
