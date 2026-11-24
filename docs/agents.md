@@ -5,14 +5,22 @@
 > [!WARNING]
 > **Experimental.** The skill and the MCP server are only partly tested: the skill has been tried with Claude Code and Codex, and the other assistants on this page haven't been tried. If a step fails, please [open an issue](https://github.com/sguyon/homeair/issues) with the assistant's name, the step and what the assistant said.
 
-## Which one for your assistant
+## Find your assistant
 
-| Your assistant | Use | Start with |
-|---|---|---|
-| Claude Code, Codex, Cursor or Gemini CLI, on the computer with Home Air's folder | [The skill](#the-skill) | `./homeair skill add` in Home Air's folder |
-| Another agent that runs commands: OpenClaw, Hermes, or one on another computer | [The MCP server](#the-mcp-server) | Ask the agent: "Add Home Air's MCP server at `<address>/mcp`, following https://github.com/sguyon/homeair/blob/main/docs/agents.md" |
-| claude.ai, Claude Desktop or Claude's phone apps | [The MCP server](#the-mcp-server), with Home Air [online](../DEPLOYMENT.md#railway) | Put Home Air online, then add a custom connector with `https://<name>.up.railway.app/mcp` |
-| Claude Desktop, with Home Air on this computer or on a home server | [The MCP server](#the-mcp-server) | The last row of the MCP server table |
+1. **Claude Code, Codex, Cursor or Gemini CLI, on the computer with Home Air's folder**
+   - Use [the skill](#the-skill).
+   - In Home Air's folder, run `./homeair skill add`.
+2. **Another agent that runs commands** (OpenClaw, Hermes, or one on another computer)
+   - Use [the MCP server](#the-mcp-server).
+   - Ask the agent, with your `<address>`:
+     ```text
+     Add Home Air's MCP server at <address>/mcp, following https://github.com/sguyon/homeair/blob/main/docs/agents.md
+     ```
+3. **claude.ai, Claude Desktop or Claude's phone apps**
+   - Use [the MCP server](#the-mcp-server), with Home Air [online](../DEPLOYMENT.md#railway).
+   - Put Home Air online, then add a custom connector with `https://<name>.up.railway.app/mcp`.
+4. **Claude Desktop, with Home Air on this computer or on a home server**
+   - Use [the MCP server](#the-mcp-server) through a bridge: the last row of its table.
 
 `<address>` is where Home Air runs: see [Your Home Air address](#your-home-air-address).
 
