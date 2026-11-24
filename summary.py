@@ -291,6 +291,19 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
     return act(None)
 
 
+AIRING = ("Open a window", "Air the room")   # the action texts that open a window for a few minutes
+AIRING_FOR = {"co2": "CO₂", "rh": "the humidity"}   # what each airing is for, in the pollen action's exception
+
+
+def with_airing(items):
+    """A CO₂ or humidity airing wins over high pollen (a few minutes of pollen against hours of stale or damp air), so the
+    pollen action names it as its one exception instead of contradicting it. Pollen is a daily index: no better hour."""
+    airing = next((it for it in items if it["id"] in AIRING_FOR and (it["action"]["text"] or "").startswith(AIRING)), None)
+    for it in items:
+        if it["id"] == "pollen" and airing:
+            it["action"]["text"] = f"Keep windows shut except a short airing for {AIRING_FOR[airing['id']]}"
+
+
 def profiles_row(r, outlook, pollen_today, smoke, night, now, indoor=True):
     """Toddler, Sinus & allergy, Runner: ok True (green), False (amber) or None (no reading), a short state, and the facts
     phrases.pill_why turns into the (i) text. Without an indoor monitor (indoor False) the toddler can't be judged
@@ -525,6 +538,7 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
             home = {"forecast_fit": fit, **({"monitor_label": monitor_label} if monitor_label else {}), **source_facts}
         it["why"] = phrases.why(it["id"], {**f, **home})
         it["facts"] = f
+    with_airing(items)
 
     profiles = profiles_row(r, outlook, pollen_today, smoke, night, now, indoor)
     # the appliances pick the damp-room words, and the home's monitors the words for a missing one; like `home` above,

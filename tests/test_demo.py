@@ -110,6 +110,8 @@ def test_rush_story(c):
     assert 30 <= int(pm["num"]) <= 35
     assert pm["action"]["when"] == "until 11 AM"
     assert items["pollen"]["num"] == "4" and items["pollen"]["facts"]["pollen_type"] == "tree"
+    # the CO₂ airing wins over pollen, and the pollen card says so: never "open a window" beside "keep windows shut"
+    assert items["pollen"]["action"]["text"] == "Keep windows shut except a short airing for CO₂"
     profiles = profiles_of(s)
     # the runner: run after the dirty stretch ends, at the same 11 AM the windows wait for
     assert profiles["runner"]["ok"] is False and profiles["runner"]["state"] == "Run after 11 AM"

@@ -695,3 +695,20 @@ def test_indoor_only_nearby_monitor_names_it():
 
 def test_two_monitor_summary_unchanged_by_the_new_arguments():
     assert busy() == busy(source=None, indoor=True)
+
+
+def test_pollen_makes_room_for_an_airing():
+    """Pollen says "keep windows shut" for the day; a CO₂ or humidity airing beside it would contradict it, so the pollen
+    action names the airing as its one exception. With nothing to air, it stays as it is."""
+    from summary import with_airing
+    shut = {"text": "Keep windows shut", "when": "today", "when_end": None}
+    items = [{"id": "co2", "action": {"text": "Open a window for 10 min", "when": "after 11 AM"}},
+             {"id": "pollen", "action": dict(shut)}]
+    with_airing(items)
+    assert items[1]["action"]["text"] == "Keep windows shut except a short airing for CO₂"
+    items = [{"id": "rh", "action": {"text": "Air the room for 10 min", "when": "after 2 PM"}}, {"id": "pollen", "action": dict(shut)}]
+    with_airing(items)
+    assert items[1]["action"]["text"] == "Keep windows shut except a short airing for the humidity"
+    items = [{"id": "co2", "action": {"text": "Run the purifier", "when": "now"}}, {"id": "pollen", "action": dict(shut)}]
+    with_airing(items)
+    assert items[1]["action"] == shut
