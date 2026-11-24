@@ -1,71 +1,111 @@
 <!doctype html>
-<!-- The README's hero image: a MacBook Pro with the desktop's first screen (Morning rush), an iPhone 14 Pro in front with the phone's (All clear).
-     scripts/screenshot.sh opens it with ?theme=light|dark&desk=<png>&phone=<png>&bg=<hex> and shoots it on a transparent background.
-     Device frames: Devices.css (MIT, github.com/picturepan2/devices.css), vendored in scripts/vendor. -->
+<!-- The README's hero image: the desktop page's first screen (Morning rush) in a rounded panel with a soft shadow, no window
+     chrome, and a current iPhone over its lower right corner with the phone's first screen (All clear).
+     scripts/screenshot.sh opens it with ?theme=light|dark&desk=<png>&phone=<png>&bg=<hex>[&look=cropped] and shoots it on a
+     transparent background. look=cropped: lighter shadows, for the hero on a white background, cropped tight. Standalone: nothing fetched beyond the two captures. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Hero</title>
-<link rel="stylesheet" href="vendor/devices.min.css">
 <style>
   html, body { margin: 0; background: transparent; }
-  :root { --ink: #10181f; }
-  :root.dark { --ink: #f2f5f8; }
-  /* 72 px of room on every side, more than any shadow reaches, so every shadow fades to nothing inside the stage;
-     screenshot.sh then trims to the last non-transparent pixel */
-  .stage { position: relative; width: 920px; height: 640px; }
-  /* the laptop behind, at its native Devices.css size (screen 600 × 375, the desktop's 16:10) */
-  .laptop { position: absolute; left: 72px; top: 72px; filter: drop-shadow(0 16px 20px rgba(10, 20, 30, .14)); }
-  .laptop .device-screen { object-position: top left; }
-  /* the phone in front, over the laptop's lower right, at the same zoom as the laptop's screen
-     (390 px of page in 187 px, 1440 in 600): the wrapper places it, zoom sizes it and keeps it sharp */
-  .phone-at { position: absolute; z-index: 2; left: 643px; top: 107px; width: 205.44px; height: 416.64px; filter: drop-shadow(0 22px 26px rgba(10, 20, 30, .26)); }
-  .phone { zoom: .48; }
-  .phone .device-screen { overflow: hidden; background: var(--bg, #f4f6f8); }
-  .phone .device-screen img { width: 390px; height: auto; display: block; }
-  /* iOS status bar, so the page starts below the Dynamic Island as it does on a real phone */
-  .status { height: 54px; display: flex !important; align-items: center; justify-content: space-between; padding: 6px 34px 0 50px;
-    font: 600 17px/1 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--ink); letter-spacing: -.01em; }
-  .status .icons { display: flex !important; gap: 6px; align-items: center; }
+  :root {
+    --ink: #0b0c0e;                  /* the phone's status bar and home indicator */
+    --ring: rgba(16, 24, 40, .09);   /* the hairline around the panel */
+    --sh1: rgba(16, 24, 40, .10);    /* the panel's close shadow */
+    --sh2: rgba(16, 24, 40, .16);    /* the panel's far shadow */
+    --ph0: rgba(0, 0, 0, .10);       /* the phone's contact shadow, close and far */
+    --ph1: rgba(10, 14, 20, .30);
+    --ph2: rgba(10, 14, 20, .30);
+  }
+  :root.dark {
+    --ink: #f5f6f8;
+    --ring: rgba(255, 255, 255, .11);
+    --sh1: rgba(0, 0, 0, .30);
+    --sh2: rgba(0, 0, 0, .40);
+    --ph0: rgba(0, 0, 0, .30);
+    --ph1: rgba(0, 0, 0, .50);
+    --ph2: rgba(0, 0, 0, .50);
+  }
+  /* the dark hero sits on GitHub's dark page (#0d1117), the same darkness as the app's dark page: a dark shadow can't
+     separate them, so a lit edge and a faint neutral light around it do, fading out inside the stage's room */
+  :root.dark .win { box-shadow: 0 0 0 1px rgba(255, 255, 255, .20), 0 0 0 2px rgba(0, 0, 0, .6), 0 0 60px -12px rgba(255, 255, 255, .10); }
+  :root.dark .phone { box-shadow: 0 0 0 1px rgba(255, 255, 255, .16), 0 0 0 2px rgba(0, 0, 0, .6), 0 2px 4px var(--ph0), 0 24px 48px -16px rgba(0, 0, 0, .7); }
+  /* the cropped hero sits on white with about 30 px below it: shadows half as dark and short enough to fade out inside that */
+  :root.cropped .win { box-shadow: 0 0 0 1px var(--ring), 0 6px 16px -6px rgba(16, 24, 40, .05), 0 14px 24px -10px rgba(16, 24, 40, .07); }
+  :root.cropped .phone { box-shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 8px 16px -4px rgba(10, 14, 20, .14), 0 16px 24px -10px rgba(10, 14, 20, .10); }
+  .stage { position: relative; }
+  /* the panel: the page's own first screen, rounded, with 100 px of room on the top and left (more than its shadow reaches) */
+  .win { position: absolute; left: 100px; top: 100px; width: 1240px; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--ring), 0 14px 32px -12px var(--sh1), 0 36px 64px -28px var(--sh2); }
+  .win img { display: block; width: 100%; height: auto; }
+
+  /* the phone: an iPhone 15 Pro-class body, the page at 0.7277 of its 393 × 852 pt screen (286 × 620) */
+  .phone { position: absolute; width: 310px; height: 644px; border-radius: 54px; padding: 2px; box-sizing: border-box;
+    background: linear-gradient(150deg, #74777c 0%, #2b2c2f 22%, #3d3f43 50%, #26272a 78%, #5d6065 100%);   /* the titanium edge */
+    box-shadow: 0 2px 4px var(--ph0), 0 20px 36px -12px var(--ph1), 0 40px 64px -28px var(--ph2); }
+  .bezel { width: 100%; height: 100%; border-radius: 52px; background: #050506; padding: 10px; box-sizing: border-box; }
+  .screen { position: relative; width: 286px; height: 620px; border-radius: 42px; overflow: hidden; background: var(--bg, #f8f9fb); }
+  .screen img { display: block; width: 286px; height: auto; }
+  .island { position: absolute; left: 50%; top: 9px; transform: translateX(-50%); width: 90px; height: 26px; border-radius: 13px; background: #000; z-index: 2; }
+  .home-ind { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); width: 98px; height: 4px; border-radius: 2px; background: var(--ink); opacity: .85; z-index: 2; }
+  /* iOS status bar (59 pt at this scale), so the page starts below the Dynamic Island as it does on a real phone */
+  .status { height: 43px; display: flex; align-items: center; justify-content: space-between; padding: 2px 26px 0 34px; box-sizing: border-box;
+    font: 600 12.5px/1 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--ink); letter-spacing: -.01em; }
+  .status .icons { display: flex; gap: 4.5px; align-items: center; }
   .status svg { display: block; fill: currentColor; }
+  /* side buttons: action, volume up and down on the left, power on the right; barely out of the edge */
+  .btn { position: absolute; width: 3px; border-radius: 2px; background: linear-gradient(90deg, #55585d, #2d2e31); }
+  .btn.l { left: -2px; } .btn.r { right: -2px; }
 </style>
 </head>
 <body>
-<div class="stage">
-  <div class="device device-macbook-pro laptop">
-    <div class="device-frame"><img class="device-screen" id="desk" alt=""></div>
-    <div class="device-stripe"></div>
-    <div class="device-header"></div>
-    <div class="device-sensors"></div>
-    <div class="device-btns"></div>
-    <div class="device-power"></div>
+<div class="stage" id="stage">
+  <div class="win" id="win"><img id="desk" alt=""></div>
+  <div class="phone" id="phone-body">
+    <div class="btn l" style="top:118px;height:22px"></div>
+    <div class="btn l" style="top:162px;height:42px"></div>
+    <div class="btn l" style="top:214px;height:42px"></div>
+    <div class="btn r" style="top:178px;height:64px"></div>
+    <div class="bezel"><div class="screen">
+      <div class="island"></div>
+      <div class="status"><span>9:41</span><span class="icons">
+        <svg width="16" height="11" viewBox="0 0 18 12" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+        <svg width="14.5" height="11" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 2.6c2.3 0 4.4.9 6 2.4l1.2-1.2A10.2 10.2 0 0 0 8 .9C5.2.9 2.7 2 .8 3.8L2 5c1.6-1.5 3.7-2.4 6-2.4Zm0 3.5c1.3 0 2.5.5 3.5 1.3l1.2-1.2A6.7 6.7 0 0 0 8 4.4c-1.8 0-3.4.7-4.7 1.8l1.2 1.2c1-.8 2.2-1.3 3.5-1.3Zm0 3.4c-.6 0-1.1.2-1.5.6L8 11.6l1.5-1.5c-.4-.4-.9-.6-1.5-.6Z"/></svg>
+        <svg width="24" height="11.5" viewBox="0 0 27 13" aria-hidden="true"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2"/><path d="M25 4.5v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2Z" fill-opacity=".45"/></svg>
+      </span></div>
+      <img id="phone" alt="">
+      <div class="home-ind"></div>
+    </div></div>
   </div>
-  <div class="phone-at"><div class="device device-iphone-14-pro device-black phone">
-    <div class="device-frame">
-      <div class="device-screen">
-        <div class="status"><span>9:41</span><span class="icons">
-          <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
-          <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 2.6c2.3 0 4.4.9 6 2.4l1.2-1.2A10.2 10.2 0 0 0 8 .9C5.2.9 2.7 2 .8 3.8L2 5c1.6-1.5 3.7-2.4 6-2.4Zm0 3.5c1.3 0 2.5.5 3.5 1.3l1.2-1.2A6.7 6.7 0 0 0 8 4.4c-1.8 0-3.4.7-4.7 1.8l1.2 1.2c1-.8 2.2-1.3 3.5-1.3Zm0 3.4c-.6 0-1.1.2-1.5.6L8 11.6l1.5-1.5c-.4-.4-.9-.6-1.5-.6Z"/></svg>
-          <svg width="27" height="13" viewBox="0 0 27 13" aria-hidden="true"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2"/><path d="M25 4.5v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2Z" fill-opacity=".45"/></svg>
-        </span></div>
-        <img id="phone" alt="">
-      </div>
-    </div>
-    <div class="device-stripe"></div>
-    <div class="device-header"></div>
-    <div class="device-sensors"></div>
-    <div class="device-btns"></div>
-    <div class="device-power"></div>
-  </div></div>
 </div>
 <script>
   const q = new URLSearchParams(location.search);
   if (q.get('theme') === 'dark') document.documentElement.classList.add('dark');
+  if (q.get('look') === 'cropped') document.documentElement.classList.add('cropped');
   if (q.get('bg')) document.documentElement.style.setProperty('--bg', q.get('bg'));
-  document.getElementById('desk').src = q.get('desk') || '';
-  document.getElementById('phone').src = q.get('phone') || '';
+  const desk = document.getElementById('desk'), phone = document.getElementById('phone');
+  desk.src = q.get('desk') || ''; phone.src = q.get('phone') || '';
+  const PAST_RIGHT = 150;   // px the phone's right edge sits past the panel's: enough to read as in front, not beside
+  const BELOW = 52;         // px the phone's bottom sits below the panel's, so it overlaps the corner
+  const PAD = 100;          // px of room right of the phone, more than its shadow reaches (the edges must stay transparent)
+  const PAD_BOTTOM = 150;   // px of room below the phone, where its shadow falls furthest
+  // place the phone once the panel's height (the desktop capture's) is known, then size the stage around both
+  let placed = false;
+  function place() {
+    const win = document.getElementById('win'), body = document.getElementById('phone-body');
+    const wr = win.offsetLeft + win.offsetWidth, wb = win.offsetTop + win.offsetHeight;
+    body.style.left = (wr + PAST_RIGHT - body.offsetWidth) + 'px';
+    body.style.top = (wb + BELOW - body.offsetHeight) + 'px';
+    const st = document.getElementById('stage');
+    st.style.width = (wr + PAST_RIGHT + PAD) + 'px';
+    st.style.height = (wb + BELOW + PAD_BOTTOM) + 'px';
+    placed = true;
+  }
+  desk.addEventListener('load', place);
   // scripts/screenshot.mjs waits for this instead of the dashboard's checks
-  window.__shotReady = () => [...document.images].every(i => i.complete && i.naturalWidth > 0) && document.fonts.status === 'loaded';
+  window.__shotReady = () => { if (desk.complete && desk.naturalWidth && !placed) place();
+    return placed && [...document.images].every(i => i.complete && i.naturalWidth > 0) && document.fonts.status === 'loaded'; };
 </script>
 </body>
 </html>
