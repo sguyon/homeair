@@ -3,7 +3,8 @@ The agent edits the file itself; this script never edits it and never reads .env
 
 Used by an agent changing a home (AGENTS.md, "Change your home").
 
-Usage: scripts/run.sh scripts/settings.py [--dir FOLDER] backup | restore [BACKUP] | list | show [SECTION]
+Usage: ./homeair settings [--dir FOLDER] backup | restore [BACKUP] | list | show [SECTION]
+(the same as scripts/run.sh scripts/settings.py …)
 `show` with no section leaves out the home's coordinates; `show place` prints them.
 Folder: --dir, else HOME_AIR_DIR, else this Home Air folder. Backups sit next to config.toml as config.toml.bak-<UTC time>.
 """
@@ -27,7 +28,7 @@ def fail(msg):
 
 def cmd_backup(cfg: Path, _):
     if not cfg.is_file():
-        fail(f"No config.toml in {cfg.parent}. Run setup first (SETUP.md) or check the folder.")
+        fail(f"No config.toml in {cfg.parent}. Run ./homeair setup first (SETUP.md), or check the folder.")
     print(backup_config(cfg))
 
 
@@ -37,14 +38,14 @@ def cmd_restore(cfg: Path, args):
         if not src.is_absolute() and not src.exists():
             src = cfg.parent / args.backup
         if src.parent.resolve() != cfg.parent.resolve() or not src.name.startswith(cfg.name + ".bak-"):
-            fail(f"{args.backup} is not a backup of this config. Run `list` to see them.")
+            fail(f"{args.backup} is not a backup of this config. Run ./homeair settings list to see the backups.")
     else:
         found = backups(cfg)
         if not found:
             fail("No backups to restore. Nothing was changed.")
         src = found[0]
     if not src.is_file():
-        fail(f"{src} does not exist. Run `list` to see the backups.")
+        fail(f"{src} does not exist. Run ./homeair settings list to see the backups.")
     try:
         tomllib.loads(src.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as e:
@@ -57,7 +58,7 @@ def cmd_restore(cfg: Path, args):
     copy_now(src, tmp)
     os.replace(tmp, cfg)  # whole-file swap: never half-written
     print(f"Restored {src.name} to {cfg}." + (f" The replaced file is kept as {kept.name}." if kept else "")
-          + " Restart the app to apply it: scripts/run.sh scripts/setup.py --start")
+          + " Restart Home Air to apply the restored settings: ./homeair start")
 
 
 def cmd_list(cfg: Path, _):

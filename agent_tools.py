@@ -13,6 +13,7 @@ MAX_HOURS = 168       # hours of history one call may ask for: the page's longes
 DEFAULT_HOURS = 12    # hours of history when the assistant doesn't say: "last night" from the morning.
 UNITS = "PM2.5 ug/m3, CO2 ppm, humidity %, temperature C"
 CACHED_HOURS = (1, 6, 24, 168)   # the page's History ranges, which the server caches (sources.HIST_TTL): asked for, then trimmed
+STALE_READING_MINUTES = 30   # minutes: a newest reading older than this is stale, and the answer starts by saying when
 STALE_SECONDS = 15 * 60   # a newest reading older than this ends the history window (the demo's fixed clock, a monitor offline)
 
 # The fields read for each measure, first one present wins: the corrected value when the monitor sends it (as static/app.js).
@@ -31,9 +32,9 @@ TOOLS = [
             "The owner's own home air right now, from their Home Air: indoor and outdoor readings (CO2, PM2.5, humidity, "
             "temperature) and what to do, each action with when and why (open or close a window, air a room, run the "
             "purifier or dehumidifier), plus whether the air suits each person type the home chose (toddler, sinus and "
-            "allergy, runner). Use it for: is my air OK, is it stuffy, should I open the window, is it OK to run, cook or "
-            "sleep with the window open. Readings say when they were measured (UTC). Not for other places, weather "
-            "forecasts or medical advice."),
+            "allergy, runner). Use it for: is my air OK, is there enough fresh air, should I open the window, is it OK "
+            "to run, cook or sleep with the window open. Each reading has the time it was measured (UTC). Not for "
+            "other places, weather forecasts or medical advice."),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "annotations": {"title": "Home air now", **READ_ONLY},
     },
@@ -91,9 +92,31 @@ def _reading(row, keys):
     return out
 
 
+DEFAULT_NAMES = {"indoor": "home", "outdoor": "outdoor"}   # the names setup writes (phrases.PLACE_DEFAULTS): said as "Indoor monitor"
+
+
+def _source_line(r, kind, settings):
+    """The answer's last line, ready to say: which monitor and when, in the home's time ("Bedroom monitor, 9:10 PM").
+    Every model in rehearsal (Haiku, Sonnet, Codex) left this out when asked to build it; a ready line gets copied."""
+    if not r or not r.get("at"):
+        return None
+    name = r.get("name")
+    if not name or name == DEFAULT_NAMES.get(kind):
+        label = f"{kind.capitalize()} monitor"
+    else:   # "Bedroom" becomes "Bedroom monitor"; a name that already says monitor stays as it is
+        label = name if name.lower().endswith("monitor") else f"{name} monitor"
+    try:
+        tz = ZoneInfo((settings.get("place") or {}).get("timezone") or "UTC")
+        at = _utc(r["at"]).astimezone(tz)
+    except (ValueError, KeyError):
+        return None
+    return f"{label}, {at.strftime('%I:%M %p').lstrip('0')}"
+
+
 def _home(settings):
+    """demo: the demo's made-up home (on its fixed clock), so an assistant can say so instead of guessing."""
     return {"timezone": (settings.get("place") or {}).get("timezone") or "UTC", "temp_unit": settings.get("temp_unit", "C"),
-            "limits": settings.get("limits", {})}
+            "limits": settings.get("limits", {}), "demo": not settings.get("real_clock", True)}
 
 
 def _rows(fetch):
@@ -122,15 +145,20 @@ def now(fetch, settings):
               "action": (it.get("action") or {}).get("text"), "when": (it.get("action") or {}).get("when"),
               "why": it.get("why")} for it in summary.get("items") or []]
     profiles = [{k: p.get(k) for k in ("name", "state", "ok", "why")} for p in summary.get("profiles") or []]
-    for r in (i, o) if settings.get("real_clock", True) else ():   # how old each reading is, so an assistant
+    for r in (i, o) if settings.get("real_clock", True) else ():   # when each reading was taken, so an assistant
         if r and r.get("at"):                                       # without the skill sees a monitor gone quiet;
             # not on the demo's fixed clock, where every reading would look months old
             try:
-                r["age_minutes"] = max(0, round((datetime.now(timezone.utc) - _utc(r["at"])).total_seconds() / 60))
+                r["minutes_ago"] = max(0, round((datetime.now(timezone.utc) - _utc(r["at"])).total_seconds() / 60))
+                r["stale"] = r["minutes_ago"] > STALE_READING_MINUTES
             except ValueError:
                 pass
+    for r in (i, o):   # the cloud id (or a placeholder for a monitor read on the Wi-Fi) only feeds the read above:
+        if r:          # an assistant took the placeholders 1 and 2 for the demo's (23 Nov)
+            r.pop("id", None)
     return {"home": _home(settings), "units": UNITS, "readings": {"indoor": i, "outdoor": o},
             "read": {"status": read.get("status"), "written_at": read.get("clock"), "all_clear": summary.get("all_clear"),
+                     "source_line": _source_line(i, "indoor", settings) or _source_line(o, "outdoor", settings),
                      "actions": items, "profiles": profiles}}
 
 

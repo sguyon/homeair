@@ -12,18 +12,22 @@
   <li class="pr"><span class="pr-ic">{% if m.kind == 'outdoor' %}{% include "icon_openair.svg" %}{% else %}{% include "icon_one.svg" %}{% endif %}</span><span class="pr-t"><b>{{ m.name }}</b><em>{{ 'Outdoor monitor' if m.kind == 'outdoor' else 'Indoor monitor' if m.kind == 'indoor' else 'Monitor' }}</em></span></li>{% endfor %}
   {% if found|length > shown %}<li class="pr token-more"><span class="pr-t"><em>and {{ found|length - shown }} more</em></span></li>{% endif %}
 </ul>
-<p class="token-next" data-wait-home><b>Keep this page open:</b> your home shows up here when your agent is done. If nothing happens, type “done” in your agent’s chat.</p>
+{% if home_ready %}
+<p class="token-next"><b>Saved.</b> Go back to your agent’s chat and reply <b>done</b>. <a href="/">Open your home ›</a></p>
+{% else %}
+<p class="token-next" data-wait-home><b>Saved.</b> Go back to your agent’s chat and reply <b>done</b>. Your home shows up here in a moment.</p>
+{% endif %}
 {% else %}
 <p class="token-next"><b>No monitors with readings yet.</b> A new monitor shows up here once it has sent its first reading: check it in the AirGradient app. You can close this tab and tell your agent.</p>
 {% endif %}
 {% else %}
-<h2>Connect your AirGradient account</h2>
-<p>Paste a token from your AirGradient account so this app can read your monitors.</p>
+<h2>Add your AirGradient API token</h2>
+<p>Home Air uses it to read your monitors through AirGradient's Cloud API.</p>
 {% if entry %}
 <ol>
   <li><a href="https://app.airgradient.com/settings/place?tab=4" target="_blank" rel="noopener noreferrer">Open AirGradient settings<span class="visually-hidden"> (opens in a new tab)</span></a>
     <p><b>Connectivity → API access</b>: turn it on, then copy the token.</p>
-    <p class="token-hint">Landed on the dashboard after signing in? Press the button again.</p>
+    <p class="token-hint">Landed on AirGradient's dashboard after signing in? Press the button again.</p>
     <details class="token-help"><summary>Show me where</summary>
       <figure><figcaption class="token-help-label">Picture of AirGradient's settings page</figcaption>
         <button type="button" class="token-help-zoom" aria-haspopup="dialog" title="See it larger"><img src="/static/airgradient-api-access.png" width="1200" height="756" alt="AirGradient's settings page, marked: 1 General Settings in the left menu, 2 the Connectivity tab, 3 the API Access row with its Enabled switch and the token's copy button."><span>See it larger</span></button>
@@ -41,8 +45,6 @@
   </form></li>
 </ol>
 <p class="token-storage">Checked with AirGradient, then saved on this computer only. Your agent never sees it.</p>
-{% elif owner_needed %}
-<p class="token-owner">To paste it here, open the private link setup printed, or run <code>{{ connect_cmd }}</code> to see it again.</p>
 {% elif forms_full %}
 <p>Too many token forms are open. Close the other Home Air tabs, then reload this page.</p>
 {% elif instructions == 'railway' %}

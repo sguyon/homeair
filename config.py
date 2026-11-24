@@ -234,6 +234,22 @@ def add_key(text: str, section: str, key: str, value) -> str:
     return "".join(lines)
 
 
+def set_keys(text: str, section: str, values: dict) -> str:
+    """config.toml text with each `key = value` of values set in [section]: an existing line replaced in place, a new
+    one after the section's last key ([section] added at the end when absent). Every other line stays as it is."""
+    for key, value in values.items():
+        lines = text.splitlines(keepends=True)
+        start = next((i for i, l in enumerate(lines) if re.fullmatch(rf"\s*\[{re.escape(section)}\]\s*(#.*)?", l.rstrip("\r\n"))), None)
+        end = next((i for i in range(start + 1, len(lines)) if SECTION_RE.match(lines[i])), len(lines)) if start is not None else None
+        at = next((i for i in range(start + 1, end) if re.match(rf"\s*{re.escape(key)}\s*=", lines[i])), None) if start is not None else None
+        if at is not None:
+            lines[at] = f"{key} = {_toml_value(value)}\n"
+            text = "".join(lines)
+        else:
+            text = add_key(text, section, key, value)
+    return text
+
+
 def config_path(cfg, env: Mapping[str, str] = os.environ, root: Path = ROOT) -> Path | None:
     """The file cfg was read from, for the app to write it back: CONFIG_FILE's or root/config.toml. None for the demo
     and CONFIG_TOML (a variable: the app can't change it)."""
@@ -262,7 +278,9 @@ def replace_text(path: Path, text: str):
 
 
 def _toml_value(value) -> str:
-    return str(value) if isinstance(value, int) and not isinstance(value, bool) else json.dumps(str(value))
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value) if isinstance(value, (int, float)) else json.dumps(str(value))
 
 
 class ConfigError(Exception):

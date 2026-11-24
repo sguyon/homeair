@@ -7,6 +7,7 @@ config.toml
 config.toml.*
 !config.example.toml
 agent-links.json
+agent-url
 connect-code
 !demo/config.toml
 
@@ -37,11 +38,12 @@ public/
 vercel.json
 requirements-dev.txt
 
-# Scripts the server doesn't need. check_config.py and setup.py stay: DEPLOYMENT.md checks the config and the
+# Scripts the server doesn't need, and ./homeair, which runs them through scripts/run.sh. check_config.py and setup.py stay: DEPLOYMENT.md checks the config and the
 # live page from inside the container (docker compose exec ... scripts/setup.py --live)
 scripts/*
 !scripts/check_config.py
 !scripts/setup.py
+homeair
 tools/
 
 # The container files themselves

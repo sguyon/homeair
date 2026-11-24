@@ -26,7 +26,6 @@ def local(monkeypatch, tmp_path):
     (tmp_path / "home").mkdir()
     (tmp_path / "app").mkdir()   # the code file sits apart here, so tests can list the .env folder alone
     monkeypatch.setattr(server, "env_path", tmp_path / "home" / ".env")
-    monkeypatch.setattr(server, "code_path", tmp_path / "app" / server.token_setup.CODE_FILE)
     monkeypatch.setenv("AIRGRADIENT_TOKEN", "")
     # Explicit literals keep the test independent of the production allow/deny lists.
     for marker in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "VERCEL", "RENDER", "FLY_APP_NAME", "K_SERVICE", "DYNO",
@@ -42,17 +41,8 @@ def local(monkeypatch, tmp_path):
         return Reply()
     monkeypatch.setattr(sources.requests, "get", get)
     with server.app.test_client() as client:
-        login(client)
         yield client
     sources._cache.clear()
-
-
-def login(client, base=BASE, **kwargs):
-    """Open the private link setup prints: it sets the owner cookie the box and the save require."""
-    code = server.token_setup.owner_code(server.code_path)
-    response = client.get("/connect?code=" + code, base_url=base, **kwargs)
-    assert response.status_code == 200 and server.token_setup.OWNER_COOKIE in response.headers["Set-Cookie"]
-    return response
 
 
 class Reply:
@@ -64,7 +54,7 @@ class Reply:
 
 
 def page(client, **kwargs):
-    # The token box is at /connect (and at / while nothing else can be shown), for a browser with the owner cookie.
+    # The token box is at /connect (and at / while nothing else can be shown), for a browser on this computer.
     return client.get("/connect", base_url=BASE, follow_redirects=True, **kwargs)
 
 
@@ -86,12 +76,12 @@ def test_local_form_is_visible_and_private(local):
     assert 'id="no-token" hidden' not in text
     assert 'type="password"' in text and 'autocomplete="off"' in text
     assert 'action="/api/token"' in text
-    assert "Connect your AirGradient account" in text and "data-1p-ignore" in text
+    assert "Add your AirGradient API token" in text and "data-1p-ignore" in text
     # "Show me where": closed by default, the picture is in the repo and described for screen readers
     assert '<details class="token-help">' in text and "Picture of AirGradient" in text and 'src="/static/airgradient-api-access.png?v=' in text and "alt=" in text
     assert (Path(server.__file__).parent / "static" / "airgradient-api-access.png").exists()
     assert "https://app.airgradient.com/settings/place?tab=4" in text
-    assert "Your agent never sees it" in text and "Landed on the dashboard" in text
+    assert "Your agent never sees it" in text and "Landed on AirGradient's dashboard" in text
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["Referrer-Policy"] == "same-origin"
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
@@ -100,7 +90,6 @@ def test_local_form_is_visible_and_private(local):
 
 @pytest.mark.parametrize("base,remote", [("http://127.0.0.1:5555", "127.0.0.1"), ("http://[::1]:5555", "::1")])
 def test_loopback_addresses_work(local, base, remote):
-    login(local, base, environ_overrides={"REMOTE_ADDR": remote})   # cookies belong to the name typed
     response = local.get("/connect", base_url=base, environ_overrides={"REMOTE_ADDR": remote})
     value = nonce(response)
     response = local.post("/api/token", base_url=base, environ_overrides={"REMOTE_ADDR": remote},
@@ -117,8 +106,7 @@ def test_nonlocal_requests_never_get_or_submit_form(local):
 
 
 def test_local_page_shows_the_box_to_the_owner(local):
-    """The owner cookie lasts a year, so the box also opens after a restart by the login item. A one-use value and an
-    HttpOnly Strict cookie come with the page itself."""
+    """A one-use value and an HttpOnly Strict cookie come with the page itself."""
     response = local.get("/", base_url=BASE)   # no_token: the page is the box
     assert 'type="password"' in response.get_data(as_text=True)
     cookie = response.headers["Set-Cookie"]
@@ -220,7 +208,6 @@ def test_same_origin_referer_fallback(local):
 def test_nonce_is_one_use_and_bound_to_browser_and_origin(local):
     value = nonce(page(local))
     with server.app.test_client() as stranger:   # another browser of the owner's: its own cookie doesn't fit this form
-        login(stranger)
         assert submit(stranger, value).status_code == 403
     assert submit(local, "wrong-value").status_code == 403
     assert submit(local, value, headers={"Origin": BASE, "Host": "127.0.0.1:5555"}).status_code == 403
@@ -535,7 +522,6 @@ def test_validation_does_not_block_local_page_or_allow_a_second_save(local, monk
         def validate(*a, **k):
             def another_browser():
                 with server.app.test_client() as other:
-                    login(other)
                     return other.post("/api/token", base_url=BASE,
                                       headers={"Origin": BASE, "Referer": BASE + "/"},
                                       data={"setup_nonce": nonce(page(other)), "token": winner}).status_code
@@ -550,10 +536,8 @@ def test_validation_does_not_block_local_page_or_allow_a_second_save(local, monk
 
 
 def test_the_start_line_names_the_command_never_the_code_and_only_without_a_token(local, monkeypatch, capsys):
-    server.print_setup_link(5600)   # this output goes to app.log: the code must not
-    out = capsys.readouterr().out
-    assert out == "No AirGradient token yet. For the private link to the token box, run: scripts/run.sh scripts/setup.py --connect\n"
-    assert server.token_setup.owner_code(server.code_path) not in out
+    server.print_setup_link(5600)   # this output goes to app.log
+    assert capsys.readouterr().out == "No AirGradient API token yet. To add it: http://localhost:5600/connect\n"
     monkeypatch.setattr(server, "TOKEN", TOKEN)
     server.print_setup_link(5600)
     assert capsys.readouterr().out == ""
@@ -602,8 +586,8 @@ def test_connected_card_names_each_monitor_indoor_or_outdoor_and_sends_the_user_
     # the point first: what happens, that nothing is needed, then the fallback; "done" only as the word to type (design check)
     # what to do first (Sacha, 13 Nov: "shouldnt we say to close the page? or do you mean that this page should stay open
     # and refreshes? i'm confused")
-    assert ('<p class="token-next" data-wait-home><b>Keep this page open:</b> your home shows up here when your agent is done. '
-            'If nothing happens, type “done” in your agent’s chat.</p>') in after
+    assert ('<p class="token-next" data-wait-home><b>Saved.</b> Go back to your agent’s chat and reply <b>done</b>. '
+            'Your home shows up here in a moment.</p>') in after
     assert "close this tab" not in after
     assert "go back to your agent" not in text and "says Connected" not in text and "<svg" not in after.split("token-next", 1)[1].split("</p>", 1)[0]
 
@@ -645,38 +629,38 @@ def test_local_mode_opens_the_box_at_connect_only(local_mode):
 
 
 def test_local_mode_saves_the_token_and_goes_live_then_the_box_closes(local_mode):
-    assert submit(local_mode).status_code == 303
+    # Sacha's tests (23 Nov): after saving, the page went home and said nothing; the agent waits for "done".
+    response = submit(local_mode)
+    assert response.status_code == 303 and response.headers["Location"] == "/connect?saved=1"
+    text = local_mode.get("/connect?saved=1", base_url=BASE).get_data(as_text=True)
+    assert "Go back to your agent’s chat and reply <b>done</b>" in text and "data-wait-home" not in text
     assert server.MODE == "live" and server.env_path.read_text() == f"AIRGRADIENT_TOKEN={TOKEN}\n"
     response = local_mode.get("/connect", base_url=BASE)
     assert response.status_code == 303 and response.headers["Location"] == "/"
     assert server.env_path.read_text() == f"AIRGRADIENT_TOKEN={TOKEN}\n"
 
 
-def test_setup_opens_the_private_link_and_it_leads_home_then_to_the_box(local_mode, monkeypatch, capsys):
-    """Setup opens the page of a home read on the Wi-Fi with no token. A bare address never gives that browser the
-    owner cookie, so the box would only ever say "open the private link". The link setup opens carries the code, shows
-    the home first, and leaves the box open at /connect."""
+def test_setup_opens_the_home_and_the_box_is_at_connect(local_mode, monkeypatch, capsys, tmp_path):
+    """A home read on the Wi-Fi with no token: setup opens the home; the token form is at /connect for a browser on
+    this computer (Sacha's test, 23 Nov: the private link reloaded at the home, so the form never showed)."""
     import subprocess
     import sys
     sys.path.insert(0, str(Path(server.__file__).parent / "scripts"))
     import setup
-    root = server.code_path.parent   # setup's folder: the same connect-code file the app reads
+    root = tmp_path / "setup-root"
+    root.mkdir()
     (root / setup.PORT_FILE).write_text("5555\n")
-    for step in ("find_home", "start_app", "start_at_login", "agent_skill", "live"):
+    for step in ("find_home", "start_app", "start_at_login", "live"):
         monkeypatch.setattr(setup, step, lambda *a, **k: 0)
     monkeypatch.setattr(setup, "known_serials", lambda root: ["aabbccddeeff"])
     monkeypatch.setattr(setup.localnet, "environment_blocker", lambda *a, **k: None)
     opened = []
     monkeypatch.setattr(setup.subprocess, "run", lambda cmd, **k: opened.append(cmd[-1]) or subprocess.CompletedProcess(cmd, 0))
     assert setup.one_run({}, root) == 0
-    code = server.token_setup.owner_code(server.code_path, create=False)
-    assert opened == [f"{BASE}/connect?code={code}"] and code not in capsys.readouterr().out
-    with server.app.test_client() as browser:   # a browser that has never had the owner cookie
-        assert 'type="password"' not in browser.get("/connect", base_url=BASE).get_data(as_text=True)
-        response = browser.get(opened[0].removeprefix(BASE), base_url=BASE)
-        assert '<meta http-equiv="refresh" content="0; url=/">' in response.get_data(as_text=True)
-        assert 'type="password"' not in browser.get("/", base_url=BASE).get_data(as_text=True)   # the home first
+    assert opened == [BASE]
+    with server.app.test_client() as browser:
         assert 'type="password"' in browser.get("/connect", base_url=BASE).get_data(as_text=True)
+        assert browser.get("/connect?code=old-link", base_url=BASE).status_code == 303   # an old private link still lands on the form
 
 
 def test_a_saved_token_closes_the_box_before_the_app_notices(local_mode):
@@ -687,10 +671,9 @@ def test_a_saved_token_closes_the_box_before_the_app_notices(local_mode):
     assert server.env_path.read_text() == "AIRGRADIENT_TOKEN=typed-in-a-terminal\n"
 
 
-# The owner's private link (security review of babb53b, 22 Nov): the box answered any program on this computer, another
-# user of it, or a tunnel to 127.0.0.1. Each test below guards one of those holes.
+# Guards that stay after the private code was removed (23 Nov; it had answered the review of babb53b, 22 Nov): proxies and
+# tunnels that add headers, cross-site requests, planted cookies.
 
-OWNER = server.token_setup.OWNER_COOKIE
 FORM = server.token_setup.COOKIE_NAME
 
 
@@ -700,103 +683,41 @@ def no_network(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("headers", [{}, {"Origin": BASE, "Referer": BASE + "/", "Host": "localhost:5555"},
-                                     {"Origin": BASE, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate"}])
-def test_a_local_program_without_the_owner_cookie_gets_no_box_and_cannot_save(local, monkeypatch, headers):
-    """A program on this computer reaches the loopback address and can forge Origin and Host, but holds no owner cookie:
-    no box, no form value, and its save stops at the owner check, before the token is even looked at."""
-    calls = no_network(monkeypatch)
-    owner_value = nonce(page(local))   # the owner's open form
-    with server.app.test_client() as program:
-        response = program.get("/connect", base_url=BASE, headers=headers)
-        text = unescape(response.get_data(as_text=True))
-        assert 'type="password"' not in text and 'name="setup_nonce"' not in text
-        assert "open the private link setup printed, or run <code>scripts/run.sh scripts/setup.py --connect</code>" in text
-        assert OWNER not in response.headers.get("Set-Cookie", "") and FORM not in response.headers.get("Set-Cookie", "")
-        for value in ("forged", owner_value):
-            response = program.post("/api/token", base_url=BASE, headers={"Origin": BASE, "Referer": BASE + "/", **headers},
-                                    data={"setup_nonce": value, "token": "has spaces so the format check would refuse it"})
-            assert response.status_code == 403 and response.get_json() == {"error": server.OWNER_NEEDED_ERROR}
-    assert not calls and not server.env_path.exists()
-    assert submit(local, owner_value).status_code == 303   # the owner's form still works
-
-
-def test_a_wrong_code_sets_nothing_and_compares_in_constant_time(local, monkeypatch):
-    code = server.token_setup.owner_code(server.code_path)
-    with server.app.test_client() as program:
-        for wrong in ("", "x", code[:-1], code + "x", code[:-1] + ("A" if code[-1] != "A" else "B"), "é" * 50, "x" * 5000):
-            response = program.get("/connect", base_url=BASE, query_string={"code": wrong})
-            assert response.status_code == 403 and "Set-Cookie" not in response.headers
-            text = unescape(response.get_data(as_text=True))
-            assert 'type="password"' not in text and "isn't the private one setup printed" in text and code not in text
-    seen = []
-    real = server.token_setup.hmac.compare_digest
-    monkeypatch.setattr(server.token_setup.hmac, "compare_digest", lambda a, b: seen.append((len(a), len(b))) or real(a, b))
-    assert not server.token_setup.code_matches("short", code) and server.token_setup.code_matches(code, code)
-    assert seen == [(64, 64), (64, 64)]   # both sides hashed first: the time doesn't depend on how much of it matched
-
-
-def test_the_right_code_sets_the_owner_cookie_and_reloads_without_the_code(monkeypatch, local):
-    code = server.token_setup.owner_code(server.code_path)
-    with server.app.test_client() as browser:
-        response = browser.get("/connect?code=" + code, base_url=BASE)
-        assert response.status_code == 200
-        cookie = response.headers["Set-Cookie"]
-        assert cookie.startswith(OWNER + "=") and code not in cookie
-        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "Path=/;" in cookie + ";" and "Max-Age=31536000" in cookie
-        body = response.get_data(as_text=True)
-        assert '<meta http-equiv="refresh" content="0; url=/connect">' in body and code not in body
-        assert response.headers["Referrer-Policy"] == "no-referrer" and response.headers["Cache-Control"] == "no-store"
-        assert "Location" not in response.headers
-        assert 'type="password"' in browser.get("/connect", base_url=BASE).get_data(as_text=True)
-        assert 'type="password"' in browser.get("/", base_url=BASE).get_data(as_text=True)   # no_token: the page is the box
-
-
 @pytest.mark.parametrize("header", ["X-Forwarded-For", "X-Forwarded-Host", "Forwarded", "X-Real-IP", "CF-Connecting-IP",
                                     "Tailscale-User-Login", "Tailscale-User-Name"])
 def test_forwarded_requests_are_refused(local, monkeypatch, header):
     """tailscale serve, cloudflared, ngrok or ssh -R reach the app from 127.0.0.1; the headers they add give them away."""
     calls = no_network(monkeypatch)
     value = nonce(page(local))
-    code = server.token_setup.owner_code(server.code_path)
     forwarded = {header: "203.0.113.9"}
     response = local.get("/connect", base_url=BASE, headers=forwarded)
     assert response.status_code == 403 and response.mimetype == "text/plain"
     assert response.get_data(as_text=True) == server.FORWARDED_ERROR + "\n"
-    assert local.get("/connect?code=" + code, base_url=BASE, headers=forwarded).status_code == 403
     assert 'type="password"' not in local.get("/", base_url=BASE, headers=forwarded).get_data(as_text=True)
     assert submit(local, value, headers={"Origin": BASE, **forwarded}).status_code == 403
     assert not calls and not server.env_path.exists()
 
 
-def test_cookieless_and_cross_site_requests_never_evict_a_real_form(local):
-    """Any website can make a browser load this page; it never had the owner cookie (Strict), so it never fills the form
-    store, and a full store refuses new forms instead of dropping old ones."""
+def test_cross_site_requests_get_no_form_and_a_full_store_keeps_the_first(local):
+    """A script on another site (no navigation) never gets a form; a full form store refuses new forms instead of
+    dropping old ones, so the first form still works."""
     value = nonce(page(local))
-    with server.app.test_client() as site:
-        for _ in range(server.token_setup.NONCE_LIMIT + 8):
-            site.get("/connect", base_url=BASE, headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors"})
-            site.get("/", base_url=BASE)
-    # the owner's own browser asks from another site's script (no navigation): no form either
     text = local.get("/connect", base_url=BASE, headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}).get_data(as_text=True)
     assert 'name="setup_nonce"' not in text
-    assert len(server.token_state.nonces) == 1
-    # the owner's other browsers fill the store: the next one is told so, and the first form still works
+    # a hidden frame on another site is a navigation too: no form, or a page could fill the store and block the owner
+    framed = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe"}
+    for _ in range(server.token_setup.NONCE_LIMIT + 2):
+        assert 'name="setup_nonce"' not in local.get("/connect", base_url=BASE, headers=framed).get_data(as_text=True)
     others = []
     for _ in range(server.token_setup.NONCE_LIMIT - 1):
         other = server.app.test_client()
-        login(other)
         nonce(page(other))
         others.append(other)
-    late = server.app.test_client()
-    login(late)
-    assert "Too many token forms are open" in page(late).get_data(as_text=True)
-    for _ in range(3):   # a browser that already has a form makes room among its own
-        nonce(page(local))
-    assert submit(local).status_code == 303
+    assert "Too many token forms are open" in page(server.app.test_client()).get_data(as_text=True)
+    assert submit(local, value).status_code == 303
 
 
-@pytest.mark.parametrize("name", [FORM, OWNER])
+@pytest.mark.parametrize("name", [FORM])
 def test_a_planted_extra_cookie_does_not_block_a_real_save_and_is_cleared(local, name):
     """Another app on localhost (cookies don't keep ports apart) plants a cookie on the form's path, which the browser
     sends first. Every value is checked, the stray one is cleared, and the owner's save goes through."""
@@ -806,64 +727,6 @@ def test_a_planted_extra_cookie_does_not_block_a_real_save_and_is_cleared(local,
     assert response.status_code == 303 and server.env_path.read_text() == f"AIRGRADIENT_TOKEN={TOKEN}\n"
     cleared = [h for h in response.headers.getlist("Set-Cookie") if h.startswith(name + "=") and "Path=/api/token" in h]
     assert cleared and ("Max-Age=0" in cleared[0] or "Expires=Thu, 01 Jan 1970" in cleared[0])
-
-
-def test_a_bad_owner_cookie_alone_is_cleared_at_both_paths(local):
-    with server.app.test_client() as browser:
-        browser.set_cookie(OWNER, "guessed")
-        response = browser.get("/connect", base_url=BASE)
-        assert 'type="password"' not in response.get_data(as_text=True)
-        paths = sorted(h.split("Path=")[1].split(";")[0] for h in response.headers.getlist("Set-Cookie") if h.startswith(OWNER + "="))
-        assert paths == ["/", "/api/token"]
-
-
-def test_failures_from_others_never_lock_the_owner_out(local, monkeypatch):
-    """Before, five bad tokens from anyone closed the box for five minutes; only the owner cookie reaches the count now."""
-    with server.app.test_client() as program:
-        for _ in range(10):
-            assert program.post("/api/token", base_url=BASE, headers={"Origin": BASE}, data={"token": "bad token"}).status_code == 403
-    assert not server.token_state.failures
-    assert submit(local).status_code == 303
-
-
-def test_the_app_never_makes_a_code_itself(local, monkeypatch, tmp_path):
-    """Only setup prints the link, so only setup writes the code: a page view or a guessed link never creates one."""
-    monkeypatch.setattr(server, "code_path", tmp_path / "app" / "none-yet")
-    with server.app.test_client() as browser:
-        assert browser.get("/connect?code=anything", base_url=BASE).status_code == 403
-        assert 'type="password"' not in browser.get("/connect", base_url=BASE).get_data(as_text=True)
-    assert not server.code_path.exists()
-
-
-def test_the_code_file_is_private_and_kept_across_restarts(local, monkeypatch, tmp_path):
-    path = server.code_path
-    code = server.token_setup.owner_code(path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and len(code) >= 43   # 256 bits, urlsafe
-    monkeypatch.setattr(server, "token_state", server.token_setup.TokenState())   # a restart: forms go, the code stays
-    assert server.token_setup.owner_code(path) == code
-    assert 'type="password"' in page(local).get_data(as_text=True)   # the owner cookie from before still opens the box
-    path.chmod(0o644)   # loosened by hand: tightened again, same code
-    assert server.token_setup.owner_code(path) == code and stat.S_IMODE(path.stat().st_mode) == 0o600
-    path.write_text("short\n")   # damaged: the app reads no code (box closed); setup's next link writes a new one
-    assert server.token_setup.owner_code(path, create=False) is None
-    assert 'type="password"' not in page(local).get_data(as_text=True)
-    fresh = server.token_setup.owner_code(path)
-    assert fresh != code and server.token_setup.CODE_FORMAT.fullmatch(fresh)
-    assert 'type="password"' not in page(local).get_data(as_text=True)
-    other = tmp_path / "elsewhere"
-    other.symlink_to(path)
-    with pytest.raises(OSError):
-        server.token_setup.owner_code(other)   # never read through a link
-    assert sorted(p.name for p in path.parent.iterdir()) == [server.token_setup.CODE_FILE]   # no temp file left
-
-
-def test_the_code_never_reaches_the_request_log(local, caplog):
-    code = server.token_setup.owner_code(server.code_path)
-    caplog.set_level(logging.INFO, logger="werkzeug")
-    logging.getLogger("werkzeug").info('%s - - [%s] "%s" %s %s', "127.0.0.1", "22/Nov/2026 10:00:00",
-                                       f"GET /connect?code={code} HTTP/1.1", "200", "-")
-    logging.getLogger("werkzeug").info('"%s" %s %s', f"\x1b[1mGET /connect?other=1&code={code} HTTP/1.1\x1b[0m", "403", "-")
-    assert code not in caplog.text and caplog.text.count("code=***") == 2   # (pytest strips the colors from caplog.text)
 
 
 # --- A token added later (Task 17): the home's own config.toml, written by the app. Real requests go to the fake cloud

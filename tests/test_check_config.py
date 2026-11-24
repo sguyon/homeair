@@ -65,12 +65,13 @@ def test_never_prints_values(tmp_path, capsys):
     assert "AIRGRADIENT_TOKEN set" in out and "GOOGLE_POLLEN_API_KEY set" in out
 
 
-def test_decimals(tmp_path, capsys):
+def test_decimals(tmp_path, capsys, monkeypatch):
+    # config.toml on this computer keeps the exact location (for the roads); online (CONFIG_TOML) it must be rounded
     code, out = run(tmp_path, EXAMPLE.replace("lat = 39.95", "lat = 39.9526"), capsys=capsys)
-    assert code == 1
-    assert "latitude has 4 decimals: round to 2, about 1 km, since the page shows it" in out
-    code, out = run(tmp_path, EXAMPLE.replace("lon = -75.16", "lon = -75.1652"), capsys=capsys)
-    assert "longitude has 4 decimals" in out
+    assert "decimals" not in out
+    monkeypatch.chdir(tmp_path)
+    code = check_config.main([], {"CONFIG_TOML": EXAMPLE.replace("lon = -75.16", "lon = -75.1652")}, tmp_path / "empty")
+    assert code == 1 and "longitude has 4 decimals" in capsys.readouterr().out
 
 
 def test_unknown_timezone(tmp_path, capsys):
@@ -214,11 +215,11 @@ def test_keys_present_reads_keys_the_way_the_server_does(tmp_path):
 def test_config_ok_without_a_token_says_it_is_not_live_yet(tmp_path, capsys):
     """Config OK means the file is valid; without the token the page can't read a monitor: say so (setup lab)."""
     code, out = run(tmp_path, capsys=capsys)
-    assert code == 0 and "Config OK" in out and "Not live yet: add your AirGradient token" in out
+    assert code == 0 and "Config OK" in out and "Not live yet: add your AirGradient API token" in out
     code, out = run(tmp_path, dotenv="AIRGRADIENT_TOKEN=real-looking-value-123\n", capsys=capsys)
     assert "Not live yet" not in out
     serials = EXAMPLE.replace('indoor = "living room"', 'indoor = "living room"\nindoor_serial = "84fce612345a"').replace('outdoor = "porch"', 'outdoor = "porch"\noutdoor_serial = "84fce612345b"')
     (tmp_path / ".env").unlink()
     code, out = run(tmp_path, text=serials, capsys=capsys)
     assert code == 0 and "Config OK" in out and "Problem:" not in out and "Not live yet" not in out
-    assert "Optional: the AirGradient token adds the last 7 days" in out
+    assert "Optional: the AirGradient API token adds the last 7 days" in out

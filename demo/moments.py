@@ -68,7 +68,7 @@ MOMENTS = {
         pm_out=22, pm_base=7, pm_rush_max=19,
         wind_dir=135, wind_speed=9, cloud=55, weather_code=2, visibility=9000, uv_max=6.5,
         sun=(("06:15", "19:39"), ("06:13", "19:40")),
-        pollen_today=(4, 1, 0), pollen_tomorrow=(3, 1, 0), pollen_in_season=(True, True, False),
+        pollen_today=(2, 1, 0), pollen_tomorrow=(2, 1, 0), pollen_in_season=(True, True, False),
         nearby_road=26,
         # the rush: 22 now, 33 at 9, back under 15 by 11; the evening rush stays under the line
         story={"pm_out": ((5, 8), (6, 11), (7, 16), (7.75, 22), (8, 27), (9, 33), (10, 17), (11, 10), (12, 8),
@@ -109,17 +109,18 @@ MOMENTS = {
 
 SAMPLES = ("rush", "clear", "humid")   # ?sample=1, 2, 3: the top area's "Sample 1 2 3"
 
+RUSH_POLLEN, RUSH_POLLEN_TOMORROW = (4, 1, 0), (3, 1, 0)   # the one-monitor cases keep a high-pollen day: their sinus story
 SOURCE_MONITOR_ID = 900001   # indoor-near's public monitor: made up, no real AirGradient monitor has this id
 
 # Homes with one monitor, reachable only by address (?moment=), not in the top area: the morning rush's readings, seen
 # from an indoor-only home that reads a public monitor 1.1 km away (indoor-near) or the model alone (indoor-model),
 # and from an outdoor-only home (outdoor-only). tests/test_demo.py pins what each says.
 HIDDEN = {
-    "indoor-near": replace(MOMENTS["rush"], key="indoor-near", label="Indoor monitor, public monitor nearby",
+    "indoor-near": replace(MOMENTS["rush"], pollen_today=RUSH_POLLEN, pollen_tomorrow=RUSH_POLLEN_TOMORROW, key="indoor-near", label="Indoor monitor, public monitor nearby",
                            outdoor_from=SOURCE_MONITOR_ID, data="rush"),
-    "indoor-model": replace(MOMENTS["rush"], key="indoor-model", label="Indoor monitor, the model outside",
+    "indoor-model": replace(MOMENTS["rush"], pollen_today=RUSH_POLLEN, pollen_tomorrow=RUSH_POLLEN_TOMORROW, key="indoor-model", label="Indoor monitor, the model outside",
                             outdoor_from="model", data="rush"),
-    "outdoor-only": replace(MOMENTS["rush"], key="outdoor-only", label="Outdoor monitor only", indoor=False, data="rush"),
+    "outdoor-only": replace(MOMENTS["rush"], pollen_today=RUSH_POLLEN, pollen_tomorrow=RUSH_POLLEN_TOMORROW, key="outdoor-only", label="Outdoor monitor only", indoor=False, data="rush"),
 }
 
 

@@ -108,10 +108,10 @@ def home(root):
 
 def test_default_command_prepares_editor_file(root, capsys, calls):
     code, out = run(root, capsys, env={})
-    assert code == 0 and ".env" in out
+    assert code == 0 and "API token" in out   # with nothing found, the token is the way in (on the page)
     assert (root / ".env").read_text() == "AIRGRADIENT_TOKEN=\n"
     assert stat.S_IMODE((root / ".env").stat().st_mode) == 0o600
-    assert "Connect AirGradient on the page instead." in out
+    assert "Connect AirGradient on the page instead." not in out   # the unclear old line; "Nothing is read yet" says it
 
 
 @pytest.mark.parametrize("text", ["# keep\nOTHER=x\n", "export AIRGRADIENT_TOKEN=\nOTHER=x\n", f"AIRGRADIENT_TOKEN={TOKEN}\nOTHER=x\n"])
@@ -125,10 +125,30 @@ def test_editor_preparation_keeps_existing_lines_and_values(root, capsys, calls,
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-def test_missing_token_stops_before_lookups(root, monkeypatch, capsys):
-    monkeypatch.setattr(setup, "http_get_json", lambda *a: pytest.fail("token must come first"))
-    code, out = run(root, capsys, "--address", "Denver", env={})
-    assert code == 1 and ".env" in out and not (root / "config.toml").exists()
+def test_without_a_token_the_address_goes_into_the_wifi_config(root, capsys):
+    # The released setup needed the token first; the Wi-Fi setup has none: the place and profiles join its config.toml,
+    # its monitors stay, the exact location stays here (for the roads) and the page still gets it rounded.
+    (root / "config.toml").write_text(f'[place]\ntimezone = "America/Denver"\nindoor = "home"\nindoor_serial = "{IN_SERIAL}"\n\n'
+                                      '[profiles]\ntoddler = false\nsinus = false\nrunner = false\n')
+    code, out = run(root, capsys, "--address", "Denver", "--profiles", "runner", env={})
+    assert code == 0, out
+    cfg = written(root)
+    assert cfg["place"]["indoor_serial"] == IN_SERIAL and cfg["profiles"]["runner"] is True
+    assert cfg["place"]["lat"] == round(float(OGDEN[0]["lat"]), setup.EXACT_DECIMALS)
+    assert home(root).place.lat == round(float(OGDEN[0]["lat"]), 2)   # what leaves the computer and shows on the page
+    code, out = run(root, capsys, "--profiles", "none", env={})
+    assert code == 0 and written(root)["place"]["name"] == cfg["place"]["name"]   # profiles alone keep the place
+    assert written(root)["profiles"]["runner"] is False
+
+
+def test_railway_gets_the_location_rounded(root, monkeypatch, capsys):
+    # The exact location never leaves this computer: Home Air online is public, with no sign-in.
+    (root / "config.toml").write_text('[place]\nname = "Ogden"\nlat = 39.7403\nlon = -104.9753\ntimezone = "America/Denver"\n')
+    (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
+    sent = {}
+    monkeypatch.setattr(setup.subprocess, "run", lambda args, **k: sent.update({args[3]: k["input"]}))
+    assert run(root, capsys, "railway", "--service", "home-air")[0] == 0
+    assert "lat = 39.74\n" in sent["CONFIG_TOML"] and "lon = -104.98\n" in sent["CONFIG_TOML"]
 
 
 def test_small_config_defaults_and_single_resolution(root, monkeypatch, capsys):
@@ -267,7 +287,7 @@ def test_one_nominatim_request_with_user_agent_and_no_second_geocoder(root, monk
     monkeypatch.setattr(setup.requests, "get", get)
     monkeypatch.setattr(setup, "http_get_json", ORIGINAL_HTTP_GET)
     code, out = run(root, capsys, "--address", "Missing place")
-    assert code == 1 and "Couldn't find it" in out
+    assert code == 1 and "Couldn't find that address" in out
     assert len(seen) == 1 and seen[0][0] == setup.NOMINATIM_SEARCH
     assert seen[0][1]["headers"]["User-Agent"] == setup.USER_AGENT and setup.USER_AGENT.startswith("HomeAir/")
 
@@ -315,7 +335,7 @@ def test_railway_uses_stdin_and_prints_only_names(root, monkeypatch, capsys):
 
 
 def test_railway_sends_no_monitor_address_and_needs_the_token(root, monkeypatch, capsys):
-    """A web copy reads the cloud only: no host line leaves this computer, and without the token nothing is sent."""
+    """A Home Air online reads the cloud only: no host line leaves this computer, and without the token nothing is sent."""
     config = '[place]\nname = "Home"\nindoor_serial = "84fce6000001"\nindoor_host = "192.168.1.20"\noutdoor_host = "10.0.0.7"\n'
     (root / "config.toml").write_text(config)
     (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
@@ -486,121 +506,41 @@ def next_line(out):
 
 
 def test_status_on_an_empty_folder_names_the_first_command(root, capsys):
-    out = status(root, capsys, env={})
+    out = status(root, capsys, env={"HOME": str(root)})
     assert next_line(out) == setup.SETUP_CMD
-    assert "not yet" in out and not (root / ".env").exists()
+    assert "A first look" in out and "Your home" in out and "On a home server or online" in out and not (root / ".env").exists()
 
 
-def test_status_after_preparing_says_to_connect_on_the_page(root, capsys):
-    (root / ".env").write_text("AIRGRADIENT_TOKEN=\n")
-    out = status(root, capsys, env={})
-    assert "--start" in next_line(out) and "private link" in next_line(out)
+def test_status_without_a_place_points_to_the_home_questions(root, capsys, monitors, calls):
+    # The first look done, the home's questions not: the way back is written out, never left to memory.
+    run(root, capsys, env=monitors((IN_SERIAL, "I-9PSL", "3.7.1", None)))
+    out = status(root, capsys, env={"HOME": str(root)})
+    assert "Address: not set" in out and "set up my home in Home Air" in out
+    assert "Home Air online needs: the AirGradient API token and the address" in out
 
 
-def test_status_with_a_token_but_no_home_names_the_home_command(root, capsys):
-    (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
-    out = status(root, capsys, env={})
-    assert next_line(out).startswith(setup.SETUP_CMD + " --address")
-    assert TOKEN not in out
-
-
-def test_status_on_a_complete_setup_is_done_with_the_address(root, capsys):
-    code, out = run(root, capsys, "--address", "Denver")
-    assert code == 0, out
+def test_status_on_a_complete_home_needs_nothing_and_never_prints_keys(root, capsys):
+    run(root, capsys, "--address", "Denver", "--profiles", "runner")
     (root / ".env").write_text(f'AIRGRADIENT_TOKEN="{TOKEN}"\n')
-    out = status(root, capsys, env={"PORT": "5600"})
-    assert "Steps 1–4 done" in out and "http://localhost:5600" in out and TOKEN not in out
-    # SETUP.md's done is --live ending with Live OK: the next command starts the page and runs that check.
-    nxt = next_line(out)
-    assert setup.START_CMD in nxt and str(root) in nxt and "PORT=5600" in nxt
-    assert f"{setup.SETUP_CMD} --live http://localhost:5600" in nxt and "the page's address" in nxt
+    out = status(root, capsys, env={"HOME": str(root), "GOOGLE_POLLEN_API_KEY": "invented-pollen-key"})
+    assert "Who lives here: runner" in out and "API token: added" in out and "Home Air online: ready" in out
+    assert next_line(out).startswith("nothing needed") or setup.START_CMD in next_line(out)
+    assert TOKEN not in out and "invented-pollen-key" not in out
 
 
 def test_status_reports_a_broken_config_in_plain_words(root, capsys):
     (root / "config.toml").write_text('[place]\nname = "Home"\n')
-    out = status(root, capsys)
-    assert "config.toml" in out and "lat" in out
-    assert next_line(out).startswith(setup.SETUP_CMD + " --address")
+    out = status(root, capsys, env={"HOME": str(root)})
+    assert "config.toml" in out and "lat" in out and next_line(out) == setup.SETUP_CMD
 
 
-def test_status_says_when_a_monitor_has_no_recent_reading(root, monkeypatch, capsys):
-    run(root, capsys, "--address", "Denver")
-    old = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    monkeypatch.setattr(setup, "account_rows", lambda token, **k: [{**INDOOR, "timestamp": old}])
-    out = status(root, capsys)
-    assert "no recent reading" in out and "Steps 1–4 done" not in out
-    assert setup.STATUS_CMD in next_line(out)
-
-
-def test_status_when_airgradient_cannot_be_reached_is_plain_and_quick(root, monkeypatch, capsys):
-    run(root, capsys, "--address", "Denver")
-    monkeypatch.setattr(setup, "account_rows", ORIGINAL_ACCOUNT_ROWS)
-    seen = []
-    def get(url, **kwargs):
-        seen.append(kwargs)
-        raise requests.ConnectionError(TOKEN)
-    monkeypatch.setattr(setup.requests, "get", get)
-    for verb in ("post", "put", "patch", "delete"):
-        monkeypatch.setattr(setup.requests, verb, lambda *a, **k: pytest.fail("Only GET is allowed"))
-    out = status(root, capsys)
-    assert "couldn't check" in out and TOKEN not in out and "Steps 1–4 done" not in out
-    seen = [k for k in seen if k["timeout"] == setup.STATUS_TIMEOUT]   # the running page's /health, then the account's
-    assert len(seen) == 2
-    assert next_line(out) == setup.STATUS_CMD
-    step4 = next(l for l in out.splitlines() if "4. Readings" in l)
-    assert ".env" not in step4 and step4.count(".") <= 2   # one short sentence, not where the token isn't
-
-
-def _status_with_get(root, monkeypatch, capsys, get):
-    run(root, capsys, "--address", "Denver")
-    monkeypatch.setattr(setup, "account_rows", ORIGINAL_ACCOUNT_ROWS)
-    monkeypatch.setattr(setup.requests, "get", get)
-    out = status(root, capsys)
-    return out, next(l for l in out.splitlines() if "4. Readings" in l)
-
-
-def test_status_when_airgradient_is_slow_says_so_and_to_try_again(root, monkeypatch, capsys):
-    # 2026-11-13: AirGradient took 7 s to connect; a 5 s limit read that as "didn't answer, or refused the token"
-    def get(url, **kwargs):
-        raise requests.ConnectTimeout(TOKEN)
-    out, step4 = _status_with_get(root, monkeypatch, capsys, get)
-    assert f"didn't answer within {setup.STATUS_TIMEOUT} s" in step4 and "refused" not in step4 and TOKEN not in out
-    assert next_line(out) == setup.STATUS_CMD
-    assert setup.STATUS_TIMEOUT >= 15
-
-
-def test_status_when_airgradient_refuses_the_token_says_to_enter_it_again(root, monkeypatch, capsys):
-    class Refused:
-        status_code = 401
-        def raise_for_status(self):
-            raise requests.HTTPError("401", response=self)
-        def json(self):
-            return {"message": TOKEN}
-    out, step4 = _status_with_get(root, monkeypatch, capsys, lambda url, **k: Refused())
-    assert "refused the token" in step4 and "didn't answer" not in step4 and TOKEN not in out
-    assert setup.START_CMD in next_line(out)
-
-
-def test_status_never_prints_key_values_even_when_set_in_the_environment(root, capsys):
-    (root / ".env").write_text("GOOGLE_POLLEN_API_KEY=invented-pollen-key\n")
-    out = status(root, capsys, env={"AIRGRADIENT_TOKEN": TOKEN, "GOOGLE_POLLEN_API_KEY": "invented-pollen-key"})
-    assert TOKEN not in out and "invented-pollen-key" not in out
-
-
-def test_status_names_where_the_config_was_read_from(root, capsys):
-    text = ('[place]\nname = "Denver"\nlat = 39.74\nlon = -104.98\ntimezone = "America/Denver"\n'
-            'indoor = "Bedroom"\nindoor_id = 7001\n[sources]\noutdoor_from = "model"\n')
-    out = status(root, capsys, env={"CONFIG_TOML": text})
-    step3 = next(l for l in out.splitlines() if "3. Home" in l)
-    assert "CONFIG_TOML" in step3 and "config.toml" not in step3
-
-
-LAST_MESSAGE = ["**Your bedroom air is fine: CO₂ 650.**",
-                "Home Air is open at http://localhost:5555 and starts by itself when you log in. Set your place there for "
-                "weather and pollen, and who lives here for tailored actions.",
-                "I've added Home Air's skill to my skills on this computer: ask me about the air at home. I change your "
-                "settings only when you ask and say yes. The first time, I'll ask your permission to run its script. "
-                "To remove the skill, ask me."]
+LAST_MESSAGE = ["**Home Air is running at http://localhost:5555**",
+                "`./homeair setup` opened the page in your browser.",
+                "Both monitors are read on your Wi-Fi:",
+                "- **Living room** (indoor): CO₂ is 650 ppm, under the 800 ppm limit.",
+                "- **Balcony** (outdoor): PM2.5 is 4 µg/m³, under the 15 µg/m³ limit.",
+                "Home Air is in your Mac's Login Items, so it starts again each time you turn on this Mac and sign in.",
+                "Next come 4 optional steps (about 4 min). To stop at any step and do the rest later, reply **skip**."]
 
 
 def doc(name):
@@ -614,35 +554,34 @@ def section(text, title):
 def test_setup_md_last_message_is_the_decided_text():
     # where-it-runs spec, Decided 2 (Sacha's edits, 14 Nov): the address plain on its own line, no tab claim, no log, no
     # start command
-    again = section(doc("SETUP.md"), "Use it again")
-    quoted = [line[2:] for line in again.splitlines() if line.startswith("> ")]
+    again = section(doc("SETUP.md"), "3. Tell the user it's ready")
+    quoted = [line[2:] for line in again.splitlines() if line.startswith("> ")]   # mock 111, picked 24 Nov
     assert [q for q in quoted if q] == LAST_MESSAGE
     message = "\n".join(quoted)
     assert "tab" not in message and "app.log" not in message and "run.sh" not in message
 
 
 def test_setup_md_says_what_each_offer_runs():
-    again = section(doc("SETUP.md"), "Use it again")
-    assert "scripts/run.sh scripts/setup.py --start-at-login on" in section(doc("SETUP.md"), "Start again, check, and connect")
-    assert "scripts/run.sh scripts/setup.py --home-server" in again
-    assert "DEPLOYMENT.md" in again
+    later = section(doc("SETUP.md"), "5. On a home server or online")
+    assert "./homeair start-at-login on" in section(doc("SETUP.md"), "Commands for later")
+    assert "./homeair home-server" in later and "DEPLOYMENT.md" in later and "skill add --url" in later
 
 
 def test_setup_md_has_no_question_about_where_it_runs():
     # mock 97: B, then "statement is better": the last message says what's possible; no question first
     assert "Where should the page run" not in doc("SETUP.md")
     rules = doc("AGENTS.md")
-    assert "- No new questions. Find the answer" in rules and "beyond where the page runs" not in rules
+    assert "- No new questions. The first look" in rules and "beyond where the page runs" not in rules
 
 
 def test_setup_md_commands_use_the_launcher():
     for name in ("SETUP.md", "DEPLOYMENT.md"):
         assert "uv run --python 3.12" not in doc(name), name
-    assert "scripts/run.sh scripts/setup.py" in doc("SETUP.md")
+    assert "./homeair setup" in doc("SETUP.md") and "scripts/setup.py" not in doc("SETUP.md")
 
 
 def test_cloud_sandbox_stops_setup_but_not_development():
-    ready = section(doc("SETUP.md"), "Get ready")
+    ready = section(doc("SETUP.md"), "1. Get Home Air")
     assert "Claude Code on the web" in ready and "Codex cloud" in ready and "stop" in ready
     assert "AGENTS.md" in ready
 
@@ -653,7 +592,7 @@ def test_no_straight_to_railway_path():
 
 
 def test_start_survives_the_session():
-    assert "scripts/run.sh scripts/setup.py --start" in section(doc("SETUP.md"), "Start again, check, and connect")
+    assert "./homeair start" in section(doc("SETUP.md"), "Commands for later")
 
 
 def test_deployment_md_says_which_hosts_are_tested():
@@ -685,25 +624,26 @@ def test_wait_token_gives_up_after_its_limit_and_says_what_to_do_next(root, caps
     monkeypatch.setattr(setup, "account_rows", lambda token, **k: pytest.fail("no token: nothing to look up"))
     code, out = run(root, capsys, "--wait-token", env={})
     assert code == 0 and now[0] >= setup.WAIT_TOKEN_SECONDS
-    assert out.startswith("Not saved yet.") and "--wait-token" in out and "done" in out
+    assert out.startswith("Not saved yet.") and setup.WAIT_TOKEN_CMD in out and "done" in out
     assert setup.WAIT_TOKEN_SECONDS < 120   # one wait fits Claude Code's default 2-minute command limit
 
 
-def test_setup_md_waits_for_the_token_and_falls_back_to_done():
+def test_setup_md_ends_the_turn_on_the_token_and_waits_after_done():
+    # Agents skipped the message when told to send it and wait in the same turn (rehearsals, 23 Nov): the turn ends on it.
     text = (Path(__file__).resolve().parent.parent / "SETUP.md").read_text()
-    assert "scripts/setup.py --wait-token" in text and "no need to reply" in text and "type done" in text
-    assert "Tell me when the page says Connected" not in text
+    assert "then end your turn" in text and "When the page says Saved, reply **done** here." in text
+    assert "./homeair connect --wait" in text and "no need to reply" not in text
 
 
 def test_setup_md_says_where_the_link_is_and_how_to_stop_it():
     # review, Important 4, then --start (14 Nov): the start command prints the setup link and restarts the copy it started
     text = doc("SETUP.md")
-    assert "private `/connect?code=…` link it prints" in text and "`scripts/run.sh scripts/setup.py --connect` prints it again" in text
-    assert "run the start command again to restart it" in text
+    assert "run `./homeair connect` and open the address it prints" in text and "?code=" not in text
+    assert "`./homeair start` starts or restarts Home Air" in text
 
 
 def test_status_suggests_starting_in_the_background():
-    assert setup.START_CMD == "scripts/run.sh scripts/setup.py --start"
+    assert setup.START_CMD == "./homeair start"
 
 
 def skill_root(root):
@@ -728,7 +668,7 @@ def test_agent_on_never_replaces_another_skill_and_off_removes_only_its_own_link
     ours = home / ".claude" / "skills" / setup.SKILL
     assert code == 0 and ours.is_symlink() and ours.resolve() == (root / "skills" / setup.SKILL).resolve()
     assert (theirs / "SKILL.md").read_text() == "someone else's skill" and not theirs.is_symlink()
-    assert "already there" in out and "--agent off" in out
+    assert "already there" in out and setup.AGENT_OFF_CMD in out
     assert run(root, capsys, "--agent", "on", env=env)[0] == 0   # twice is the same as once
     code, out = run(root, capsys, "--agent", "off", env=env)
     assert code == 0 and not ours.exists() and not ours.is_symlink()
@@ -739,7 +679,7 @@ def test_agent_on_never_replaces_another_skill_and_off_removes_only_its_own_link
     ours.mkdir()
     (ours / "SKILL.md").write_text("their own now")
     code, out = run(root, capsys, "--agent", "off", env=env)
-    assert code == 0 and (ours / "SKILL.md").read_text() == "their own now" and "no longer the link setup made" in out
+    assert code == 0 and (ours / "SKILL.md").read_text() == "their own now" and "no longer the link made during setup" in out
 
 
 def test_agent_on_with_every_folder_taken_says_it_did_not_connect(root, capsys, monkeypatch):
@@ -768,7 +708,8 @@ def test_agent_on_records_a_link_made_before_a_later_one_fails(root, capsys, mon
 
 @pytest.mark.parametrize("env, claude_dir, folders", [
     ({"CLAUDECODE": "1"}, False, {setup.SHARED_SKILLS, setup.CLAUDE_SKILLS}),
-    ({"CODEX_SANDBOX": "seatbelt"}, True, {setup.SHARED_SKILLS}),
+    ({"CODEX_SANDBOX": "seatbelt"}, True, {setup.SHARED_SKILLS, setup.CLAUDE_SKILLS}),   # Codex runs it, Claude Code installed: both (23 Nov)
+    ({"CODEX_SANDBOX": "seatbelt"}, False, {setup.SHARED_SKILLS}),
     ({"CODEX_HOME": "/elsewhere"}, False, {setup.SHARED_SKILLS}),   # a user setting, not Codex running: unknown agent
     ({}, True, {setup.SHARED_SKILLS, setup.CLAUDE_SKILLS}),          # unknown agent, Claude Code installed: both
 ])
@@ -779,6 +720,68 @@ def test_agent_on_links_the_folders_of_the_agent_running_setup(root, capsys, mon
         (home / ".claude").mkdir()
     assert run(root, capsys, "--agent", "on", env={"HOME": str(home), **env})[0] == 0
     assert {f for f in (setup.SHARED_SKILLS, setup.CLAUDE_SKILLS) if (home / f / setup.SKILL).is_symlink()} == folders
+
+
+def test_agents_found_by_their_folder_or_their_command(tmp_path):
+    # setup's last message names the coding agents that got the skill: only ones present on this computer
+    home, bin_ = tmp_path / "home", tmp_path / "bin"
+    home.mkdir()
+    bin_.mkdir()
+    assert setup.agents_found({"PATH": str(bin_)}, home) == []
+    (home / ".codex").mkdir()
+    (home / ".gemini").write_text("a file, not the agent's folder")
+    for name in ("claude", "cursor-agent", "gemini-old"):
+        (bin_ / name).write_text("#!/bin/sh\n")
+        (bin_ / name).chmod(0o755)
+    assert setup.agents_found({"PATH": str(bin_)}, home) == ["Claude Code", "Codex", "Cursor"]
+    assert setup.agents_found({}, home) == ["Codex"]   # no PATH: folders only
+
+
+def test_agent_on_names_the_agents_found_that_read_the_linked_folders(root, capsys, monkeypatch):
+    home = skill_root(root)
+    monkeypatch.setenv("HOME", str(home))
+    for folder in (".codex", ".cursor"):
+        (home / folder).mkdir()
+    code, out = run(root, capsys, "--agent", "on", env={"HOME": str(home), "CLAUDECODE": "1"})
+    assert code == 0 and "Added the Home Air skill to Claude Code, Codex and Cursor on this computer: " in out, out
+    assert "Gemini CLI on this computer" not in out and f"To remove the skill: {setup.AGENT_OFF_CMD}" in out
+    run(root, capsys, "--agent", "off", env={"HOME": str(home)})
+    import shutil
+    shutil.rmtree(home / ".claude")   # a computer without Claude Code
+    code, out = run(root, capsys, "--agent", "on", env={"HOME": str(home), "CODEX_SANDBOX": "seatbelt"})
+    assert code == 0 and "Added the Home Air skill to Codex and Cursor on this computer: " in out, out   # no Claude Code link
+    run(root, capsys, "--agent", "off", env={"HOME": str(home)})
+    bare = root / "bare"
+    bare.mkdir()
+    code, out = run(root, capsys, "--agent", "on", env={"HOME": str(bare)})
+    assert code == 0 and "Added the Home Air skill to your coding agents on this computer: " in out, out
+    run(root, capsys, "--agent", "off", env={"HOME": str(bare)})
+
+
+def test_stop_stops_the_copy_start_started_by_its_pid_never_the_login_item(root, capsys, monkeypatch):
+    import autostart
+    stopped = []
+    monkeypatch.setattr(autostart, "login_item", lambda root, home: None)
+    monkeypatch.setattr(autostart, "stop_setup_copy", lambda root: stopped.append(root) or True)
+    (root / setup.PORT_FILE).write_text("5600\n")
+    code, out = run(root, capsys, "--stop", env={"HOME": str(root)})
+    assert code == 0 and stopped == [root] and "Stopped Home Air (it was at http://localhost:5600)" in out
+    monkeypatch.setattr(autostart, "stop_setup_copy", lambda root: False)
+    code, out = run(root, capsys, "--stop", env={"HOME": str(root)})
+    assert code == 0 and "isn't running from this folder: nothing to stop" in out
+    # the login item's copy: the system would start it again, so it is left running and the message says how to turn it off
+    monkeypatch.setattr(autostart, "login_item", lambda root, home: ("launchd", 5555))
+    monkeypatch.setattr(autostart, "port_answers", lambda port: True)
+    monkeypatch.setattr(autostart, "stop_setup_copy", lambda root: pytest.fail("the login item's copy was stopped by its pid"))
+    code, out = run(root, capsys, "--stop", env={"HOME": str(root)})
+    assert code == 1 and setup.LOGIN_OFF_CMD in out
+
+
+def test_stop_setup_copy_says_whether_it_stopped_one(tmp_path):
+    import autostart
+    assert autostart.stop_setup_copy(tmp_path) is False   # no app.pid
+    (tmp_path / autostart.PID_FILE).write_text("not a pid")
+    assert autostart.stop_setup_copy(tmp_path) is False
 
 
 # Setup finds the monitors on the Wi-Fi and writes the home, asking nothing. Fake monitors on loopback, found through
@@ -821,16 +824,14 @@ def test_a_new_home_starts_with_no_profiles(root, capsys, monitors, calls):
     assert home(root).profiles == {"toddler": False, "sinus": False, "runner": False}
 
 
-def test_connect_prints_the_private_link_from_the_code_file(root, capsys):
-    """The link carries the owner's code (kept 0600 in connect-code, the same each time); with a token saved, no link."""
+def test_connect_prints_the_token_forms_address(root, capsys):
+    """The form's plain address on the port setup chose (no private code since 23 Nov); with a token saved, none."""
     (root / setup.PORT_FILE).write_text("5601\n")
     code, out = run(root, capsys, "--connect", env={})
-    secret = (root / setup.token_setup.CODE_FILE).read_text().strip()
-    assert code == 0 and out == f"Connect AirGradient here (a private link: don't share it): http://localhost:5601/connect?code={secret}\n"
-    assert stat.S_IMODE((root / setup.token_setup.CODE_FILE).stat().st_mode) == 0o600
-    assert run(root, capsys, "--connect", env={})[1] == out   # reused, not a new code
+    assert code == 0 and out == "Add your AirGradient API token at http://localhost:5601/connect\n"
+    assert not (root / "connect-code").exists()
     code, out = run(root, capsys, "--connect")   # a token saved
-    assert code == 0 and "/connect" not in out and secret not in out and "already saved" in out
+    assert code == 0 and "/connect" not in out and "already saved" in out
 
 
 def test_setup_writes_both_found_monitors(root, capsys, monitors, calls):
@@ -873,12 +874,12 @@ def test_several_of_a_kind_keep_the_configured_one_else_the_lowest_serial(root, 
     env = monitors((third, "I-9PSL", "3.7.1", None), (IN_SERIAL, "I-9PSL", "3.7.1", None))
     code, out = run(root, capsys, env=env)
     assert code == 0 and written(root)["place"]["indoor_serial"] == IN_SERIAL
-    assert f"Also found: another indoor monitor (…3333, I-9PSL). To read it instead: {setup.SETUP_CMD} --monitor {third}\n" in out
+    assert f"Also found: another indoor monitor (…3333, I-9PSL). To read it instead: {setup.MONITOR_CMD} {third}\n" in out
     path = root / "config.toml"
     path.write_text(path.read_text().replace(IN_SERIAL, third))   # the household switched to the other one
     code, out = run(root, capsys, env=env)
     assert code == 0 and written(root)["place"]["indoor_serial"] == third
-    assert f"Also found: another indoor monitor (…1111, I-9PSL). To read it instead: {setup.SETUP_CMD} --monitor {IN_SERIAL}" in out
+    assert f"Also found: another indoor monitor (…1111, I-9PSL). To read it instead: {setup.MONITOR_CMD} {IN_SERIAL}" in out
     env = monitors((third, "I-9PSL", "3.7.1", "wrong_serial"), (IN_SERIAL, "I-9PSL", "3.7.1", None))
     code, out = run(root, capsys, env=env)   # the household's monitor didn't answer this once: it stays, never swapped
     assert code == 0 and written(root)["place"]["indoor_serial"] == third and "didn't answer" in out, out
@@ -911,13 +912,32 @@ def test_monitor_flag_reads_a_found_serial_and_drops_the_other_monitors_cloud_id
     assert code == 0 and calls == ["start_app"] and len(list(root.glob("config.toml.bak-*"))) == 1
 
 
+def test_monitors_lists_each_one_found_and_which_ones_are_read(root, capsys, monitors, calls):
+    third = "84fce6333333"
+    env = monitors((IN_SERIAL, "I-9PSL", "3.7.1", None), (third, "I-9PSL", "3.7.1", None),
+                   (OUT_SERIAL, "O-1PST", "3.1.3", "old_firmware"))
+    path = root / "config.toml"
+    path.write_text(f'[place]\ntimezone = "America/New_York"\nindoor = "Bedroom"\nindoor_serial = "{IN_SERIAL}"\n'
+                    f'outdoor = "Porch"\noutdoor_serial = "84fce6444444"\n')
+    before = path.read_text()
+    code, out = run(root, capsys, "--monitors", env=env)
+    assert code == 0 and path.read_text() == before and calls == [], out
+    assert out.splitlines() == [
+        f"indoor {IN_SERIAL} (I-9PSL): read by Home Air",
+        f"outdoor {OUT_SERIAL} (O-1PST): not read: firmware 3.1.3 is older than 3.1.4: update it in the AirGradient app",
+        f"indoor {third} (I-9PSL): not read. To read it instead: {setup.MONITOR_CMD} {third}",
+        "outdoor 84fce6444444: read by Home Air, but it didn't answer on the Wi-Fi now"]
+    code, out = run(root, capsys, "--monitors", env=monitors())
+    assert code == 0 and out.startswith("No AirGradient monitor answered on this network.")
+
+
 def test_nothing_found_exits_0_with_the_line(root, capsys, monitors, monkeypatch, tmp_path, calls):
     # Nothing on the Wi-Fi is an ordinary home (the token path), never an error and never a hang.
     env = monitors()
     start = time.monotonic()
     code, out = run(root, capsys, env=env)
     assert code == 0 and time.monotonic() - start < 5
-    assert "No AirGradient monitor answered on this network" in out and "Connect AirGradient on the page instead." in out
+    assert "No AirGradient monitor answered on this network" in out and "Nothing is read yet" in out
     cfg = written(root)
     assert "indoor" not in cfg["place"] and "outdoor" not in cfg["place"]
     # a home without a place or monitor loads (the server starts with it), and nobody is picked yet: "Who lives here" is unset
@@ -930,27 +950,27 @@ def test_nothing_found_exits_0_with_the_line(root, capsys, monitors, monkeypatch
     monkeypatch.setattr(localnet, "environment_blocker", lambda env=os.environ, proc_version=None: real(env, proc))
     (root / "config.toml").unlink()
     code, out = run(root, capsys, env={})
-    assert code == 0 and "WSL can't see your Wi-Fi's monitors" in out
+    assert code == 0 and "WSL can't find the monitors on your Wi-Fi" in out
 
 
 def test_nothing_found_in_a_container_says_where_the_token_goes(root, capsys, monkeypatch, calls):
     monkeypatch.setattr(localnet, "environment_blocker", lambda *a, **k: "container")
     code, out = run(root, capsys, env={})
-    assert code == 0 and "a container can't see your Wi-Fi's monitors" in out and "--home-server" in out
+    assert code == 0 and "a container can't find the monitors on your Wi-Fi" in out and setup.HOME_SERVER_CMD in out
 
 
 
 def test_bare_setup_runs_each_step_once_in_order_and_ends_with_the_live_check(root, capsys, monitors, calls):
     # One command is the whole setup: a step missing or out of order leaves no running page or no skill, silently.
     code, _ = run(root, capsys, env=monitors((IN_SERIAL, "I-9PSL", "3.7.1", None)))
-    assert code == 0 and calls == ["start_app", "start_at_login", "agent_skill", "open_page", "live"]
+    assert code == 0 and calls == ["start_app", "start_at_login", "open_page", "live"]   # the skill is offered after, not added
 
 
 def test_bare_setup_with_nothing_found_opens_the_page_and_skips_the_live_check(root, capsys, monitors, calls):
     # No monitor is an ordinary home: the page opens on the token card, and "Not live yet" would read as a failure.
     code, out = run(root, capsys, env=monitors())
-    assert code == 0 and calls == ["start_app", "start_at_login", "agent_skill", "open_page"]
-    assert "Nothing is read yet" in out and "optional" in out
+    assert code == 0 and calls == ["start_app", "start_at_login", "open_page"]
+    assert "Nothing is read yet" in out and "--wait" in out
 
 
 def test_bare_setup_restarts_the_app_when_the_login_item_cannot_start(root, capsys, monitors, calls, monkeypatch):
@@ -958,7 +978,7 @@ def test_bare_setup_restarts_the_app_when_the_login_item_cannot_start(root, caps
     monkeypatch.setattr(setup, "start_at_login", lambda *a, **k: calls.append("start_at_login") or 1)
     monkeypatch.setattr(setup.autostart if hasattr(setup, "autostart") else __import__("autostart"), "port_answers", lambda port: False)
     code, _ = run(root, capsys, env=monitors((IN_SERIAL, "I-9PSL", "3.7.1", None)))
-    assert code == 0 and calls == ["start_app", "start_at_login", "start_app", "agent_skill", "open_page", "live"]
+    assert code == 0 and calls == ["start_app", "start_at_login", "start_app", "open_page", "live"]
 
 
 def test_live_waits_for_the_first_local_reads_of_an_app_just_started(root, monkeypatch, capsys):
@@ -1061,3 +1081,68 @@ def test_a_connection_that_ends_in_no_route_to_host_is_told_apart(monkeypatch):
         raise requests.ConnectionError("Connection refused")
     with pytest.raises(localnet.LocalReadError, match="ConnectionError"):
         localnet.read_current(None, "192.168.1.20", 80, get=refused)
+
+
+def test_start_at_login_counts_a_home_with_nothing_to_read_as_answering(root, monkeypatch):
+    # No monitor found and no token (rehearse S9, 23 Nov): the page answers but --live can't pass, and start at login
+    # said "the page didn't answer" and skipped writing app.port. Nothing to read yet: the page answering is enough.
+    class Ok:
+        ok = True
+    monkeypatch.setattr(setup.requests, "get", lambda *a, **k: Ok())
+    monkeypatch.setattr(setup, "known_serials", lambda r: [])
+    monkeypatch.setattr(setup, "has_saved_token", lambda env, r: False)
+    monkeypatch.setattr(setup, "live", lambda *a, **k: 1)
+    assert setup.page_answers("http://localhost:1", {}, root) == 0
+
+
+def test_start_at_login_uses_the_port_setup_chose(root, monkeypatch):
+    # Sacha's Mac (23 Nov): 5555 was taken, setup started Home Air on 5601, and start at login tried 5555 and failed.
+    import autostart
+    seen = {}
+    monkeypatch.setattr(autostart, "turn_on", lambda root_, home, env, *a: seen.update(port=env.get("PORT")) or 1)
+    (root / setup.PORT_FILE).write_text("5601\n")
+    setup.start_at_login("on", {"HOME": str(root)}, root, quiet=True)
+    assert seen["port"] == "5601"
+    setup.start_at_login("on", {"HOME": str(root), "PORT": "5700"}, root, quiet=True)
+    assert seen["port"] == "5700"   # a PORT the person set still wins
+
+
+def test_the_skill_goes_to_claude_code_too_when_another_agent_runs_setup(tmp_path):
+    # Codex ran setup on a Mac with Claude Code (23 Nov): only ~/.agents/skills was linked, though the question named both.
+    (tmp_path / ".claude").mkdir()
+    agent, targets = setup.agent_targets({"CODEX_THREAD_ID": "t"}, tmp_path)
+    assert tmp_path / ".claude" / "skills" / setup.SKILL in targets and tmp_path / ".agents" / "skills" / setup.SKILL in targets
+
+
+def test_a_file_error_names_the_file(root, capsys, monkeypatch):
+    # Codex's sandbox (rehearse S12, 24 Nov): "Couldn't read or write a setup file" didn't say which one.
+    monkeypatch.setattr(setup, "one_run", lambda env, root: (_ for _ in ()).throw(PermissionError(1, "Operation not permitted", "/x/Library/LaunchAgents/h.plist")))
+    code, out = run(root, capsys, env={})
+    assert code == 1 and "/x/Library/LaunchAgents/h.plist" in out and "Operation not permitted" in out
+
+
+def test_skill_status_names_the_agents_found(root, capsys, monkeypatch):
+    # SETUP.md's skill step names the agents before asking (mock 111): status is where it reads them, without linking.
+    home = skill_root(root)
+    (home / ".codex").mkdir()
+    (home / ".claude").mkdir()
+    code, out = run(root, capsys, "--agent", "status", env={"HOME": str(home), "PATH": ""})
+    assert code == 0 and "Coding agents on this computer: Claude Code and Codex" in out
+    assert not (home / setup.SHARED_SKILLS / setup.SKILL).exists()
+
+
+def test_a_monitor_that_misses_one_read_is_still_read(root, monkeypatch, monitors):
+    # Sacha's Mac (24 Nov): other programs read the same monitors, the outdoor one missed setup's single read, and
+    # setup left it out of config.toml. A few tries, a second apart, before saying it didn't answer.
+    env = monitors((IN_SERIAL, "I-9PSL", "3.7.1", None), (OUT_SERIAL, "O-1PST", "3.7.1", None))
+    found = localnet.discover(env=env)
+    misses = {OUT_SERIAL: 1}
+    def flaky(_session, address, port):
+        item = next(f for f in found if f.port == port)
+        if misses.get(item.serial):
+            misses[item.serial] -= 1
+            raise OSError("busy")
+        return localnet.read_current(None, address, port)
+    monkeypatch.setattr(setup, "READ_RETRY_WAIT", 0)
+    chosen, lines = setup.found_monitors(found, reader=flaky)
+    assert set(chosen) == {"indoor", "outdoor"} and not any("didn't answer" in l for l in lines)

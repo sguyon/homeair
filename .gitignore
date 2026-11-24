@@ -20,7 +20,8 @@ __pycache__/
 /app.port
 # what setup.py --agent on linked into the agent's skills folders, so --agent off removes only those
 /agent-links.json
-# the owner's private code for the token box (token_setup.owner_code): setup prints the link that carries it
+/agent-url
+# left by older versions: the token form's private code (no longer used)
 /connect-code
 /.connect-code.*
 /home-server/

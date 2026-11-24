@@ -2,7 +2,8 @@
 For a home without an outdoor monitor it also checks the chosen outdoor source answers (one request to AirGradient's
 public map), and --suggest lists the nearby public outdoor monitors and prints the source to choose.
 
-Usage: python scripts/check_config.py [--file PATH] [--suggest]
+Usage: ./homeair check --config, ./homeair check --suggest, or ./homeair check (this, then the running page);
+directly, python scripts/check_config.py [--file PATH] [--suggest]
 """
 import argparse
 import os
@@ -52,13 +53,15 @@ def old_name_note(raw: dict) -> str | None:
     return f"Note: [{OLD_PROFILES_TABLE}] is the old name of [profiles]. It still works; rename it to [profiles]."
 
 
-def extra_problems(raw: dict, root: Path) -> list[str]:
+def extra_problems(raw: dict, root: Path, online: bool = False) -> list[str]:
+    """online: the settings come from CONFIG_TOML, as on Railway. There the exact location must not be: config.toml on
+    this computer keeps it (for the roads) and ./homeair railway sends it rounded; the app rounds it everywhere."""
     out = []
     place = raw.get("place") if isinstance(raw.get("place"), dict) else {}
     for key, label in (("lat", "latitude"), ("lon", "longitude")):
         v = place.get(key)
-        if isinstance(v, float) and decimals(v) > 2:
-            out.append(f"{label} has {decimals(v)} decimals: round to 2, about 1 km, since the page shows it")
+        if online and isinstance(v, float) and decimals(v) > 2:
+            out.append(f"{label} has {decimals(v)} decimals: round to 2, about 1 km: the exact location stays on the computer that ran setup")
     table = profiles_table(raw)
     profiles = raw.get(table) if isinstance(raw.get(table), dict) else {}
     for k in profiles:
@@ -112,7 +115,7 @@ def suggest_line(world, lat: float, lon: float, now, skip=None) -> str:
     if isinstance(choice, int):
         km, mon = first
         return (f"Suggested outdoor_from = {choice}: {publicmap.name_of(mon)}, {km:.1f} km away, the nearest public outdoor "
-                f"monitor reporting now (within {NEARBY_SOURCE_KM} km, its readings stand for your street).")
+                f"monitor reporting now (within {NEARBY_SOURCE_KM} km, so its readings are close to your street's air).")
     if choice == "area":
         return (f'Suggested outdoor_from = "area": no public outdoor monitor within {NEARBY_SOURCE_KM} km; '
                 f"{_monitors(count)} within {AREA_KM} km tune the forecast to your area.")
@@ -206,7 +209,8 @@ def main(argv, env, root: Path = ROOT) -> int:
     elif env.get("CONFIG_TOML", "").strip():
         text = env["CONFIG_TOML"]
     else:
-        print("Problem: No config.toml found. Copy config.example.toml to config.toml and edit it.")
+        print("Problem: No config.toml found. Run ./homeair setup to write one, or copy config.example.toml to "
+              "config.toml and edit the copy.")
         return 1
     print(f"Checked {args.file if args.file else label}")
 
@@ -216,7 +220,7 @@ def main(argv, env, root: Path = ROOT) -> int:
     except tomllib.TOMLDecodeError as e:
         print(f"Problem: {label}: {e}")
         return 1
-    problems += extra_problems(raw, root)
+    problems += extra_problems(raw, root, online=not args.file and label == "CONFIG_TOML")
     cfg = None
     try:
         cfg = load_config({"CONFIG_TOML": text}, root)
@@ -233,7 +237,7 @@ def main(argv, env, root: Path = ROOT) -> int:
     if cfg:
         print(outdoor_source_line(cfg))
         if not located(cfg):
-            print("Place: not set yet (weather, pollen, smoke and nearby monitors wait for it)")
+            print("Place: not set yet (weather, pollen, smoke and nearby monitors need it)")
     for note in (old_name_note(raw), outdoor_from_note(raw)):
         if note:
             print(note)
@@ -248,7 +252,7 @@ def main(argv, env, root: Path = ROOT) -> int:
         pending = [p for p in problems if OUTDOOR_FROM_NEEDED in p]
         problems = [p for p in problems if OUTDOOR_FROM_NEEDED not in p]
         if pending:
-            print("Still to choose: sources.outdoor_from (write the user's pick, then run this check again without --suggest)")
+            print("Still to choose: sources.outdoor_from (write the user's pick, then run ./homeair check --config)")
     for p in problems:
         print(f"Problem: {p}")
     if problems:
@@ -269,8 +273,8 @@ def token_note(cfg) -> str:
     if not named:
         return "Not live yet: connect AirGradient on the page"
     if all(named):
-        return "Optional: the AirGradient token adds the last 7 days (charts start from now)"
-    return "Not live yet: add your AirGradient token to .env in your text editor, then restart the app."
+        return "Optional: the AirGradient API token adds the last 7 days (charts start from now)"
+    return "Not live yet: add your AirGradient API token to .env in your text editor, then restart Home Air (./homeair start)."
 
 
 def outdoor_source_check(cfg, raw: dict, suggest: bool) -> tuple[list[str], list[str]]:

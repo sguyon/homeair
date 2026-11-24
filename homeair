@@ -1,0 +1,87 @@
+#!/bin/sh
+# Home Air's commands: each one is a short name for a script in scripts/, run through scripts/run.sh.
+# This file only maps the names; the scripts do the work, and their long forms still work.
+set -eu
+case "$0" in */*) cd "${0%/*}" ;; esac
+
+usage() {
+    cat <<'EOF'
+Home Air commands, run in the Home Air folder:
+
+  ./homeair setup                      Find your monitors, start Home Air and open the page
+  ./homeair setup --address "…" --profiles …
+                                       Set the home's address and who lives there
+  ./homeair start                      Start Home Air in the background, or restart it (log: app.log; PORT=<port> first for another port)
+  ./homeair serve                      Run Home Air in this window until you stop it (what start at login runs)
+  ./homeair stop                       Stop the copy of Home Air that ./homeair start started
+  ./homeair status                     Show what is done and the next command (changes nothing)
+  ./homeair check [address]            Check the settings, then the running page (this computer's, or the address); changes nothing, Live OK means each monitor has a recent reading
+  ./homeair check --config             Check the settings only (config.toml), before a restart
+  ./homeair check --suggest            List the public outdoor monitors nearby and the outdoor source to choose
+  ./homeair connect                    Show the address of the page where you enter the AirGradient API token
+  ./homeair connect --wait             Wait up to 90 s for the token to be saved, then list the account's monitors
+  ./homeair start-at-login on|off      Start Home Air each time you log in, or stop doing that
+  ./homeair skill add|remove|status    Add the Home Air skill to your coding agents (never over another skill), remove it, or show the links
+  ./homeair skill add --url <address>  Make the skill read Home Air at that address (online or a home server)
+  ./homeair monitors                   List the monitors on your Wi-Fi and which ones Home Air reads (changes nothing)
+  ./homeair monitors use <serial>      Read this monitor instead of the other one of its kind
+  ./homeair settings show|backup|restore|list
+                                       Show config.toml, back it up, restore a backup, or list the backups
+  ./homeair home-server                Prepare a folder to run Home Air on a home server with Docker
+  ./homeair railway --service <name>   Send the settings and keys to a Railway service
+  ./homeair help                       Show this list
+EOF
+}
+
+run() {
+    exec scripts/run.sh "$@"
+}
+
+unknown() {
+    echo "Unknown command: ./homeair $*" >&2
+    echo >&2
+    usage >&2
+    exit 1
+}
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+    setup) run scripts/setup.py "$@" ;;
+    start) run scripts/setup.py --start "$@" ;;
+    serve) run server.py "$@" ;;
+    stop) run scripts/setup.py --stop "$@" ;;
+    status) run scripts/setup.py --status "$@" ;;
+    check)
+        case "${1:-}" in
+            --config) run scripts/check_config.py ;;
+            --suggest) run scripts/check_config.py --suggest ;;
+        esac
+        scripts/run.sh scripts/check_config.py && run scripts/setup.py --live "$@" ;;
+    connect)
+        case "${1:-}" in
+            "") run scripts/setup.py --connect ;;
+            --wait) run scripts/setup.py --wait-token ;;
+            *) unknown connect "$@" ;;
+        esac ;;
+    start-at-login) run scripts/setup.py --start-at-login "$@" ;;
+    skill)
+        case "${1:-}" in
+            add) shift; run scripts/setup.py --agent on "$@" ;;
+            remove) run scripts/setup.py --agent off ;;
+            status) run scripts/setup.py --agent status ;;
+            *) unknown skill "$@" ;;
+        esac ;;
+    monitors)
+        case "${1:-}" in
+            "") run scripts/setup.py --monitors ;;
+            use) shift; run scripts/setup.py --monitor "$@" ;;
+            *) unknown monitors "$@" ;;
+        esac ;;
+    settings) run scripts/settings.py "$@" ;;
+    home-server) run scripts/setup.py --home-server "$@" ;;
+    railway) run scripts/setup.py railway "$@" ;;
+    help|-h|--help) usage ;;
+    *) unknown "$cmd" "$@" ;;
+esac

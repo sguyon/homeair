@@ -571,8 +571,8 @@ def install(server, moment_for_request):
     sources.get_air_forecast = air_model
     sources.smoke_status = smoke_status
     sources.get_smoke_data = lambda *a, **k: smoke_status()["detected"]
-    sources.get_pollen_days = lambda *a, **k: pollen_days(key()) if which() == "sample" else {"today": [], "tomorrow": []}
-    sources.get_pollen_data = lambda *a, **k: pollen_days(key())["today"] if which() == "sample" else []
+    sources.get_pollen_days = lambda *a, **k: pollen_days(moment_for_request().key) if which() == "sample" else {"today": [], "tomorrow": []}
+    sources.get_pollen_data = lambda *a, **k: pollen_days(moment_for_request().key)["today"] if which() == "sample" else []
     sources.source_on = source_on
     sources.pollen_state = lambda: "ok" if sources.source_on("pollen") else "off"   # made up, so no key to miss
     sources.history_points = points

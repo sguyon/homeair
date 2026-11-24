@@ -11,6 +11,7 @@ import http.server, os
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers()
     def log_message(self, *a): pass
+open('app.pid', 'w').write(str(os.getpid()))
 http.server.HTTPServer(('127.0.0.1', int(os.environ['PORT'])), H).serve_forever()
 " 
 """
@@ -24,25 +25,30 @@ def fake_root(tmp_path, script):
     return tmp_path
 
 
+def free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
+
+
 def test_start_waits_for_the_app_and_prints_the_address_and_where_to_connect(tmp_path, capsys):
     root = fake_root(tmp_path, SERVER.replace('"$1"', f'"{sys.executable}"'))
-    env = {"PORT": "5641", "PATH": "/usr/bin:/bin"}
+    first, second = free_port(), free_port()   # fixed ports collide when several checkouts run the tests at once
+    env = {"PORT": first, "PATH": "/usr/bin:/bin"}
     assert setup.start_app(env, root) == 0
     out = capsys.readouterr().out
-    secret = (root / setup.token_setup.CODE_FILE).read_text().strip()   # the owner's code, made by --start when missing
-    assert "Started: http://localhost:5641" in out
-    assert f"Connect AirGradient here (a private link: don't share it): http://localhost:5641/connect?code={secret}" in out
-    assert secret not in (root / "app.log").read_text()   # the app's own output never carries it
+    assert f"Started: http://localhost:{first}" in out
+    assert f"Add your AirGradient API token at http://localhost:{first}/connect" in out
     import urllib.request
-    assert urllib.request.urlopen("http://127.0.0.1:5641/").status == 200
+    assert urllib.request.urlopen(f"http://127.0.0.1:{first}/").status == 200
     (tmp_path / "b").mkdir()
     other = fake_root(tmp_path / "b", SERVER.replace('"$1"', f'"{sys.executable}"'))
-    assert setup.start_app({**env, "PORT": "5643", "AIRGRADIENT_TOKEN": "invented"}, other) == 0   # a saved token: no connect line
+    assert setup.start_app({**env, "PORT": second, "AIRGRADIENT_TOKEN": "invented"}, other) == 0   # a saved token: no connect line
     assert "/connect" not in capsys.readouterr().out
-    import os, signal, subprocess
-    for port in ("5641", "5643"):
-        for p in subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True).stdout.split():
-            os.kill(int(p), signal.SIGTERM)
+    import os, signal
+    for started in (root, other):   # only the apps this test started, by their pid file, never whatever holds a port
+        os.kill(int((started / "app.pid").read_text().split()[0]), signal.SIGTERM)
 
 
 def test_a_bare_live_checks_the_port_start_chose(tmp_path):

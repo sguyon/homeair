@@ -344,7 +344,7 @@
      },
      {
       "action": {
-       "text": "Keep windows shut",
+       "text": "Keep windows shut except a short airing for CO₂",
        "when": "today",
        "when_end": null
       },
@@ -387,7 +387,7 @@
       "name": "Sinus & allergy",
       "ok": false,
       "state": "Damp + pollen",
-      "why": "Damp inside and pollen outside: dehumidify with the windows shut."
+      "why": "Damp inside and pollen outside: dehumidify with the windows shut, except a short airing for CO₂."
      },
      {
       "facts": {
@@ -1010,7 +1010,7 @@
      },
      {
       "action": {
-       "text": "Keep windows shut",
+       "text": "Keep windows shut except a short airing for CO₂",
        "when": "today",
        "when_end": null
       },
@@ -1076,7 +1076,7 @@
       "name": "Sinus & allergy",
       "ok": false,
       "state": "Damp + pollen",
-      "why": "Damp inside and pollen outside: dehumidify with the windows shut."
+      "why": "Damp inside and pollen outside: dehumidify with the windows shut, except a short airing for CO₂."
      },
      {
       "facts": {

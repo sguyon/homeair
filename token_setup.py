@@ -1,7 +1,4 @@
-"""Local first-run entry: request guards, the owner's private code and short-lived, browser-bound form values."""
-import hashlib
-import hmac
-import logging
+"""Local first-run entry: request guards and short-lived, browser-bound form values."""
 import os
 import re
 import secrets
@@ -26,27 +23,17 @@ BROWSER_LIMIT = 32  # browsers remembered at once: bounds memory.
 TOKEN_CHARACTERS = re.compile(r"[A-Za-z0-9._~+=/-]+")  # Plain API credentials; excludes whitespace and dotenv quotes.
 TOKEN_MAX_LENGTH = 4096  # characters: enough for an API credential, while bounding malformed input.
 TOKEN_POST_MAX_BYTES = 8192  # bytes: bounds the token plus form encoding and the one-use value.
-FAILED_ATTEMPT_LIMIT = 5  # failures per window. Only the owner cookie reaches the count, and it has one value: one budget, the owner's.
+FAILED_ATTEMPT_LIMIT = 5  # failures per window, for this computer's page as a whole: one budget.
 FAILED_ATTEMPT_WINDOW = 300  # seconds: retry after five minutes rather than locking out a new setup.
 NONCE_LIFETIME = 600  # seconds: a form expires after ten minutes; reload makes another.
 NONCE_LIMIT = 32  # outstanding forms: bounds memory even if pages are repeatedly opened.
 NONCE_BYTES = 32  # random bytes for one-use form values (256 bits).
 COOKIE_NAME = "aq_token_setup"  # HttpOnly browser cookie the page sets itself; never contains the AirGradient token.
 COOKIE_PATHS = ("/", "/api/token")  # where a cookie is cleared: ours live at /, a planted one may sit on the form's path.
-# The owner's code: a random value in this file next to .env (mode 0600, gitignored), kept across restarts. Only the link
-# setup prints (/connect?code=...) carries it; the box and the save also need the owner cookie that link sets.
-CODE_FILE = "connect-code"
-CODE_BYTES = 32  # random bytes in the code (256 bits).
-CODE_FORMAT = re.compile(r"[A-Za-z0-9_-]{43,}")  # what token_urlsafe(32) writes; anything else in the file is replaced.
-CODE_FILE_MODE = 0o600  # owner read and write only: another user of this computer can't read the code.
-OWNER_COOKIE = "aq_owner"  # HttpOnly, SameSite=Strict, Path=/: a value derived from the code, never the code itself.
-OWNER_COOKIE_AGE = 365 * 24 * 3600  # seconds: a year, so the owner logs in once per browser.
-OWNER_LABEL = b"home-air token box owner v1"  # the HMAC message that turns the code into the owner cookie's value.
 # Headers a proxy or tunnel adds (tailscale serve, cloudflared, ngrok, nginx): the box never opens through one.
 FORWARD_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "Forwarded", "X-Real-IP", "CF-Connecting-IP",
                    "Tailscale-User-Login", "Tailscale-User-Name")
 FORM_SITES = ("none", "same-origin")  # Sec-Fetch-Site values that may get a form: typed or opened by this page itself.
-
 
 def forwarded(req):
     """A proxy or tunnel forwarded this request to the loopback address: the peer isn't really this computer."""
@@ -144,88 +131,18 @@ def same_origin(req):
     return bool(values) and all(values)
 
 
-def _write_code(path, replace):
-    """A new code in a 0600 file written aside, then put in place: a reader never sees a half-written file. Without
-    replace, a code another process wrote first is kept."""
-    tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, CODE_FILE_MODE)
-    try:
-        with os.fdopen(fd, "w", encoding="ascii") as f:
-            f.write(secrets.token_urlsafe(CODE_BYTES) + "\n")
-        if replace:
-            os.replace(tmp, path)
-        else:
-            try:
-                os.link(tmp, path)
-            except FileExistsError:
-                pass
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def owner_code(path, create=True):
-    """The owner's code from `path`; one others can read is made 0600 first. setup.py (create) writes a new one when the
-    file is missing, damaged or not this user's; the app only reads it (None then), so it never makes one nobody printed.
-    The app never prints or logs it; setup.py prints the link that carries it."""
-    path = Path(path)
-    for _ in range(3):
-        try:
-            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        except FileNotFoundError:
-            if not create:
-                return None
-            _write_code(path, replace=False)
-            continue
-        with os.fdopen(fd, encoding="ascii", errors="replace") as f:
-            info = os.fstat(f.fileno())
-            mine = info.st_uid == os.getuid()   # a file someone else put here is replaced, never trusted
-            if mine and info.st_mode & 0o077:
-                os.fchmod(f.fileno(), CODE_FILE_MODE)
-            code = f.read(256).strip()
-        if mine and CODE_FORMAT.fullmatch(code):
-            return code
-        if not create:
-            return None
-        _write_code(path, replace=True)
-    raise OSError(f"couldn't keep a code in {path.name}")
-
-
-def owner_value(code):
-    """The owner cookie's value: an HMAC of the code, so the cookie never holds the code itself."""
-    return hmac.new(code.encode("utf-8", "replace"), OWNER_LABEL, hashlib.sha256).hexdigest()
-
-
-def code_matches(given, code):
-    """Constant time whatever the given value's length or content: both sides are hashed to the same length first."""
-    return hmac.compare_digest(owner_value(given), owner_value(code))
-
-
-def owner_cookie(req, code):
-    """(valid, values): whether any owner cookie the browser sent is this code's, and every value it sent."""
-    values = req.cookies.getlist(OWNER_COOKIE)
-    expected = owner_value(code).encode()
-    return any(hmac.compare_digest(v.encode("utf-8", "replace"), expected) for v in values), values
-
-
 def form_request(req):
-    """A browser says where a request comes from (Sec-Fetch-*): only one typed or opened by this page, or a top-level
-    navigation, may take a form. Without those headers (not a browser) the owner cookie is the gate."""
+    """A browser says where a request comes from (Sec-Fetch-*): only one typed or opened by this page, or a navigation
+    of the browser window itself, may take a form; a frame on another site may not (it could fill the form store and
+    block the owner: security review, 23 Nov). A request without those headers isn't a browser: it gets a form, and
+    the loopback, Host and Origin checks still apply to its save."""
     site, mode = req.headers.get("Sec-Fetch-Site"), req.headers.get("Sec-Fetch-Mode")
     if site is None and mode is None:
         return True
-    return site in FORM_SITES or mode == "navigate"
+    return site in FORM_SITES or (mode == "navigate" and req.headers.get("Sec-Fetch-Dest") in (None, "document"))
 
 
-class _CodeURLFilter(logging.Filter):
-    """The dev server logs each request line: hide the code of a /connect?code= link before any handler sees it."""
-    def filter(self, record):
-        message = record.getMessage()
-        if "code=" in message:
-            record.msg, record.args = re.sub(r"([?&]code=)[^&\s\"'\x1b]*", r"\1***", message), ()
-        return True
 
-
-logging.getLogger("werkzeug").addFilter(_CodeURLFilter())
 
 
 class TokenState:

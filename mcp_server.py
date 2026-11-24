@@ -10,7 +10,7 @@ Who can call it: whoever can reach the app, as for /api/current. On this compute
 says otherwise; a Railway or Docker deploy is reachable from the internet, with no sign-in. A browser page from another
 site can't call it (the Origin check below, against DNS rebinding).
 
-Add it in Claude Code: claude mcp add --transport http home-air http://localhost:5555/mcp
+Add it in Claude Code: claude mcp add --transport http homeair http://localhost:5555/mcp
 """
 import json
 from urllib.parse import urlencode, urlsplit
@@ -25,12 +25,20 @@ LOCAL_ORIGIN_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1")
 PASS_ON = ("moment", "sample", "monitor")   # the outer request's demo choices, kept for the app's own routes
 INSTRUCTIONS = ("Home Air reads one home's air monitors and outdoor data, and lists what to do and when, each with "
                 "its reason. Call home_air_now for any 'should I' question about this home's air, and "
-                "home_air_history for how it has been. Answer from what the tools return; never invent a reading. "
-                "Lead with the action and its timing in a first sentence that stands alone, then the why in two or "
-                "three plain sentences with rounded numbers, then the monitor and the time. Plain sentences only "
-                "(no tables, headings or lists), under about 60 words unless asked for more: the answer may be read "
-                "in a terminal, on a phone, in a messaging app or aloud. "
-                "If a reading is more than 30 minutes old (age_minutes over 30), say so first. "
+                "home_air_history for how it has been. "
+                "Home Air's actions are its rules applied to the readings and this home's limits: use them as the "
+                "starting answer, then think it through with the readings, the history and what you know about the "
+                "person (who is asking, who lives there, what they told you). Give one answer. If it differs from "
+                "Home Air's action, give the reason for the difference in the same sentence (\"Open it at noon: the "
+                "exhaust clears at 11 AM, but the baby naps until noon\"), since Home Air's card may show its own "
+                "timing beside your words. Use only readings the tools return; never invent one. A cause Home Air "
+                "didn't name is a guess and is said as one (\"maybe the cooking\"). "
+                "Lead with the answer and its timing in one sentence that stands alone, then the reasons in two or "
+                "three plain sentences with rounded numbers, then read.source_line as it is (which monitor and when). "
+                "Two to four plain sentences, no tables, headings or lists, about 60 words unless asked for more: the answer may be read in a "
+                "terminal, on a phone, in a messaging app or aloud. "
+                "If a reading is stale (stale: true), start by saying when it was taken: "
+                "'the last reading is from 9:10 PM'. "
                 "This is information about the air, not medical advice.")
 
 # JSON-RPC error codes (https://www.jsonrpc.org/specification#error_object)
@@ -99,7 +107,7 @@ def _handle(msg):
         asked = params.get("protocolVersion")
         version = asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
         result = {"protocolVersion": version, "capabilities": {"tools": {"listChanged": False}},
-                  "serverInfo": {"name": "home-air", "title": "Home Air", "version": SERVER_VERSION},
+                  "serverInfo": {"name": "homeair", "title": "Home Air", "version": SERVER_VERSION},
                   "instructions": INSTRUCTIONS}
     elif method == "ping":
         result = {}
