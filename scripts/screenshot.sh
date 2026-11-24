@@ -54,7 +54,7 @@ CLEAR="${URL}${Q}moment=clear&shot"   # the phone: all clear
 
 DESK_VIEW=1280x800   # the desktop capture: 16:10, narrower than 1440 so the Summary's text reads larger in the panel
 PHONE_VIEW=393x793   # the phone capture: a 393 × 852 pt iPhone's screen below its 59 pt status bar (hero.html draws the bar)
-HERO_VIEW=1600x1300  # hero.html's window: its stage (about 1590 × 1230 CSS px) fits inside
+HERO_VIEW=1600x1200  # hero.html's window: its stage (about 1590 × 1080 CSS px) fits inside
 HERO_DPR=2           # hero.html is shot at twice its size, then scaled down to ≤ 1600 px wide, so text stays sharp
 HERO_MAX_W=1600      # the README images' width: crisp at the README's 800 px on a 2x screen, still a small file
 HERO_BORDER=6        # px of nothing kept around the trimmed shot (about 3 px after scaling: the edge check needs 2)
