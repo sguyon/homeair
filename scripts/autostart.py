@@ -19,6 +19,11 @@ STOP_WAIT = 10                                 # seconds for setup's own copy to
 STOP_POLL = 0.2                                # seconds between checks that it has stopped
 RETRY_WAIT = 2                                 # seconds before launchd gets a second bootstrap, right after a bootout
 PATH_TAIL = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"   # where uv or Python may live, after ~/.local/bin
+# What macOS shows when the login item is installed and first reads the Wi-Fi: it names the programs the item runs
+# (/bin/sh, then uv), not Home Air (seen on the real home, 22 Nov). Said before they appear.
+MACOS_NOTICES = ('macOS will now say "sh" can run in the background, and may ask to allow "uv" to find devices on '
+                 'local networks: both are Home Air, which starts through them. Choose Allow, or it can\'t read your '
+                 'monitors on the Wi-Fi when it starts at login.')
 
 
 def system(platform, which, run):
@@ -113,6 +118,39 @@ def stop_setup_copy(root):
     pid_file.unlink(missing_ok=True)
 
 
+def _port_in(path):
+    """The PORT the start file gives the app, read back from it; None when it can't be read."""
+    try:
+        if path.suffix == ".plist":
+            return int(plistlib.loads(path.read_bytes())["EnvironmentVariables"]["PORT"])
+        for line in path.read_text().splitlines():
+            if line.startswith("Environment=PORT="):
+                return int(line.split("=", 2)[2])
+    except (OSError, KeyError, ValueError, TypeError, plistlib.InvalidFileException):
+        pass
+    return None
+
+
+def login_item(root, home):
+    """The login item set up for this folder: ("launchd" or "systemd", the port it serves), or None (none here, or
+    another folder's)."""
+    for kind, path in (("launchd", plist_path(home)), ("systemd", unit_path(home))):
+        if not path.exists():
+            continue
+        folder, port = _folder_in(path), _port_in(path)
+        if folder is not None and port is not None and folder.resolve() == Path(root).resolve():
+            return kind, port
+    return None
+
+
+def restart(kind, run):
+    """Restart the login item's copy through the system (it reads config.toml again): still one copy, and the
+    system keeps it running. 0 when the system accepted it."""
+    if kind == "launchd":
+        return run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{LABEL}"])
+    return run(["systemctl", "--user", "restart", UNIT])
+
+
 def turn_on(root, home, env, run, which, platform, check):
     from setup import SETUP_CMD, START_CMD, port_from
     kind, reason = system(platform, which, run)
@@ -130,6 +168,7 @@ def turn_on(root, home, env, run, which, platform, check):
         print(f"Port {port} is busy (another copy of the app, or another program). Stop it, then run this again.")
         return 1
     if kind == "launchd":
+        print(MACOS_NOTICES, flush=True)
         path = plist_path(home)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(launchd_plist(root, home, port, host))

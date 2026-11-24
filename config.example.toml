@@ -9,14 +9,21 @@ lat = 39.95
 lon = -75.16
 # Your timezone, as an IANA name (for example America/Chicago, Europe/Paris).
 timezone = "America/New_York"
-# Either monitor may be left out (delete its line), not both. Without an outdoor one, set outdoor_from under [sources].
+# Either monitor may be left out, or both (a home where none was found yet). Without an outdoor one, set outdoor_from under [sources].
 # What to call your indoor monitor in sentences (the room it's in). The page finds the monitor itself, from your token.
 indoor = "living room"
 # Optional account monitor id, written by setup when it discovers your monitors.
 # indoor_id = 7001
+# The monitor's serial (12 hex characters, lowercase): how the app finds it on your Wi-Fi without the token.
+# indoor_serial = "84fce612345a"
+# Only in the home-server copy, written by setup: the monitor's address on your network (private, link-local or loopback), with an optional :port.
+# indoor_host = "192.168.1.20"
 # What to call your outdoor monitor in sentences.
 outdoor = "porch"
 # outdoor_id = 7002
+# outdoor_serial = "84fce612345b"
+# Only in the home-server copy, written by setup.
+# outdoor_host = "192.168.1.21"
 # Your US ZIP code, used for the pollen.com link. Delete this line for no pollen link (outside the US).
 pollen_zip = "19103"
 # Your city or region, used in a few sentences, e.g. "the usual New York season". Leave out for neutral wording.

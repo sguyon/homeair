@@ -20,6 +20,9 @@ __pycache__/
 /app.port
 # what setup.py --agent on linked into the agent's skills folders, so --agent off removes only those
 /agent-links.json
+# the owner's private code for the token box (token_setup.owner_code): setup prints the link that carries it
+/connect-code
+/.connect-code.*
 /home-server/
 
 # Private notes: a separate private repo cloned here
@@ -49,3 +52,7 @@ PRODUCT.md
 
 # Generated setup screenshots (scripts/setup_shots.sh)
 /docs/setup-shots/
+
+# the home's own history of local readings (history_store.py)
+/history.sqlite*
+/local-addresses.json

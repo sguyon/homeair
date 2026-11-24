@@ -217,3 +217,8 @@ def test_config_ok_without_a_token_says_it_is_not_live_yet(tmp_path, capsys):
     assert code == 0 and "Config OK" in out and "Not live yet: add your AirGradient token" in out
     code, out = run(tmp_path, dotenv="AIRGRADIENT_TOKEN=real-looking-value-123\n", capsys=capsys)
     assert "Not live yet" not in out
+    serials = EXAMPLE.replace('indoor = "living room"', 'indoor = "living room"\nindoor_serial = "84fce612345a"').replace('outdoor = "porch"', 'outdoor = "porch"\noutdoor_serial = "84fce612345b"')
+    (tmp_path / ".env").unlink()
+    code, out = run(tmp_path, text=serials, capsys=capsys)
+    assert code == 0 and "Config OK" in out and "Problem:" not in out and "Not live yet" not in out
+    assert "Optional: the AirGradient token adds the last 7 days" in out

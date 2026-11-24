@@ -2,6 +2,11 @@
 
 For access away from home, use Railway. For a home server or NAS, use Docker Compose. Only Railway and Docker are tested: another host that runs a container (Fly.io, Render, a VPS) can build from the `Dockerfile` with the same settings, but it is untested and these steps don't cover it. Keep `config.toml` and `.env` private. Agents run commands themselves and ask once, before the first change to a live service or account, saying what they will do.
 
+## What each host reads
+
+- **This computer, and a home server with Docker:** the monitors on your Wi-Fi, directly, one reading a minute, with no AirGradient token. They keep their own history of the readings (`history.sqlite`). A token is optional there: it adds the monitors' cloud ids, fills the last 7 days of history, and is the fallback if a monitor stops answering.
+- **Railway, or any host online:** AirGradient's cloud only. A copy on the web can't see your Wi-Fi, so it needs the AirGradient token, shows readings up to 5 minutes old, and keeps no history of its own (charts come from AirGradient's cloud). A home without a token adds one first, on its computer's page ([SETUP.md](SETUP.md)); `scripts/setup.py railway` refuses to send a home that has none, and leaves the monitors' Wi-Fi addresses out of what it sends.
+
 ## Railway
 
 Railway builds from this repo's `Dockerfile`. There is no login on the page: anyone with its address can see the readings and the home's rounded location (about 1 km). Keep the address private; telling search engines not to index it is not access control.
@@ -56,7 +61,7 @@ After config or key changes, ask once what will change, then rerun the transfer 
 
 ## Docker
 
-**On a home server** (a mini PC, a Raspberry Pi or a NAS): set up on your computer first ([SETUP.md](SETUP.md)), then run `scripts/run.sh scripts/setup.py --home-server`. It prepares a `home-server` folder (a Compose file using the published image, `config.toml` and a private copy of `.env`) and says the two steps: copy the folder to the server, then run `docker compose up -d` in it. The page opens at `http://<the server>:8000` for every device at home; it has no password, so anyone on that network can see it. A NAS can take the same Compose file through its own screens.
+**On a home server** (a mini PC, a Raspberry Pi or a NAS): set up on your computer first ([SETUP.md](SETUP.md)), then run `scripts/run.sh scripts/setup.py --home-server`. It prepares a `home-server` folder (a Compose file using the published image, `config.toml` and a private copy of `.env`) and says the two steps: copy the folder to the server, then run `docker compose up -d` in it. It looks for your monitors on the Wi-Fi again and writes the addresses it finds into the folder's `config.toml`, because a container can't browse the network: the server reads those addresses directly, with no token. If a monitor's address changes (the router gave it a new one), the server can't find it again on its own: with a token it reads that monitor from the cloud, and without one the card shows its last reading and says it isn't answering; run `--home-server` again on your computer and copy the folder over. The page opens at `http://<the server>:8000` for every device at home; it has no password, so anyone on that network can see it. A NAS can take the same Compose file through its own screens.
 
 **On this machine, from the repo** (the steps below): install Docker with Compose 2.24 or newer. Build from this repo's Dockerfile. Keep `.env` and `config.toml` beside `docker-compose.yml`.
 
@@ -68,7 +73,7 @@ docker compose run --rm --no-deps --user "$(id -u):$(id -g)" -v "$PWD:/work" -w 
   home-air-quality python scripts/setup.py
 ```
 
-Open `.env` in the user's editor and wait while they paste the token (see SETUP.md). Ask the location and profiles, then run the same container command with `--address "…" --profiles none`. It writes the config and checks it and the monitors. On Linux, the app's container user must be able to read the mounted config: `chmod 644 config.toml`.
+A container started this way can't see the Wi-Fi, so it reads AirGradient's cloud and needs the token: open `.env` in the user's editor and wait while they paste it (see SETUP.md). The home-server copy above needs none. Ask the location and profiles, then run the same container command with `--address "…" --profiles none`. It writes the config and checks it and the monitors. On Linux, the app's container user must be able to read the mounted config: `chmod 644 config.toml`.
 
 Start it (your own machine, so no extra OK):
 
@@ -79,5 +84,7 @@ docker compose up -d
 Open http://localhost:8000. Verify with `docker compose exec home-air-quality python scripts/setup.py --live http://localhost:8000`. If you change only the host port mapping, open that host address in your browser and keep http://localhost:8000 in the container's verification command. Change the verification port only if you also change PORT inside the container. `docker compose logs` shows startup problems.
 
 To open it from a phone on the same network, change the Compose port line to `"8000:8000"`, recreate the service, and use `http://<server-address>:8000`. Anyone on that network can then see the page; it has no password or HTTPS. Don't forward this port on your router. Use Railway or a home VPN for access from outside.
+
+The history of the readings (`history.sqlite`) and the monitors' last known addresses (`local-addresses.json`) are kept in the Docker volume `homeair-history`, mounted at `/data`: they survive `--force-recreate` and a new image. `docker compose down -v` deletes them. With a token, the container fills the last 7 days from the cloud when it starts.
 
 After config or `.env` changes: `docker compose up -d --force-recreate` (recreation reloads environment variables). After pulling code: `docker compose up -d --build`. These restart your own container: say so, no extra OK.

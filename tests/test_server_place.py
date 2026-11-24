@@ -174,3 +174,40 @@ def test_neighborhood_error_carries_no_keys(monkeypatch):
     monkeypatch.setattr(sources, "source_on", lambda name: True)
     r = server.app.test_client().get("/api/neighborhood")
     assert r.status_code == 502 and b"FAKEPOLLENKEY12345" not in r.data
+
+
+# ── A home without a place (local-reads Task 12) ──
+
+PLACELESS = '[place]\ntimezone = "America/New_York"\nindoor = "Home"\nindoor_serial = "84fce602549c"\n'
+
+
+def test_no_place_calls_nothing_outside(monkeypatch):
+    """A home found on the Wi-Fi has no place yet: no source may send None coordinates to Open-Meteo, NOAA, Google or the
+    map (existing tests don't cover it: they all run a located home)."""
+    import publicmap
+    from config import located, load_config
+    calls = []
+
+    def outside(*a, **k):
+        calls.append(a)
+        raise AssertionError("an outside call without a place")
+    for mod in (sources.upstream, publicmap.upstream, sources.requests):
+        monkeypatch.setattr(mod, "get", outside)
+    monkeypatch.setenv("GOOGLE_POLLEN_API_KEY", "a-key-that-is-set")
+    before = server.CFG
+    cfg = load_config({"CONFIG_TOML": PLACELESS})
+    assert not located(cfg)
+    server.use_config(cfg)
+    try:
+        client = server.app.test_client()
+        ctx = client.get("/api/context")
+        assert ctx.status_code == 200
+        status = ctx.get_json()["status"]
+        assert {k: status[k] for k in ("weather", "air_forecast", "pollen", "smoke", "nearby")} == {k: "needs_place" for k in ("weather", "air_forecast", "pollen", "smoke", "nearby")}
+        assert client.get("/api/neighborhood").get_json() == []
+        assert client.get("/api/current").status_code in (200, 502)   # the monitors' own route is not a place source
+        assert client.get("/").status_code == 200
+        assert sources.outdoor_from() is None
+        assert calls == []
+    finally:
+        server.use_config(before)

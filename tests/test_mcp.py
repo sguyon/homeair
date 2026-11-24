@@ -1,9 +1,11 @@
 """/mcp: an AI assistant's connection. What it must never do silently: speak a broken protocol, answer a page from
 another site, or hand over the token, coordinates or serial numbers."""
 import json
+import re
 
 import server
 import sources
+from test_sources import wifi  # noqa: F401  (the fixture: a home with serials and a stub poller)
 
 MCP = "/mcp"
 
@@ -51,3 +53,14 @@ def test_answer_has_readings_but_no_token_coordinates_or_serial(client, monkeypa
     text = json.dumps(result)
     for secret in ("SECRET123", "84fce6", "3.7.0", "39.95", "75.16", "serialno", "latitude"):
         assert secret not in text, secret
+
+
+def test_agent_history_works_without_a_cloud_id(wifi, monkeypatch, tmp_path):
+    """A home with no token and no cloud id: the agent tool's history comes from the home's own store, and its answer holds no serial or address."""
+    from test_sources import stored
+    stored(tmp_path, monkeypatch)
+    client = wifi({"indoor": "local", "outdoor": "local"}, token="")
+    result = rpc(client, "tools/call", {"name": "home_air_history", "arguments": {"hours": 24}}).get_json()["result"]
+    assert result["isError"] is False and result["structuredContent"]["samples"] > 0
+    text = json.dumps(result)
+    assert "84fce6" not in text and not re.search(r"\d+\.\d+\.\d+\.\d+", text)

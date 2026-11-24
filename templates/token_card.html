@@ -41,12 +41,16 @@
   </form></li>
 </ol>
 <p class="token-storage">Checked with AirGradient, then saved on this computer only. Your agent never sees it.</p>
+{% elif owner_needed %}
+<p class="token-owner">To paste it here, open the private link setup printed, or run <code>{{ connect_cmd }}</code> to see it again.</p>
+{% elif forms_full %}
+<p>Too many token forms are open. Close the other Home Air tabs, then reload this page.</p>
 {% elif instructions == 'railway' %}
 <p>Add AIRGRADIENT_TOKEN in your Railway project → Variables, then redeploy.</p>
 {% elif instructions == 'docker' %}
 <p>Add AIRGRADIENT_TOKEN to the .env next to docker-compose.yml, then run <code>docker compose restart</code>.</p>
 {% else %}
-<p>To add it here, open the setup link the app printed when it started (restart the app for a new one). Or add AIRGRADIENT_TOKEN to the app's .env file and restart.</p>
+<p>To add it here, open Home Air on the computer it runs on, at <code>http://localhost:{{ port }}/connect</code>. Or add AIRGRADIENT_TOKEN to the app's .env file and restart.</p>
 {% endif %}
 {% endif %}
 {% if error and not entry %}<p class="token-error" role="alert">{{ error }}</p>{% endif %}

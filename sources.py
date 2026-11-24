@@ -16,9 +16,13 @@ from flask import request
 import requests
 
 import budgets
+import phrases
 import publicmap
 import upstream
 import summary as summary_rules
+import config
+import history_store
+import localnet
 from config import Here, airgradient_map, env_key
 
 # Config and the Flask app stay owned by server; startup passes its module as runtime.
@@ -228,8 +232,9 @@ logging.getLogger("urllib3.connectionpool").addFilter(_TokenURLFilter())
 
 def validate_token(token):
     """One uncached call, without changing the running credential or exposing upstream bodies/errors.
-    None: AirGradient refused the token. A list (maybe empty): accepted, with the account's monitors as
-    {"name": ..., "kind": "indoor" | "outdoor" | None}, for the page's "connected" card."""
+    None: AirGradient refused the token. A list (maybe empty): accepted, with the account's rows as AirGradient sent
+    them (dicts only): their ids, names, kinds and serials match the home's monitors (match_account) and name them on
+    the page's "connected" card (account_monitors)."""
     response = requests.get(f"{API_BASE}/locations/measures/current", params={"token": token}, timeout=10, allow_redirects=False,
                             headers=upstream.headers())
     if response.status_code in (400, 401, 403):
@@ -241,8 +246,108 @@ def validate_token(token):
     rows = response.json()
     if not isinstance(rows, list):
         raise ValueError("Unexpected AirGradient response")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def account_monitors(rows):
+    """The account's monitors for the "connected" card: {"name": ..., "kind": "indoor" | "outdoor" | None}."""
     return [{"name": publicmap.plain_text(row.get("locationName") or "") or "Unnamed monitor", "kind": monitor_kind(row)}
-            for row in rows if isinstance(row, dict)]
+            for row in rows]
+
+
+class MonitorChoice(ValueError):
+    """Today's rule can't pick the account's monitor for a kind by itself; the message says what to choose."""
+
+
+def _cloud_id(row):
+    value = row.get("locationId")
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def choose_monitors(rows, indoor_id=None, outdoor_id=None, kinds=config.MONITOR_KINDS):
+    """Today's rule, one account monitor per kind: the one with the id given, else the only one of that kind. Monitors
+    whose kind isn't set in AirGradient count only when given by id, or as the only candidate for neither kind.
+    {kind: row}; MonitorChoice when it can't choose by itself, or chooses nothing. The same rule as setup's."""
+    wanted_ids = {"indoor": indoor_id, "outdoor": outdoor_id}
+    chosen = {}
+    unknown = [r for r in rows if r.get("locationType") not in ("indoor", "outdoor")]
+    for kind in kinds:
+        other = "outdoor" if kind == "indoor" else "indoor"
+        available_unknown = [r for r in unknown if str(r.get("locationId")) != str(wanted_ids[other])]
+        candidates = [r for r in rows if r.get("locationType") == kind]
+        wanted = wanted_ids[kind]
+        options = candidates + available_unknown
+        match = [r for r in options if str(r.get("locationId")) == str(wanted)] if wanted is not None else []
+        if len(match) == 1:
+            chosen[kind] = {**match[0], "locationType": kind}
+        elif wanted is not None or len(candidates) > 1 or (available_unknown and not candidates):
+            words = "; ".join(f"{r.get('locationId')}: {publicmap.plain_text(r.get('locationName') or 'Unnamed monitor')}" for r in options)
+            raise MonitorChoice(f"Choose one of: {words or 'no matching monitors'}. Pass --{kind}-id <id>. "
+                                "Set uncertain monitor types in AirGradient's dashboard, then run setup again.")
+        elif candidates:
+            chosen[kind] = candidates[0]
+        if kind in chosen:
+            unknown = [r for r in unknown if r.get("locationId") != chosen[kind].get("locationId")]
+    if not chosen:
+        raise MonitorChoice("AirGradient lists no monitors with readings in this account. A monitor shows up once it has sent its first reading: check it shows readings in the AirGradient app, then run setup again.")
+    if len({str(r.get("locationId")) for r in chosen.values()}) != len(chosen):
+        raise MonitorChoice("Choose a different monitor for indoors and outdoors in AirGradient.")
+    if not all(_cloud_id(row) for row in chosen.values()):
+        raise MonitorChoice("AirGradient returned a monitor without a valid id. Check it in its dashboard.")
+    return chosen
+
+
+def match_account(cfg, rows):
+    """After a token: the [place] keys that tie the home's monitors to the account's (for config.set_monitor_keys), by
+    kind. A monitor with a serial gets the cloud id of the account's row with that serial (in any case), and its cloud
+    name unless the household renamed it (a name other than phrases.PLACE_DEFAULTS'). A kind without a serial gets
+    today's rule (choose_monitors) among the rows not matched; when the rule can't choose by itself, that kind is left
+    as it is.
+    A serial the account doesn't have (when its rows carry serials) isn't the household's to assume: on a shared Wi-Fi
+    it can be a neighbour's. The account's monitor of that kind takes its place (its serial, so it is read on the Wi-Fi
+    when it is there, and its id; a fixed address goes, it was the other monitor's); when the rule can't pick one, the
+    serial stays, without an id that belongs to another monitor."""
+    place = cfg.place
+    rows = [r for r in rows if isinstance(r, dict) and _cloud_id(r)]
+    serial_of = lambda r: str(r.get("serialno") or "").strip().lower()
+    account_serials = any(serial_of(r) for r in rows)
+
+    def keys(kind, row):
+        kv = {f"{kind}_id": row["locationId"]}
+        name = getattr(place, kind)
+        cloud = publicmap.plain_text(row.get("locationName") or "")
+        if name is None or name == phrases.PLACE_DEFAULTS[kind]:
+            kv[kind] = cloud or phrases.PLACE_DEFAULTS[kind]
+        return kv
+
+    out, strangers = {}, []
+    for kind in config.MONITOR_KINDS:
+        serial = getattr(place, kind + "_serial")
+        row = next((r for r in rows if serial and serial_of(r) == serial), None)
+        if row is not None:
+            out[kind] = keys(kind, row)
+        elif serial and account_serials:
+            strangers.append(kind)
+    used = {kv[f"{kind}_id"] for kind, kv in out.items()}
+    missing = tuple(k for k in config.MONITOR_KINDS if getattr(place, k + "_serial") is None or k in strangers)
+    chosen = {}
+    if missing:
+        try:
+            chosen = choose_monitors([r for r in rows if r["locationId"] not in used], kinds=missing,
+                                     **{f"{k}_id": None if k in strangers else getattr(place, k + "_id") for k in missing})
+        except MonitorChoice:
+            chosen = {}
+        out.update({kind: keys(kind, row) for kind, row in chosen.items()})
+    for kind in strangers:
+        if kind in chosen:
+            out[kind].update({f"{kind}_serial": serial_of(chosen[kind]) or None, f"{kind}_host": None})
+            log.warning("the %s monitor found on the Wi-Fi isn't in this AirGradient account: the account's %s monitor "
+                        "is read instead", kind, kind)
+        else:
+            out[kind] = {f"{kind}_id": None}
+            log.warning("the %s monitor found on the Wi-Fi isn't in this AirGradient account: it stays read on the "
+                        "Wi-Fi, without the account's history", kind)
+    return out
 
 
 def monitor_kind(row):
@@ -302,6 +407,8 @@ def _fetch_weather(here):
 def get_open_meteo_data(here=None):
     """Weather from Open-Meteo (free, no key) at a place (the home by default). Their current data moves on a 15-minute grid."""
     here = here or home_here()
+    if here.lat is None:   # a home without a place yet: nothing to ask Open-Meteo about
+        return no_weather()
     try:
         value, info = cached(_cache_key("wx", here), lambda: _fetch_weather(here), ttl=600, swr=3600, keep=3 * 3600, force=_force(), force_floor=300)
         return value
@@ -338,6 +445,8 @@ def get_air_forecast(here=None):
     """{"2026-11-07T18:00": pm2.5, ...}; empty when the model can't be reached. A model, so it can sit above or
     below the monitor: the page reacts to how it changes, not just its level."""
     here = here or home_here()
+    if here.lat is None:
+        return {}
     try:
         value, _ = cached(_cache_key("aq", here), lambda: _fetch_air_forecast(here), ttl=1800, swr=3600, keep=6 * 3600, force=_force(), force_floor=300)
         return value
@@ -365,6 +474,8 @@ def smoke_status(here=None):
     tested against them here, in the caller's thread.
     """
     here = here or home_here()
+    if here.lat is None:
+        return no_smoke()
     try:
         value, _ = cached("smoke", _fetch_smoke, ttl=1800, swr=6 * 3600, keep=24 * 3600, force=_force(), force_floor=600)
         return smoke_at(value, here)
@@ -488,6 +599,8 @@ def _fetch_pollen_kept():
 def get_pollen_days():
     """{"today": [...], "tomorrow": [...]} from Google, kept for the rest of the home's day: it's a daily forecast, so one
     call a day per running server (plus restarts and the Refresh button), in every season. A new day is a new key."""
+    if not place_known():
+        return {"today": [], "tomorrow": []}
     try:
         # the key is the day's, so an answer never outlives its day: a day's ttl keeps it until the key changes
         value, _ = cached("pollen:" + local_now().strftime("%Y-%m-%d"), _fetch_pollen_kept, ttl=24 * 3600,
@@ -510,9 +623,24 @@ def source_on(name):
     return runtime.CFG.sources.get(name, True) if runtime.CFG else True
 
 
+def place_known():
+    """True when the home has a place: the sources that look at the home's coordinates wait for one (config.located)."""
+    return runtime.HOME_LAT is not None and runtime.HOME_LON is not None
+
+
+def source_state(name):
+    """"needs_place" for a source that looks at the home's coordinates while the home has none, else "off" when it is turned
+    off, else "" (on)."""
+    if not source_on(name):
+        return "off"
+    return "" if place_known() else "needs_place"
+
+
 def pollen_state():
     if not source_on("pollen"):
         return "off"
+    if not place_known():
+        return "needs_place"
     return "ok" if env_key("GOOGLE_POLLEN_API_KEY") else "not_set_up"
 
 
@@ -565,10 +693,13 @@ def _row_time(row):
         return None
 
 
-def _past(location_id, frm, to):
+def _past(location_id, frm, to, keep=HIST_KEEP):
+    """A monitor's cloud readings between frm and to, trimmed to `keep` (the charts' fields unless told otherwise;
+    None keeps every field, for the history store, which trims what it doesn't keep)."""
     rows = api_get(f"/locations/{int(location_id)}/measures/past", {
         "from": frm.strftime("%Y-%m-%dT%H:%M:%SZ"), "to": to.strftime("%Y-%m-%dT%H:%M:%SZ")})
-    return [{k: r.get(k) for k in HIST_KEEP if r.get(k) is not None} for r in rows or [] if isinstance(r, dict)]
+    return [{k: r.get(k) for k in (r if keep is None else keep) if r.get(k) is not None}
+            for r in rows or [] if isinstance(r, dict)]
 
 
 def merge_rows(old, new, start):
@@ -625,6 +756,160 @@ def current_rows(force=False):
                   force=force, force_floor=REFRESH_FLOOR_SECONDS)
 
 
+FILL_DAYS = 7   # d: how far back the cloud fills the home's own history (the cloud's own limit for the chart)
+_filling = set()   # serials with a fill running: one fill per monitor at a time
+_filling_lock = threading.Lock()
+_asked_until = {}   # (serial, cloud id) -> the end of the last range the cloud answered for, in this process
+
+
+def _fill_one(store, mon):
+    """One monitor: the gaps of the last FILL_DAYS days, one /measures/past call spanning them, the rows that fall in a
+    gap stored. Nothing to ask when there is no gap. After the first answer, a fill asks only from where the last one
+    ended (less GAP, for rows the cloud got late or was still averaging): a gap the cloud had nothing for isn't asked again, so a monitor
+    that drops off the Wi-Fi now and then costs a call over its new gap, not the whole week each time."""
+    try:
+        now = datetime.now(timezone.utc)
+        gaps = store.gaps(mon.serial, now - timedelta(days=FILL_DAYS), now)
+        floor = _asked_until.get((mon.serial, mon.location_id))
+        if floor is not None:
+            floor -= history_store.GAP
+            gaps = [(max(a, floor), b) for a, b in gaps if b - max(a, floor) >= history_store.CLOUD_ROW]
+        if not gaps:
+            return
+        rows = _past(mon.location_id, gaps[0][0], gaps[-1][1], keep=None)   # every field: the store keeps what it keeps
+        added = store.fill(mon.serial, rows, gaps)
+        _asked_until[(mon.serial, mon.location_id)] = gaps[-1][1]   # only once stored: a failed write asks the range again
+        log.info("history fill: %d gap(s), %d row(s) added", len(gaps), added)
+    except Exception as error:   # the cloud being down must not hurt reads; the next trigger tries again
+        log.warning("history fill failed (%s)", type(error).__name__)
+    finally:
+        with _filling_lock:
+            _filling.discard(mon.serial)
+
+
+def start_fill(reason):
+    """With a token and a history store, fill the store's gaps from the cloud in the background (one call per monitor
+    that has a cloud id). Called at start, when a token is saved and when reads resume after a long gap."""
+    store = getattr(runtime, "STORE", None)
+    if store is None or not _has_token() or not runtime.CFG or not runtime.CFG.place:
+        return
+    for mon in config.monitors(runtime.CFG):
+        if mon.location_id in localnet.LOCAL_IDS.values():   # no cloud id yet: nothing to ask
+            continue
+        with _filling_lock:
+            if mon.serial in _filling:
+                continue
+            _filling.add(mon.serial)
+        log.info("history fill (%s): %s", reason, mon.kind)
+        _REFRESH_POOL.submit(_fill_one, store, mon)
+
+
+def local_reads_on():
+    """True when this copy reads monitors on the Wi-Fi: a real config with at least one serial, not on a hosted copy."""
+    cfg = runtime.CFG
+    return bool(cfg and not cfg.demo and cfg.place and config.monitors(cfg)
+                and localnet.environment_blocker() != "hosted")
+
+
+_MONITOR_VIA = {}   # kind -> "local" | "cloud" | "stale": where home_rows last read each monitor from, for /health
+
+
+def _has_token():
+    return config.real_value(runtime.TOKEN)
+
+
+def monitor_states():
+    """Where each configured monitor is read from now, by kind: "local", "cloud" or "stale" (no addresses, no serials).
+    home_rows' order, worked out on every call from the poller's state (a page needn't have asked for readings): the
+    Wi-Fi when its reading is fresh, else the cloud with a token (unless home_rows last found no cloud row for it),
+    else not answering."""
+    cfg = runtime.CFG
+    if not cfg or cfg.demo or not cfg.place:
+        return {}
+    poller = getattr(runtime, "POLLER", None)
+    serial = {m.kind for m in config.monitors(cfg)}
+    out = {}
+    for kind in config.MONITOR_KINDS:
+        if getattr(cfg.place, kind) is None and kind not in serial:
+            continue
+        if poller is not None and kind in serial and poller.state(kind) == "local":
+            out[kind] = "local"
+        elif _has_token():
+            out[kind] = "stale" if _MONITOR_VIA.get(kind) == "stale" else "cloud"
+        else:
+            out[kind] = "stale"
+    return out
+
+
+def _last_row(poller, mon):
+    """A monitor's last reading: the poller's, or after a restart the history store's (rebuilt to the poller's shape)."""
+    row = poller.latest(mon.kind)
+    store = getattr(runtime, "STORE", None)
+    if row is None and store is not None:
+        last = store.last(mon.serial)
+        if last is not None:
+            row = {**last, "serialno": mon.serial, "locationId": mon.location_id, "locationName": mon.name,
+                   "locationType": mon.kind, "via": "local"}
+    return row
+
+
+def home_rows(force=False):
+    """The home's monitors' current readings and the cache info, one read order per monitor: the Wi-Fi reading when
+    fresh, else the cloud's (with a token), else the last reading marked stale. When every monitor is fresh on the
+    Wi-Fi, the cloud isn't asked. Then the indoor-only home's outdoor source, as before. RuntimeError when the cloud
+    is needed and fails and nothing else can be shown."""
+    poller = getattr(runtime, "POLLER", None)
+    mons = {m.kind: m for m in config.monitors(runtime.CFG)} if poller is not None and runtime.CFG else {}
+    info = {"state": "hit", "age": 0}
+    if not mons:   # no Wi-Fi reads: the cloud's rows as they come
+        value, info = current_rows(force=force)
+        value = place_rows(value)
+    else:
+        place = runtime.CFG.place
+        wanted = [k for k in config.MONITOR_KINDS if getattr(place, k) is not None or k in mons]
+        local = {k for k in mons if poller.state(k) == "local"}
+        cloud, error = [], None
+        if _has_token() and any(k not in local for k in wanted):
+            try:
+                raw, info = current_rows(force=force)
+                cloud = raw if isinstance(raw, list) else []
+            except RuntimeError as e:
+                error = e
+        by_type = {r.get("locationType"): r for r in place_rows(cloud) if isinstance(r, dict)}
+        value = []
+        for kind in wanted:
+            row, via = None, "stale"
+            if kind in local:
+                row, via = poller.latest(kind), "local"
+            if row is None and kind in mons:
+                serial = mons[kind].serial
+                row = next((r for r in cloud if isinstance(r, dict) and str(r.get("serialno", "")).lower() == serial), None)
+                if row is None and str((by_type.get(kind) or {}).get("serialno") or "").lower() in ("", serial):
+                    row = by_type.get(kind)   # the configured id's row, unless it says it's another monitor
+                via = "cloud"
+            elif row is None:
+                row, via = by_type.get(kind), "cloud"
+            if row is not None and via == "cloud":
+                row = {**row, "via": "cloud", "locationType": kind}
+            if row is None and kind in mons:
+                row, via = _last_row(poller, mons[kind]), "stale"
+                if row is not None:
+                    row = {**row, "stale": True}
+                    if localnet.environment_blocker() == "container" and not _has_token():
+                        row["fix"] = "home_server"   # the address was written at --home-server: only running it again can change it
+            if row is not None:
+                value.append(row)
+                _MONITOR_VIA[kind] = via
+            else:
+                _MONITOR_VIA[kind] = "stale"
+        if error is not None and not value:
+            raise error
+    src = outdoor_source(with_history=False) if isinstance(value, list) else None
+    if src is not None:   # an indoor-only home: its outdoor source stands as the outdoor monitor (a copy: the cache keeps its list)
+        value = value + [source_monitor(src)]
+    return value, info
+
+
 def area_monitors(lat, lon):
     """The public monitors within AREA_SEARCH_KM of a point with their PM2.5 now (publicmap.fetch_area), from the
     server's own cache: one map request per place (rounded to about 1 km) every NEARBY_REFRESH_SECONDS at most.
@@ -655,6 +940,8 @@ def _fetch_nearby(here=None, rows=None, skip_own=True):
     the raw pm02 corrected when it has the humidity): the page compares neighbors with a home's own monitors on the
     corrected basis (summary.corrected_pm). The map gives no owner's name for most monitors; a row then has none."""
     here = here or home_here()
+    if here.lat is None:
+        return []
     rows = area_monitors(here.lat, here.lon) if rows is None else rows
     nearby = []
     for d, loc in _within_km(rows, here, NEARBY_RADIUS_KM):   # copies: the cached list stays as it came
@@ -672,8 +959,8 @@ def _fetch_nearby(here=None, rows=None, skip_own=True):
 def outdoor_from():
     """The configured outdoor source of an indoor-only home (a public monitor's id, "area" or "model"), or None: a home
     with an outdoor monitor, no config, or the demo (its own seams)."""
-    if runtime.CFG is None or runtime.CFG.demo or runtime.CFG.place is None or runtime.CFG.place.outdoor is not None:
-        return None
+    if runtime.CFG is None or runtime.CFG.demo or runtime.CFG.place is None or runtime.CFG.place.outdoor is not None or not place_known():
+        return None   # without a place, no public monitor or area estimate can be found
     return runtime.CFG.outdoor_from
 
 
@@ -874,11 +1161,53 @@ def fnum(value):
         return None
 
 
+def monitor_for_id(location_id):
+    """The configured monitor (with a serial) behind a history id: the one with that cloud id, else the one with the
+    fixed local id (localnet.LOCAL_IDS), else None."""
+    mons = config.monitors(runtime.CFG) if runtime.CFG else []
+    cloud = next((m for m in mons if m.location_id == location_id and m.location_id not in localnet.LOCAL_IDS.values()), None)
+    return cloud or next((m for m in mons if m.location_id == location_id), None)
+
+
+def _cloud_tail(location_id, since):
+    """A monitor's cloud readings, from the ranges the charts already cache: its last day when `since` is within it,
+    else its week. RuntimeError when the cloud doesn't answer."""
+    hours = HIST_DAY if datetime.now(timezone.utc) - since <= timedelta(hours=HIST_DAY) else 168
+    rows, _ = history_rows(location_id, hours)
+    return rows
+
+
+def store_rows(location_id, frm, to):
+    """The home's own history of a monitor between frm and to (aware datetimes), oldest first, as stored (every measured
+    field); None when this copy keeps no history of that monitor, so the caller asks the cloud as before.
+    The store answers up to its last reading. When reads have stopped for longer than a gap (the monitor left the
+    Wi-Fi, the app was stopped), the time after it comes from the cloud with a token and a cloud id; without them, or
+    when the cloud doesn't answer, the rows end at the last reading: never an invented point."""
+    store = getattr(runtime, "STORE", None)
+    mon = monitor_for_id(location_id) if store is not None else None
+    last = store.last(mon.serial) if mon is not None else None
+    if last is None:
+        return None
+    rows = store.rows(mon.serial, frm, to)
+    end = max(_row_time(last), frm)
+    if to - end <= history_store.GAP or not _has_token() or mon.location_id in localnet.LOCAL_IDS.values():
+        return rows
+    try:
+        tail = _cloud_tail(mon.location_id, end)
+    except RuntimeError:
+        return rows
+    later = sorted(((t, r) for r in tail if isinstance(r, dict) and (t := _row_time(r)) is not None and end < t <= to),
+                   key=lambda p: p[0])
+    return rows + [r for _, r in later]
+
+
 def history_points(location_id, now_local, hours=24):
     if not location_id:
         return []
     try:
-        rows, _ = history_rows(location_id, hours)
+        rows = store_rows(location_id, datetime.now(timezone.utc) - timedelta(hours=hours), datetime.now(timezone.utc))
+        if rows is None:
+            rows, _ = history_rows(location_id, hours)
     except (RuntimeError, ValueError, TypeError):
         return []
     points = []

@@ -207,8 +207,8 @@ def test_a_failed_pollen_call_waits_ten_minutes(monkeypatch):
 
 
 def test_every_outside_api_has_a_budget():
-    assert set(budgets.DAILY) == {"ag_current", "ag_history", "ag_map_area", "ag_map", "pollen", "weather",
-                                  "air_quality", "smoke"}
+    assert set(budgets.DAILY) == {"ag_current", "ag_history", "ag_local", "ag_map_area", "ag_map", "pollen",
+                                  "weather", "air_quality", "smoke"}
     assert budgets.DAILY["ag_map_area"] == 2000
     assert sources.api_budget("/locations/7/measures/past") == "ag_history"
     assert sources.api_budget("/locations/measures/current") == "ag_current"

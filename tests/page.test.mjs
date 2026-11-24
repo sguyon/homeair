@@ -118,6 +118,8 @@ test('a source that is off or not set up says so in plain words, with one line o
   assert.deepEqual(home.sourceOff('smoke', 'off'), { word: 'Off', line: 'Adds wildfire smoke from NOAA\u2019s satellite map.' });
   assert.deepEqual(home.sourceOff('nearby', 'off'), { word: 'Off', line: 'Adds readings from public AirGradient monitors nearby.' });
   assert.deepEqual(home.sourceOff('road', 'off'), { word: 'Off', line: 'No road set up.' });
+  assert.deepEqual(home.sourceOff('smoke', 'needs_place'), { word: 'Off', line: 'Add your place to see wildfire smoke.', calendar: false });   // a home without a place yet
+  assert.equal(home.sourceOff('road', 'needs_place'), null);
   for (const s of ['ok', 'error', undefined]) assert.equal(home.sourceOff('pollen', s), null);
 });
 
@@ -369,7 +371,10 @@ test("the open menu's indoor row on a public monitor's page: greyed (off), Not s
   const r = home.monitorRow(null, NOW, true, 'America/New_York');
   assert.deepEqual(r, { tone: 'off', text: 'Not set up', title: 'Not set up', off: true });
   const live = home.monitorRow(FRESH, NOW, false, 'America/New_York');
-  assert.equal(live.off, false); assert.equal(live.tone, 'good'); assert.equal(live.text, 'Live · 2 min ago');
+  assert.equal(live.off, false); assert.equal(live.tone, 'good'); assert.match(live.text, /^Live · cloud · (just now|\d+ min ago)$/);
+  assert.match(home.monitorRow({ ...FRESH, via: 'local' }, NOW, false, 'UTC').text, /^Live · on your Wi-Fi · (just now|\d+ min ago)$/);
+  const stale = home.monitorRow({ ...FRESH, via: 'local', stale: true, fix: 'home_server' }, NOW, false, 'UTC');
+  assert.equal(stale.text, 'Not answering · 2 min ago'); assert.match(stale.title, /Run setup's home server step again on your computer$/);
   assert.match(live.title, /^Last reading Nov 9, 6:58\sAM$/);
   assert.deepEqual(home.monitorRow(null, NOW, false, 'UTC'), { tone: 'bad', text: 'Offline', title: 'No reading', off: false });
 });

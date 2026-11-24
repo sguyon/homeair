@@ -19,6 +19,7 @@ log = logging.getLogger("aq.budget")
 DAILY = {
     "ag_current": 5000,     # AirGradient, with the home's token: the monitors' current readings
     "ag_history": 10000,    # AirGradient, with the home's token: a monitor's past readings
+    "ag_local": 6000,       # the monitors on the Wi-Fi: two monitors read every minute use 2,880
     "ag_map_area": 2000,    # AirGradient's map, no token: the public monitors in an area (~6 KB), 15 min per place
     "ag_map": 8000,         # AirGradient's public map: one chosen monitor's place, reading and history
     "pollen": 10,           # Google Pollen (its free tier is capped; one call a day is normal)

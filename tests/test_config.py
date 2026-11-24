@@ -272,9 +272,9 @@ def test_outdoor_only_needs_no_outdoor_from(tmp_path):
     assert cfg.place.indoor is None and cfg.place.outdoor == "porch" and cfg.outdoor_from is None
 
 
-def test_neither_monitor_is_refused(tmp_path):
-    with pytest.raises(ConfigError, match=r"\[place\] needs indoor, outdoor or both \(the names of your monitors\)"):
-        load_config({}, _place_only(tmp_path, ["indoor", "outdoor"]))
+def test_neither_monitor_is_a_home_where_none_was_found_yet(tmp_path):
+    cfg = load_config({}, _place_only(tmp_path, ["indoor", "outdoor"]))
+    assert cfg.place.indoor is None and cfg.place.outdoor is None and cfg.outdoor_from is None
 
 
 def test_indoor_only_without_outdoor_from_is_refused(tmp_path):
@@ -332,8 +332,8 @@ def test_a_blank_indoor_name_is_no_indoor_monitor(tmp_path, blank):
 
 def test_two_blank_names_are_no_monitors(tmp_path):
     text = EXAMPLE.replace('indoor = "living room"', 'indoor = ""').replace('outdoor = "porch"', 'outdoor = " "')
-    with pytest.raises(ConfigError, match=r"\[place\] needs indoor, outdoor or both"):
-        load_config({}, root_with(tmp_path, text))
+    cfg = load_config({}, root_with(tmp_path, text))
+    assert cfg.place.indoor is None and cfg.place.outdoor is None
 
 
 def test_temp_unit_defaults_to_celsius_and_reads_the_home_section():
@@ -358,3 +358,83 @@ def test_the_demo_home_in_brooklyn_starts_in_fahrenheit():
     # Sacha, 2026-11-13: "Build °F for US homes now, the demo in °F too"
     cfg = load_config({"DEMO": "1"}, REPO)
     assert cfg.demo and cfg.temp_unit == "F" and public_view(cfg)["temp_unit"] == "F"
+
+
+SERIAL = "84FCE612345A"
+
+
+@pytest.mark.parametrize("host, serial, ok", [
+    ("8.8.8.8", True, False),                 # a public address: the server would fetch the internet
+    ("monitor.local", True, False),           # a name: resolved by whoever answers
+    ("http://192.168.1.5/x", True, False),    # a scheme and a path
+    ("192.168.1.5", False, False),            # no serial: nothing to check the answer against
+    ("192.168.1.5", True, True),
+    ("169.254.3.4", True, True),
+    ("127.0.0.1:8081", True, True),
+])
+def test_host_must_be_a_private_ipv4_with_a_serial(tmp_path, host, serial, ok):
+    """check 20: what the server may be made to fetch is the home's own network, and only for a monitor it can verify."""
+    lines = f'indoor_serial = "{SERIAL}"\n' if serial else ""
+    text = EXAMPLE.replace('indoor = "living room"', f'indoor = "living room"\n{lines}indoor_host = "{host}"', 1)
+    if not ok:
+        with pytest.raises(ConfigError, match="indoor_host"):
+            load_config({}, root_with(tmp_path, text))
+        return
+    p = load_config({}, root_with(tmp_path, text)).place
+    assert p.indoor_host == host and p.indoor_serial == SERIAL.lower()
+
+
+def test_set_monitor_keys_keeps_comments_and_order():
+    """The app rewrites the household's hand-edited file: only the monitor keys change, every other line stays."""
+    from config import set_monitor_keys
+    ref = (Path(__file__).parent / "fixtures" / "config_reference.toml").read_text(encoding="utf-8")
+    text = "# my home, edited by hand\n" + ref.replace('outdoor = "backyard"\n', 'outdoor = "backyard"\noutdoor_id = 5  # old\n')
+    out = set_monitor_keys(text, {"indoor": {"indoor_id": 7, "indoor_host": None},
+                                  "outdoor": {"outdoor_id": 9, "outdoor_serial": "aabbccddeeff"}})
+    old, new = text.splitlines(), out.splitlines()
+    assert new.index("indoor_id = 7") == new.index('indoor = "apartment"') + 1
+    assert new.index("outdoor_id = 9") == new.index('outdoor = "backyard"') + 1
+    assert new.index('outdoor_serial = "aabbccddeeff"') == new.index("outdoor_id = 9") + 1
+    added = {"indoor_id = 7", "outdoor_id = 9", 'outdoor_serial = "aabbccddeeff"'}
+    assert [l for l in new if l not in added] == [l for l in old if not l.startswith("outdoor_id = 5")]
+    assert "indoor_id" not in set_monitor_keys(out, {"indoor": {"indoor_id": None}})   # None removes the line
+    assert set_monitor_keys('[home]\ntemp_unit = "F"\n', {"indoor": {"indoor_serial": "aabbccddeeff"}}) \
+        == '[home]\ntemp_unit = "F"\n\n[place]\nindoor_serial = "aabbccddeeff"\n'
+
+
+def test_backup_config_copies_and_keeps_the_newest_five(tmp_path):
+    """A backup is what the household's undo rests on: same bytes and mode, and the oldest go, not the newest."""
+    import os
+    from config import BACKUPS_KEPT, backup_config
+    cfg = tmp_path / "config.toml"
+    made = []
+    for n in range(BACKUPS_KEPT + 2):
+        cfg.write_text(f"v = {n}\n")
+        cfg.chmod(0o600)
+        os.utime(cfg, (1_500_000_000, 1_500_000_000))   # an old modified time must not decide which backup is newest
+        made.append(backup_config(cfg))
+    left = sorted(tmp_path.glob("config.toml.bak-*"))
+    assert len(left) == BACKUPS_KEPT and set(left) == set(made[-BACKUPS_KEPT:])
+    assert made[-1].read_text() == f"v = {BACKUPS_KEPT + 1}\n" and made[-1].stat().st_mode & 0o777 == 0o600
+
+
+def test_local_timezone_prefers_tz_then_the_localtime_link_then_utc(tmp_path):
+    # setup writes this into a new home: a wrong name would fail every load, so a bad TZ must fall through.
+    from config import local_timezone
+    link = tmp_path / "localtime"
+    link.symlink_to("/usr/share/zoneinfo/America/Chicago")
+    assert local_timezone({"TZ": "Europe/Paris"}, link) == "Europe/Paris"
+    assert local_timezone({"TZ": "Not/AZone"}, link) == "America/Chicago"
+    assert local_timezone({}, tmp_path / "missing") == "UTC"
+
+
+def test_a_home_without_a_place_is_valid_but_half_a_place_is_not(tmp_path):
+    """Setup writes only the timezone; a name or one coordinate alone is a typo, not a home without a place."""
+    from config import located
+    cfg = load_config({"CONFIG_TOML": '[place]\ntimezone = "UTC"\nindoor = "Home"\nindoor_serial = "84fce602549c"\n'}, tmp_path)
+    assert not located(cfg) and cfg.place.lat is None and cfg.outdoor_from is None
+    view = public_view(cfg)
+    assert view["place"]["lat"] is None and view["links"] == {}
+    with pytest.raises(ConfigError) as e:
+        load_config({"CONFIG_TOML": '[place]\nlat = 40.7\ntimezone = "UTC"\n'}, tmp_path)
+    assert "place.name, place.lat and place.lon go together" in str(e.value)
