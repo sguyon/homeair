@@ -95,9 +95,10 @@ def test_rush_story(c):
     r = read(c, "rush")
     s = r["summary"]
     items = {i["id"]: i for i in s["items"]}
-    # three items at most: PM2.5, CO₂ and pollen lead; humidity (63%) is the Also line
-    assert set(items) == {"pm", "co2", "pollen"}
-    assert "Humidity inside 63%" in s["also"]
+    # three items: PM2.5 and CO₂ make one timeline (shut during the rush, air after it), humidity a dehumidifier;
+    # pollen is moderate (2 of 5), under the line, so no window card contradicts the airing
+    assert set(items) == {"pm", "co2", "rh"}
+    assert items["rh"]["num"] == "63" and items["rh"]["action"]["text"] == "Run the dehumidifier"
     # the tension: stale inside, dirty outside, so air out after the rush
     co2 = items["co2"]
     assert co2["action"]["text"] == "Open a window for 10 min"
@@ -109,16 +110,13 @@ def test_rush_story(c):
     assert pm["forecast"] is True and pm["facts"]["cause"] == "BQE rush" and pm["facts"]["pm_now"] == 22
     assert 30 <= int(pm["num"]) <= 35
     assert pm["action"]["when"] == "until 11 AM"
-    assert items["pollen"]["num"] == "4" and items["pollen"]["facts"]["pollen_type"] == "tree"
-    # the CO₂ airing wins over pollen, and the pollen card says so: never "open a window" beside "keep windows shut"
-    assert items["pollen"]["action"]["text"] == "Keep windows shut except a short airing for CO₂"
     profiles = profiles_of(s)
     # the runner: run after the dirty stretch ends, at the same 11 AM the windows wait for
     assert profiles["runner"]["ok"] is False and profiles["runner"]["state"] == "Run after 11 AM"
     # the toddler: stale now, after a stale night that peaked about 1,400
     assert profiles["toddler"]["ok"] is False and profiles["toddler"]["state"] == "Stale indoors"
     assert 1350 <= profiles["toddler"]["facts"]["night_peak"] <= 1450 and "last night" in profiles["toddler"]["why"].lower()
-    assert profiles["sinus"]["state"] == "Damp + pollen"
+    assert profiles["sinus"]["state"] == "Too damp"
     ctx = c.get("/api/context?moment=rush").get_json()
     assert ctx["road"] == {"name": "BQE", "toward": True}
     assert ctx["status"] == {"pollen": "ok", "smoke": "ok", "road": "ok", "nearby": "ok"}

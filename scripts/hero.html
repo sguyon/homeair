@@ -87,7 +87,7 @@
   const desk = document.getElementById('desk'), phone = document.getElementById('phone');
   desk.src = q.get('desk') || ''; phone.src = q.get('phone') || '';
   const PAST_RIGHT = 150;   // px the phone's right edge sits past the panel's: enough to read as in front, not beside
-  const BELOW = 52;         // px the phone's bottom sits below the panel's, so it overlaps the corner
+  const BELOW = 200;        // px the phone's bottom sits below the panel's: it overlaps the corner, under the Summary's actions
   const PAD = 100;          // px of room right of the phone, more than its shadow reaches (the edges must stay transparent)
   const PAD_BOTTOM = 150;   // px of room below the phone, where its shadow falls furthest
   // place the phone once the panel's height (the desktop capture's) is known, then size the stage around both

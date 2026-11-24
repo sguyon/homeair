@@ -399,12 +399,12 @@ def _h(obj):
 
 
 # The default sample's answers before public monitors existed (sha256 of the sorted JSON, first 16 hex digits;
-# the page is checked in test_demo.py).
+# the page is checked in test_demo.py). The rush context changed on 24 Nov: tree pollen 2 of 5, for the README's example.
 SAMPLE_BEFORE = {
-    "/api/current": "150a35e45008fe0c", "/api/context": "d70ffdedee6eab84",
+    "/api/current": "150a35e45008fe0c", "/api/context": "9b19ec4b621b11c1",
     "/api/neighborhood": "8088a41040dae5c0",
     "/api/current?moment=rush": "150a35e45008fe0c",
-    "/api/context?moment=rush": "d70ffdedee6eab84", "/api/neighborhood?moment=rush": "8088a41040dae5c0",
+    "/api/context?moment=rush": "9b19ec4b621b11c1", "/api/neighborhood?moment=rush": "8088a41040dae5c0",
     "/api/current?moment=clear": "fd99c0e8c62db6c8",
     "/api/context?moment=clear": "1e5434ff04926b83", "/api/neighborhood?moment=clear": "557e170a3a50a6f8",
     "/api/current?moment=humid": "3f99cb689a5ca5ca",
