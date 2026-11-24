@@ -8,11 +8,11 @@ For a coding agent setting this up for someone's home. Do the steps yourself whe
 
 Tested on Mac and Linux. On Windows, use WSL or Docker.
 
-Work in this repo folder throughout. If needed:
+Work in the Home Air folder throughout: `~/homeair`, unless the user named another folder. Never inside the project that happens to be open. If it isn't there yet:
 
 ```bash
-git clone https://github.com/sguyon/homeair
-cd home-air
+git clone https://github.com/sguyon/homeair ~/homeair
+cd ~/homeair
 ```
 
 Run every command below from this folder through `scripts/run.sh`: it uses uv, installs uv if it's missing, or falls back to Python 3.11 or newer, and says which; if none works, it stops and says what to install. To see what's done and the next command at any point, run `scripts/run.sh scripts/setup.py --status`; it changes nothing. Some commands wait on purpose (`--wait-token` up to 90 seconds, `--start` up to 30, `--live` up to 10 for an app just started): run them with a timeout of at least 100 seconds, so one call returns the result; don't poll.
@@ -36,6 +36,8 @@ Then send one message, with the exact link, and in the same turn run `scripts/se
 > On that page you enter your AirGradient token. You need an AirGradient monitor that already shows readings in the AirGradient app. Follow the page's two steps: copy your token from the AirGradient dashboard (General settings → Connectivity → API access), then press Connect. If AirGradient asks you to sign in, press the page's step 1 button again afterwards.
 >
 > I'll notice when the token is saved: no need to reply. If nothing happens, type done. If you don't have a monitor set up yet, tell me.
+>
+> When it's done, I'll also add Home Air's skill to my skills, so you can ask me "should I open the window?" and I answer from your monitors. I change your settings only when you ask and say yes. Tell me if you'd rather not.
 
 The page checks the token with AirGradient, lists the account's monitors, saves it privately and loads it without a restart. `--wait-token` waits up to 90 seconds for that and prints the account's monitors without showing the token. If it says "Not saved yet", run it again, unless the user has written meanwhile; when they type done, run it once more. Tell the user in one line what you found ("Connected: 2 monitors, Living room (indoor) and Back porch (outdoor).") before the next question. A fresh copy stays in the demo until the home is configured below; run the start command again to restart it with the home.
 
@@ -93,6 +95,14 @@ scripts/run.sh scripts/setup.py --live
 
 With no address it checks the copy `--start` started (for any other page, Docker or Railway, pass its address: `--live <address>`). It uses read-only GET requests and ends with `Live OK`. If the token was saved on its page in this session, the page where the user saved the token turns into the home by itself: don't open another tab. Otherwise open the address once (`open` on Mac, `xdg-open` on Linux). The page should show the monitors' readings, actions, chosen profiles and local conditions. Without an outdoor monitor, the outdoor card names a public monitor or says “Estimate for your area”. If a reading is missing, check the monitor is online and set as indoor or outdoor in AirGradient. Docker and Railway users verify their final URL without starting a local server.
 
+After `Live OK`, add the skill to your skills, unless the user said they'd rather not:
+
+```bash
+scripts/run.sh scripts/setup.py --agent on
+```
+
+To undo it later (the user asks you to), run `scripts/run.sh scripts/setup.py --agent off`. It links the skill in `skills/home-air-quality` into your skills folder (Claude Code's `~/.claude/skills`, and the shared `~/.agents/skills` that Codex, Cursor and Gemini CLI read), as links, so updating Home Air updates it. The skill reads the home's air, and changes `config.toml` only when the user asks and says yes (AGENTS.md, "Change your home"). It never replaces a skill that's already there and says so. `--agent status` says what's linked. Only for a page on this computer: the skill reads the address `--start` chose. For Docker or Railway, skip it; [docs/agents.md](docs/agents.md) says how to point an assistant at another address. If you didn't connect (the user said no, Docker or Railway, or it says "Not connected"), leave the "I'm connected" paragraph out of the last message.
+
 ## Use it again
 
 End with this message, with the real port, and nothing after it:
@@ -104,6 +114,10 @@ End with this message, with the real port, and nothing after it:
 > It stops when this computer restarts. I can make it start by itself when you log in.
 >
 > I can also help you set it up on a home server with Docker, or online with Railway.
+>
+> I've added Home Air's skill to my skills on this computer: ask me about the air at home. I change your settings only when you ask and say yes. The first time, I'll ask your permission to run its script. To remove the skill, ask me.
+>
+> For other AI assistants: [docs/agents.md](docs/agents.md) in this folder.
 
 The address goes alone on its line, plain; don't say a tab is open. If they ask:
 
@@ -111,7 +125,7 @@ The address goes alone on its line, plain; don't say a tab is open. If they ask:
 - For a home server: `scripts/run.sh scripts/setup.py --home-server`, then pass on its two steps; the server needs Docker. Don't offer to copy it over SSH: give the steps, and do more only if they ask. Once they've started it, check `scripts/run.sh scripts/setup.py --live http://<the server>:8000` if you can reach it.
 - Online: [DEPLOYMENT.md](DEPLOYMENT.md#railway).
 
-For later sessions, not for the message: the app writes to `app.log` in this folder, and starts again with `cd /path/to/home-air && scripts/run.sh scripts/setup.py --start` (with `PORT=` first if it isn't 5555).
+For later sessions, not for the message: the app writes to `app.log` in this folder, and starts again with `cd ~/homeair && scripts/run.sh scripts/setup.py --start` (with `PORT=` first if it isn't 5555).
 
 Change names, profiles, drying equipment (`[home] appliances`) or limits in `config.toml`; [config.example.toml](config.example.toml) explains the settings. Restart after editing config or `.env` by hand. Keep a private copy of config; it isn't in git. Optional [pollen, road tracing, new profiles and Vercel demo](docs/optional.md); [Railway and Docker deployment](DEPLOYMENT.md).
 

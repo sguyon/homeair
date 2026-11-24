@@ -10,6 +10,24 @@ If `internal/AGENTS.local.md` exists, read it: it holds the maintainer's private
 - Putting it online: follow [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - Do the steps yourself when a command can (the `railway` CLI, `gcloud`, `gh`), and say so before listing any manual click-path: the user may act on a list right away. Changing a live service or account needs the user's OK, asked once for all the steps of the task, saying what will be created, sent and made public (not one OK per command: approvals nobody reads protect nothing), and manual steps are the fallback. Never ask the user to do by hand what a command can do.
 
+## Change your home
+
+What the owner asks their agent ("my dad has asthma and lives with us now", "make the CO₂ line stricter", "we got a dehumidifier", "switch to Fahrenheit") is a change to `config.toml`. The skill `skills/home-air-quality` sends agents here.
+
+1. **Plan, then wait for a yes.** `scripts/run.sh scripts/settings.py show [section]` prints the current value (from `config.toml` only; `show place` for the coordinates). Say in plain words what it is now, what it becomes and what the page will do differently. One change at a time.
+2. **Back up:** `scripts/run.sh scripts/settings.py backup` (prints the backup's path: keep it for the undo; keeps the 5 newest).
+3. **Edit only what was asked**, in place, keeping comments and order. `config.example.toml` says what each setting means and allows:
+   - `[profiles]`: `toddler`, `sinus`, `runner` (`true`/`false`). A person who fits none ("over 65") is a new profile: a code change, not a setting; say so.
+   - `[limits]`: stricter CO₂ or PM2.5 is a lower number; the humidity bands stay in order (the check enforces it).
+   - `[home]`: `appliances` (`"dehumidifier"`, `"ac_dry"`), `temp_unit` (`"F"` or `"C"`).
+   - `[place]`: a new address means new coordinates (two decimals), often a new timezone and `pollen_zip`: ask for the address, never guess coordinates.
+   - Monitor ids: the account's own, as setup reads them (run setup again for the home; with several monitors it lists them and names the `--indoor-id` / `--outdoor-id` flag), never invented. The outdoor source for a home without an outdoor monitor (`outdoor_from`): from `scripts/run.sh scripts/check_config.py --suggest`.
+4. **Check:** `scripts/run.sh scripts/check_config.py` prints `Config OK` and no `Problem:` line (a "Not live yet" note only means no token or a stopped app). If not: `scripts/run.sh scripts/settings.py restore <the path backup printed>`, say what failed, stop.
+5. **Restart and verify:** `scripts/run.sh scripts/setup.py --start`, then `--live` (ends with `Live OK`).
+6. **Report:** old → new, where it shows on the page, and the undo (`scripts/run.sh scripts/settings.py restore <the path backup printed>`, then `--start`; the replaced file is kept too).
+
+Never: keys or tokens (they go in `.env`, typed by the owner; see Keys), the rules or the page (code: a reviewed change, with tests), or a deployed copy without the steps below.
+
 ## After changing config.toml
 
 The deployed copy doesn't follow the local file by itself. After every edit:
@@ -51,13 +69,15 @@ The setup (`SETUP.md`, `scripts/setup.py`, the token page) is a stranger's first
 - `air_read.py`: builds the page’s air read, profiles, source facts for the summary, and summary inputs.
 - `summary.py`: the rules that pick the actions, the profiles' states and the day chart's data. No network.
 - `phrases.py`: the sentences behind each explanation, filled from the readings and the limits.
+- `agent_tools.py`: what an AI assistant gets: the two read-only tools (`home_air_now`, `home_air_history`), their descriptions and their answers (no coordinates, serials or tokens). `mcp_server.py` serves them at `/mcp` (MCP over HTTP, one JSON answer per POST, Origin-checked) and at `/api/agent/now` and `/api/agent/history` for the skill's script.
+- `skills/home-air-quality/`: the skill for coding agents on the same computer: it reads the home and, for a change, sends the agent to "Change your home" above (`SKILL.md`, and `scripts/home_air.py`, standard library only, which asks `/api/agent/now` and `/api/agent/history`). `setup.py --agent on` links it into the agent's skills folders (`~/.agents/skills`, and `~/.claude/skills` for Claude Code), never over another skill, and records the links in `agent-links.json` so `--agent off` removes only those. `docs/agents.md` ("Connect your AI assistant") covers every other agent and app.
 - `config.py`: reads `config.toml` (or the `CONFIG_TOML` or `CONFIG_FILE` variable) and checks it. `config.example.toml` is the commented starter.
 - `index.html` and `static/`: the page, with no build step. `app.js` (data, readings, charts), `summary.js` (the summary card), `home.js` (the home's profiles and road in words), `sky.js` (the live sky), `map.js` (the neighborhood map), `picker.js` (the demo's top area, its three ways in and the monitor picker).
 - Serving: the page's `/static/` URLs carry `?v=<content hash>` (`server.py` `version_assets`); a URL with the current hash is cached by browsers for a year (`immutable`), anything else revalidates. `sw.js` and `/manifest.json` are never immutable. Text answers are gzipped in the app (`compress`) for gunicorn and Docker; on Vercel its edge compresses and serves `/static/`. gunicorn stays at 1 worker: the server cache and the daily call limits live in that one process.
 - `DESIGN.md`: the page's design rules (cards, disabled states, colors that carry meaning, motion, the check before shipping); read it before changing the page.
 - `publicmap.py`: AirGradient's public monitors for any home or the demo: the ones in an area of its public map (one small request), the nearest, the outdoor source an indoor-only home is offered at setup, a monitor's reading row, its place on the public map and its history there. No import of `demo/` or `server.py`.
 - `demo/`: the demo's home (`config.toml`), its made-up data (`data.py`), its three moments and three hidden one-monitor cases (`moments.py`) and the public monitors' pages at `?monitor=<id>` (`public.py`).
-- `scripts/`: `setup.py` (prepares an empty token entry, discovers monitors, writes household choices with a backup, checks config and readings; `railway` transfers saved settings through stdin and `--live` checks a running page), `check_config.py`, `screenshot.sh` (the README's images, from the demo), `vercel_build.sh` (the demo's build on Vercel).
+- `scripts/`: `settings.py` (backup, restore and show `config.toml` for "Change your home"), `setup.py` (prepares an empty token entry, discovers monitors, writes household choices with a backup, checks config and readings; `railway` transfers saved settings through stdin, `--live` checks a running page and `--agent` connects the agent that ran it), `check_config.py`, `screenshot.sh` (the README's images, from the demo), `vercel_build.sh` (the demo's build on Vercel).
 - `Dockerfile`, `docker-compose.yml` and `.dockerignore`: the container (DEPLOYMENT.md, "Docker"). `.github/workflows/image.yml` publishes the image to `ghcr.io/sguyon/homeair` from `main`, and to the old name `ghcr.io/sguyon/home-air-quality` so existing installs keep updating.
 - `tests/`: Python tests (pytest) and page tests (`*.test.mjs`, Node's test runner).
 
@@ -91,5 +111,7 @@ The demo's three moments (`demo/moments.py`: `rush`, `clear`, `humid`, at `?mome
 ## Copy
 
 - Plain and factual, no marketing.
+- Things don't do what people do: a skill isn't "connected", a copy doesn't "know", a page doesn't "turn into" anything. Say what the person or the program does ("setup adds the skill", "set `HOME_AIR_URL`"). Simple English, for readers whose first language isn't English: no idioms ("stuffy").
+- Docs, code and comments describe what exists now: no plans, "next" or "later" (those live in the maintainer's roadmap). A claim about another product (what an assistant can reach, a command's syntax) is checked against its docs and linked, or left out.
 - What the page tells you to do is an **action**, each with a why. Not advice, a recommendation or a tip.
 - **Profiles** are ready-made types of person a home picks from (toddler, sinus & allergy, runner): `[profiles]` in `config.toml`. Say "the profiles that match your home"; when saying how the air suits them, talk about the person ("whether the air suits each of them"), not the profile. Never call them "needs" (the old name).

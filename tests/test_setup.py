@@ -512,7 +512,11 @@ def test_setup_md_asks_one_question_at_a_time_with_or_without_a_question_tool():
 
 LAST_MESSAGE = ["Home Air is ready at this address:", "http://localhost:5555",
                 "It stops when this computer restarts. I can make it start by itself when you log in.",
-                "I can also help you set it up on a home server with Docker, or online with Railway."]
+                "I can also help you set it up on a home server with Docker, or online with Railway.",
+                "I've added Home Air's skill to my skills on this computer: ask me about the air at home. I change your "
+                "settings only when you ask and say yes. The first time, I'll ask your permission to run its script. "
+                "To remove the skill, ask me.",
+                "For other AI assistants: [docs/agents.md](docs/agents.md) in this folder."]
 
 
 def doc(name):
@@ -633,3 +637,78 @@ def test_setup_md_says_where_the_link_is_and_how_to_stop_it():
 
 def test_status_suggests_starting_in_the_background():
     assert setup.START_CMD == "scripts/run.sh scripts/setup.py --start"
+
+
+def skill_root(root):
+    """A Home Air folder with the real skill in it, and an empty home folder beside it."""
+    src = REPO / "skills" / setup.SKILL
+    (root / "skills" / setup.SKILL / "scripts").mkdir(parents=True)
+    for name in ("SKILL.md", "scripts/home_air.py"):
+        (root / "skills" / setup.SKILL / name).write_text((src / name).read_text())
+    (root / "home").mkdir()
+    return root / "home"
+
+
+def test_agent_on_never_replaces_another_skill_and_off_removes_only_its_own_links(root, capsys, monkeypatch):
+    # decision 21 Nov, "Self-install setup connects the agent that ran it": never overwrite, a record, a one-command undo
+    home = skill_root(root)
+    monkeypatch.setenv("HOME", str(home))   # never the real ~/.claude or ~/.agents
+    theirs = home / ".agents" / "skills" / setup.SKILL
+    theirs.mkdir(parents=True)
+    (theirs / "SKILL.md").write_text("someone else's skill")
+    env = {"HOME": str(home), "CLAUDECODE": "1"}
+    code, out = run(root, capsys, "--agent", "on", env=env)
+    ours = home / ".claude" / "skills" / setup.SKILL
+    assert code == 0 and ours.is_symlink() and ours.resolve() == (root / "skills" / setup.SKILL).resolve()
+    assert (theirs / "SKILL.md").read_text() == "someone else's skill" and not theirs.is_symlink()
+    assert "already there" in out and "--agent off" in out
+    assert run(root, capsys, "--agent", "on", env=env)[0] == 0   # twice is the same as once
+    code, out = run(root, capsys, "--agent", "off", env=env)
+    assert code == 0 and not ours.exists() and not ours.is_symlink()
+    assert (theirs / "SKILL.md").read_text() == "someone else's skill"
+    # a link setup made, then replaced by the person's own skill: off leaves theirs
+    run(root, capsys, "--agent", "on", env=env)
+    ours.unlink()
+    ours.mkdir()
+    (ours / "SKILL.md").write_text("their own now")
+    code, out = run(root, capsys, "--agent", "off", env=env)
+    assert code == 0 and (ours / "SKILL.md").read_text() == "their own now" and "no longer the link setup made" in out
+
+
+def test_agent_on_with_every_folder_taken_says_it_did_not_connect(root, capsys, monkeypatch):
+    home = skill_root(root)
+    monkeypatch.setenv("HOME", str(home))
+    for folder in (setup.SHARED_SKILLS, setup.CLAUDE_SKILLS):
+        (home / folder).mkdir(parents=True)
+        (home / folder / setup.SKILL).symlink_to(home)   # a link elsewhere is another skill too
+    code, out = run(root, capsys, "--agent", "on", env={"HOME": str(home), "CLAUDECODE": "1"})
+    assert code == 1 and "The skill wasn't added" in out and not (root / setup.AGENT_FILE).exists()
+    assert run(root, capsys, "--agent", "off", env={"HOME": str(home)})[0] == 0
+    assert all((home / f / setup.SKILL).is_symlink() for f in (setup.SHARED_SKILLS, setup.CLAUDE_SKILLS))
+
+
+def test_agent_on_records_a_link_made_before_a_later_one_fails(root, capsys, monkeypatch):
+    # review of agent/lead/mcp-server: the record was written after the loop, so a failure left an unrecorded link
+    home = skill_root(root)
+    monkeypatch.setenv("HOME", str(home))
+    (home / ".claude").mkdir()
+    (home / setup.CLAUDE_SKILLS).write_text("not a folder")   # Claude Code's folder can't be made: the second link fails
+    code, out = run(root, capsys, "--agent", "on", env={"HOME": str(home), "CLAUDECODE": "1"})
+    shared = home / setup.SHARED_SKILLS / setup.SKILL
+    assert code == 0 and shared.is_symlink() and "Couldn't link" in out
+    assert run(root, capsys, "--agent", "off", env={"HOME": str(home)})[0] == 0 and not shared.is_symlink()
+
+
+@pytest.mark.parametrize("env, claude_dir, folders", [
+    ({"CLAUDECODE": "1"}, False, {setup.SHARED_SKILLS, setup.CLAUDE_SKILLS}),
+    ({"CODEX_SANDBOX": "seatbelt"}, True, {setup.SHARED_SKILLS}),
+    ({"CODEX_HOME": "/elsewhere"}, False, {setup.SHARED_SKILLS}),   # a user setting, not Codex running: unknown agent
+    ({}, True, {setup.SHARED_SKILLS, setup.CLAUDE_SKILLS}),          # unknown agent, Claude Code installed: both
+])
+def test_agent_on_links_the_folders_of_the_agent_running_setup(root, capsys, monkeypatch, env, claude_dir, folders):
+    home = skill_root(root)
+    monkeypatch.setenv("HOME", str(home))
+    if claude_dir:
+        (home / ".claude").mkdir()
+    assert run(root, capsys, "--agent", "on", env={"HOME": str(home), **env})[0] == 0
+    assert {f for f in (setup.SHARED_SKILLS, setup.CLAUDE_SKILLS) if (home / f / setup.SKILL).is_symlink()} == folders
