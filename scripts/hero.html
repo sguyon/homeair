@@ -27,6 +27,10 @@
     --ph1: rgba(0, 0, 0, .50);
     --ph2: rgba(0, 0, 0, .50);
   }
+  /* the dark hero sits on GitHub's dark page (#0d1117), the same darkness as the app's dark page: a dark shadow can't
+     separate them, so a lit edge and a faint neutral light around it do, fading out inside the stage's room */
+  :root.dark .win { box-shadow: 0 0 0 1px rgba(255, 255, 255, .20), 0 0 0 2px rgba(0, 0, 0, .6), 0 0 60px -12px rgba(255, 255, 255, .10); }
+  :root.dark .phone { box-shadow: 0 0 0 1px rgba(255, 255, 255, .16), 0 0 0 2px rgba(0, 0, 0, .6), 0 2px 4px var(--ph0), 0 24px 48px -16px rgba(0, 0, 0, .7); }
   /* the cropped hero sits on white with about 30 px below it: shadows half as dark and short enough to fade out inside that */
   :root.cropped .win { box-shadow: 0 0 0 1px var(--ring), 0 6px 16px -6px rgba(16, 24, 40, .05), 0 14px 24px -10px rgba(16, 24, 40, .07); }
   :root.cropped .phone { box-shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 8px 16px -4px rgba(10, 14, 20, .14), 0 16px 24px -10px rgba(10, 14, 20, .10); }

@@ -5,7 +5,10 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 **[Try the demo](https://homeair.app)** · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
 
 <p align="center">
-  <img src="docs/hero-light.png" alt="Home Air's page next to its phone view" width="800">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.png">
+    <img src="docs/hero-light.png" alt="Home Air's page next to its phone view" width="800">
+  </picture>
 </p>
 
 <sub>Screenshots from the demo, with sample data.</sub>
