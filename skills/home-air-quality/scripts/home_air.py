@@ -4,8 +4,9 @@
   home_air.py now                       current readings and the air read (actions with a why) in one call
   home_air.py history [--hours N] [--where indoor|outdoor]   the last N hours (default 12, 1 to 168), hourly
 
-The server is HOME_AIR_URL; else, when this skill sits in a Home Air folder (setup links it from there), the port that
-`setup.py --start` chose (app.port), then http://localhost:5555 if that one doesn't answer; else http://localhost:5555.
+The server is HOME_AIR_URL; else the address `./homeair skill add --url` saved (agent-url in the Home Air folder);
+else, when this skill sits in a Home Air folder (setup links it from there), the port that
+`./homeair start` chose (app.port), then http://localhost:5555 if that one doesn't answer; else http://localhost:5555.
 It asks the server's /api/agent/now and /api/agent/history, the same answers as Home Air's MCP tools. On failure it
 prints {"error": ...} and exits 1.
 """
@@ -23,16 +24,17 @@ TIMEOUT = 60          # seconds: the first read after a restart waits on weather
 DEFAULT_HOURS = 12    # hours of history when the question doesn't say: "last night" from the morning.
 HOME_AIR = Path(__file__).resolve().parents[3]   # the Home Air folder, when this is its skills/home-air-quality/scripts
 NO_NETWORK_VAR = "CODEX_SANDBOX_NETWORK_DISABLED"  # set by Codex when its sandbox blocks the network, localhost too
-UPDATE = ("This Home Air is older than the skill and has no /api/agent routes. Update it (git pull in the Home Air "
-          "folder), then restart it (scripts/run.sh scripts/setup.py --start).")
+UPDATE = ("This Home Air is older than the skill and has no /api/agent routes. Update Home Air (git pull in the Home "
+          "Air folder), then restart it (./homeair start).")
 OTHER = ("Something else answers at {}, not Home Air. Set HOME_AIR_URL to Home Air's address, or check the port setup "
          "chose (app.port in the Home Air folder).")
 SANDBOX = ("This command runs in a sandbox without network access ({} is set), which blocks localhost too, so the server "
-           "may well be running: run it again with network access allowed (outside the sandbox, or in Codex "
+           "may be running: run the command again with network access allowed (outside the sandbox, or in Codex "
            "network_access = true under [sandbox_workspace_write] in ~/.codex/config.toml).")
-STOPPED_OR_SANDBOX = ("Either it is stopped (start it: scripts/run.sh scripts/setup.py --start in the Home Air folder, "
-                      "or set HOME_AIR_URL), or this command runs in a sandbox without network access, which blocks "
-                      "localhost too (Codex's default sandbox does): then run it again with network access allowed.")
+STOPPED_OR_SANDBOX = ("Either Home Air is stopped (start it: ./homeair start in the Home Air folder, or set "
+                      "HOME_AIR_URL), or this command runs in a sandbox without network access, which blocks "
+                      "localhost too (Codex's default sandbox does): then run the command again with network access "
+                      "allowed.")
 
 
 class Fail(Exception):
@@ -42,6 +44,11 @@ class Fail(Exception):
 def base_urls():
     """The addresses to try, in order: HOME_AIR_URL alone; else the port setup chose, then the default port."""
     url = os.environ.get("HOME_AIR_URL", "").strip()
+    if not url:
+        try:   # the address `./homeair skill add --url` saved: Home Air online or on a home server
+            url = (HOME_AIR / "agent-url").read_text().strip()
+        except OSError:
+            url = ""
     if url:
         return [url.rstrip("/")]
     urls = []

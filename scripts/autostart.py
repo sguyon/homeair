@@ -19,11 +19,16 @@ STOP_WAIT = 10                                 # seconds for setup's own copy to
 STOP_POLL = 0.2                                # seconds between checks that it has stopped
 RETRY_WAIT = 2                                 # seconds before launchd gets a second bootstrap, right after a bootout
 PATH_TAIL = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"   # where uv or Python may live, after ~/.local/bin
-# What macOS shows when the login item is installed and first reads the Wi-Fi: it names the programs the item runs
-# (/bin/sh, then uv), not Home Air (seen on the real home, 22 Nov). Said before they appear.
-MACOS_NOTICES = ('macOS will now say "sh" can run in the background, and may ask to allow "uv" to find devices on '
-                 'local networks: both are Home Air, which starts through them. Choose Allow, or it can\'t read your '
-                 'monitors on the Wi-Fi when it starts at login.')
+# The login item runs the folder's `homeair` script, so macOS's background notice names "homeair" (it names the
+# program the item starts: "sh" when it was /bin/sh, 22 Nov; AgentRun's script-named item shows "agentrun", 23 Nov).
+# The Local Network prompt still names "uv", the program that reads the Wi-Fi. Said before they appear.
+LOGIN_CMD = "homeair"
+MACOS_NOTICES = ('macOS will now say "homeair" can run in the background, and may ask to allow "uv" to find devices on '
+                 'local networks: "uv" is the program Home Air runs through. Choose Allow, or Home Air can\'t read '
+                 'your monitors on the Wi-Fi when it starts at login.')
+# What turning it on gives, by system, in the words of setup's last message (SETUP.md, "3. Tell the user it's ready").
+LOGIN_WORDS = {"launchd": "Home Air is in your Mac's Login Items, so it starts again each time you turn on this Mac and sign in.",
+               "systemd": "Home Air starts again each time you turn on this computer and sign in (a systemd user service)."}
 
 
 def system(platform, which, run):
@@ -45,7 +50,7 @@ def launchd_plist(root, home, port, host=None):
         env["HOST"] = host   # started with HOST=0.0.0.0 for a phone at home: it stays open to it
     return plistlib.dumps({
         "Label": LABEL,
-        "ProgramArguments": ["/bin/sh", str(root / "scripts" / "run.sh"), "server.py"],
+        "ProgramArguments": [str(root / LOGIN_CMD), "serve"],
         "WorkingDirectory": str(root),
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -60,7 +65,7 @@ def systemd_unit(root, port, host=None):
         "[Unit]\nDescription=Home Air\n\n"
         "[Service]\n"
         f"WorkingDirectory={root}\n"
-        f'ExecStart=/bin/sh "{root / "scripts" / "run.sh"}" server.py\n'
+        f'ExecStart="{root / LOGIN_CMD}" serve\n'
         f"Environment=PORT={port}\n"
         + (f"Environment=HOST={host}\n" if host else "") +
         "Restart=on-failure\n"
@@ -88,10 +93,30 @@ def _alive(pid):
     return True
 
 
-def _is_ours(pid):
-    """The pid is this app (a stale app.pid can name another program after a crash or a restart)."""
-    out = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout   # -ww: Linux's ps cuts a long command at 80 columns when piped, losing "server.py" at its end
-    return "server.py" in out
+def _home_air_answers(port):
+    """Home Air's /health answers on this port (a GET to this computer, 2 s at most)."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+            return isinstance(json.loads(r.read().decode()), dict)
+    except (OSError, ValueError):
+        return False
+
+
+def _is_ours(pid, root=None):
+    """The pid is this app (a stale app.pid can name another program after a crash or a restart). Asked of ps; where
+    ps can't run (Codex's sandbox on macOS refuses it), Home Air answering on the port setup wrote (app.port) means the
+    pid it wrote is its own; when neither can tell, False: nothing is stopped."""
+    try:
+        out = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout   # -ww: Linux's ps cuts a long command at 80 columns when piped, losing "server.py" at its end
+        return "server.py" in out
+    except OSError:
+        try:
+            port = int((Path(root) / "app.port").read_text().strip()) if root is not None else None
+        except (OSError, ValueError):
+            port = None
+        return port is not None and _home_air_answers(port)
 
 
 def port_answers(port):
@@ -101,21 +126,25 @@ def port_answers(port):
 
 
 def stop_setup_copy(root):
-    """Stop the copy setup started (its pid in app.pid), so two copies never fight over the port."""
+    """Stop the copy setup started (its pid in app.pid), so two copies never fight over the port. True when it was
+    running and got the stop signal."""
     pid_file = root / PID_FILE
     try:
         pid = int(pid_file.read_text().strip())
     except (OSError, ValueError):
-        return
-    if _alive(pid) and _is_ours(pid):
+        return False
+    stopped = False
+    if _alive(pid) and _is_ours(pid, root):
         try:
             os.kill(pid, signal.SIGTERM)
         except PermissionError:
-            return
+            return False
+        stopped = True
         end = time.monotonic() + STOP_WAIT
         while _alive(pid) and time.monotonic() < end:
             time.sleep(STOP_POLL)
     pid_file.unlink(missing_ok=True)
+    return stopped
 
 
 def _port_in(path):
@@ -152,10 +181,11 @@ def restart(kind, run):
 
 
 def turn_on(root, home, env, run, which, platform, check):
-    from setup import SETUP_CMD, START_CMD, port_from
+    from setup import LOGIN_OFF_CMD, START_CMD, port_from
     kind, reason = system(platform, which, run)
     if not kind:
-        print(f"Start at login isn't available here ({reason}): keep the app running with {START_CMD} instead.")
+        print(f"Start at login isn't available here ({reason}): Home Air runs until this computer restarts. "
+              f"Start it again with {START_CMD}.")
         return 1
     port, host = port_from(env), env.get("HOST")
     uid = os.getuid()
@@ -165,7 +195,8 @@ def turn_on(root, home, env, run, which, platform, check):
         run(["systemctl", "--user", "stop", UNIT])
     stop_setup_copy(root)
     if port_answers(port):
-        print(f"Port {port} is busy (another copy of the app, or another program). Stop it, then run this again.")
+        print(f"Port {port} is busy (another Home Air, or another program). Stop that program, then run this "
+              "command again.")
         return 1
     if kind == "launchd":
         print(MACOS_NOTICES, flush=True)
@@ -185,12 +216,12 @@ def turn_on(root, home, env, run, which, platform, check):
                                                ["systemctl", "--user", "enable", UNIT],
                                                ["systemctl", "--user", "restart", UNIT]))
     if not loaded:
-        print(f"The system didn't start it ({path}). Its log: {root / LOG_FILE}")
+        print(f"The system didn't start Home Air ({path}). Its log: {root / LOG_FILE}")
         return 1
     if check() != 0:
-        print(f"It's set to start at login, but the page didn't answer. Its log: {root / LOG_FILE}")
+        print(f"Home Air is set to start at login, but the page didn't answer. Its log: {root / LOG_FILE}")
         return 1
-    print(f"It now starts by itself when you log in. To turn it off: {SETUP_CMD} --start-at-login off")
+    print(f"{LOGIN_WORDS[kind]} To turn that off: {LOGIN_OFF_CMD}")
     return 0
 
 
@@ -214,7 +245,7 @@ def turn_off(root, home, run, which, platform):
     if path is not None and path.exists():
         folder = _folder_in(path)
         if folder is not None and not folder.exists():
-            moved = f" (it pointed to {folder}, which no longer exists)"
+            moved = f" (the login item pointed to {folder}, which no longer exists)"
         if kind == "launchd":
             run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"])
         else:

@@ -28,7 +28,6 @@ from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, add_k
 
 # Load .env file if it exists
 env_path = Path(__file__).parent / ".env"
-code_path = Path(__file__).parent / token_setup.CODE_FILE   # the owner's code for the token box (token_setup.owner_code)
 if env_path.exists():
     for key, val in parse_dotenv(env_path.read_text()).items():
         os.environ.setdefault(key, val)
@@ -342,46 +341,17 @@ def index():
 
 @app.route("/connect")
 def connect():
-    """The token box on this computer's page, whenever no token is saved (also when monitors are read on the Wi-Fi), for
-    a browser holding the owner cookie. /connect?code= (the private link setup prints) sets that cookie. Anywhere else,
-    or with a token saved, the card says where to add it instead."""
+    """The token box on this computer's page, whenever no token is saved (also when monitors are read on the Wi-Fi).
+    Anywhere else, or with a token saved, the card says where to add it instead. An old private link (?code=) lands here."""
     if token_setup.forwarded(request):
         return Response(FORWARDED_ERROR + "\n", 403, mimetype="text/plain", headers={"Cache-Control": "no-store"})
+    if request.args.get("saved") == "1" and token_state.saved and token_setup.has_token(env_path, TOKEN):
+        return render_page(card=True)   # right after a save: "Saved. Go back to your agent's chat and reply done."
     if not token_mode() or token_setup.has_token(env_path, TOKEN):
         return redirect("/", code=303)
     if "code" in request.args:
-        return owner_login(request.args.get("code", ""))
+        return redirect("/connect", code=303)
     return render_page(card=True)
-
-
-def current_code():
-    """The owner's code, read (setup.py writes it); None when there is none yet or it can't be read: the box stays closed."""
-    try:
-        return token_setup.owner_code(code_path, create=False)
-    except (OSError, UnicodeError):
-        return None
-
-
-def is_owner(req):
-    code = current_code()
-    return code is not None and token_setup.owner_cookie(req, code)[0]
-
-
-def owner_login(given):
-    """The private link: the right code sets the owner cookie, then the page reloads without the code: at the home in
-    "local" mode (its readings come first; the box stays at /connect for this browser), else at /connect. A refresh
-    rather than a redirect: the next request then comes from this page, so the Strict cookie goes with it even when
-    the link was clicked on another site. A wrong code sets nothing."""
-    code = current_code() if token_setup.local_entry(request, env_path) else None
-    if code is None or not token_setup.code_matches(given, code):
-        return render_page(WRONG_CODE_ERROR if code is not None else None, 403, card=True)
-    target, words = ("/", "Open Home Air") if MODE == "local" else ("/connect", "Open the token box")
-    response = make_response(OWNER_PAGE.format(target=target, words=words))
-    response.set_cookie(token_setup.OWNER_COOKIE, token_setup.owner_value(code), max_age=token_setup.OWNER_COOKIE_AGE,
-                        path="/", httponly=True, samesite="Strict", secure=request.is_secure)
-    response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-                             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"})
-    return response
 
 
 def sets_cookie(response, name):
@@ -396,11 +366,6 @@ def tidy_token_cookies(response):
             or not token_setup.local_entry(request, env_path)):
         return response
     checks = []
-    owners = request.cookies.getlist(token_setup.OWNER_COOKIE)
-    if owners:
-        code = current_code()
-        valid = code is not None and token_setup.owner_cookie(request, code)[0]
-        checks.append((token_setup.OWNER_COOKIE, valid, len(owners) > 1 or not valid))
     forms = request.cookies.getlist(token_setup.COOKIE_NAME)
     if forms:
         known = [token_state.known(v) for v in forms]
@@ -425,9 +390,9 @@ def token_mode():
 
 
 def print_setup_link(port):
-    """The start line names the command that prints the private link, never the link: this output goes to app.log."""
+    """The start line names where the token goes, when none is saved."""
     if not real_value(TOKEN):
-        print(f"No AirGradient token yet. For the private link to the token box, run: {CONNECT_CMD}", flush=True)
+        print(f"No AirGradient API token yet. To add it: http://localhost:{port}/connect", flush=True)
 
 
 TOKEN_FORMAT_ERROR = ("This doesn't look like an AirGradient token. Press the copy button next to API Access "
@@ -435,17 +400,8 @@ TOKEN_FORMAT_ERROR = ("This doesn't look like an AirGradient token. Press the co
 TOKEN_REFUSED_ERROR = ("AirGradient refused this token. Check that API Access is turned on for the place that shows your monitor, "
                        "then copy the token again.")
 FORM_EXPIRED_ERROR = "This form had expired, so nothing was sent. Paste the token again."
-CONNECT_CMD = "scripts/run.sh scripts/setup.py --connect"   # prints the private link to the token box
-OWNER_NEEDED_ERROR = f"Open the private link setup printed first, or run {CONNECT_CMD} to see it."
-WRONG_CODE_ERROR = "This link isn't the private one setup printed."
+CONNECT_CMD = "./homeair connect"   # opens the token box's address (scripts/setup.py --connect)
 FORWARDED_ERROR = "The token box opens only on the computer Home Air runs on, not through a proxy or tunnel."
-# The private link's answer: the owner cookie, then the page reloads itself without the code, at {target}: the token
-# box (/connect), or the home (/) when monitors are read on the Wi-Fi.
-OWNER_PAGE = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-              '<meta http-equiv="refresh" content="0; url={target}"><title>Home Air</title>'
-              '<p><a href="{target}">{words}</a></p></html>')
-
-
 # The public demo's head only (never a copy a household runs): Vercel Web Analytics and Speed Insights (cookieless, nothing
 # personal; the app itself has no analytics) and the link preview shown when someone shares the demo's address. Vercel serves
 # the two scripts itself once the project has them on.
@@ -480,15 +436,16 @@ def render_page(error=None, status=200, card=False):
     html = html.replace("</head>", demo_head_tags() + "</head>", 1)
     browser = None
     # A fresh copy (the demo, no home yet) shows only the card: the token box with its link, then "saved" until setup restarts it.
-    saved = setup_mode() and MODE == "demo" and token_state.saved
+    just_saved = card and request.args.get("saved") == "1" and bool(token_state.saved)   # /connect?saved=1 after a save
+    saved = (setup_mode() and MODE == "demo" and token_state.saved) or just_saved
     show_setup = MODE == "no_token" or saved or (token_mode() and card)
     html = inject_app(html, setup_page=show_setup)
     if show_setup:
         entry = token_setup.allowed(request, env_path, TOKEN, "no_token" if MODE != "local" else "local")
-        owner = entry and not saved and is_owner(request)
-        value, browser = token_state.issue(request) if owner and token_setup.form_request(request) else (None, None)
-        card = render_template("token_card.html", entry=bool(owner and value), saved=saved, owner_needed=entry and not saved and not owner,
-                               forms_full=bool(owner and not value), connect_cmd=CONNECT_CMD,
+        open_box = entry and not saved   # this computer's page: the checks in token_setup.allowed
+        value, browser = token_state.issue(request) if open_box and token_setup.form_request(request) else (None, None)
+        card = render_template("token_card.html", entry=bool(open_box and value), saved=saved, home_ready=just_saved,
+                               forms_full=bool(open_box and not value), connect_cmd=CONNECT_CMD,
                                found=token_state.saved["monitors"] if saved else [], shown=SAVED_NAMES_SHOWN, nonce=value, error=error,
                                instructions=token_setup.instructions(request), port=token_setup.app_port(), max_length=token_setup.TOKEN_MAX_LENGTH)
         card = version_assets(card)
@@ -524,8 +481,6 @@ def save_token():
     with token_state.lock:
         if (MODE == "demo" and not setup_mode()) or not token_setup.local_entry(request, env_path) or not token_setup.same_origin(request):
             return jsonify(error="Token entry is only available on this computer's local page."), 403
-        if not is_owner(request):
-            return jsonify(error=OWNER_NEEDED_ERROR), 403   # a program on this computer without the private link stops here
         if token_setup.has_token(env_path, TOKEN):
             return redirect("/", code=303)   # sent twice, or from an old tab: the page shows where things stand
         if not token_mode():
@@ -563,6 +518,7 @@ def save_token():
         except (OSError, UnicodeError, ValueError):
             return render_page("Couldn't save the token. Check that the app's folder is writable.", 500, card=True)
         os.environ["AIRGRADIENT_TOKEN"] = candidate
+        home_ready = MODE == "local"   # monitors already read on the Wi-Fi: the home is there; the card says to go back to the agent
         TOKEN, MODE = candidate, server_mode(CFG, candidate)
         budgets.clear("ag_current")   # a refused token's pause ends with a new one
         budgets.clear("ag_history")
@@ -570,7 +526,7 @@ def save_token():
         token_state.saved = {"monitors": sources.account_monitors(accepted)}   # their names and kinds, for the "connected" card
         token_state.nonces.clear()
         token_state.failures.clear()
-        response = redirect("/", code=303)
+        response = redirect("/connect?saved=1" if home_ready else "/", code=303)
         response.headers["Cache-Control"] = "no-store"
         response.delete_cookie(token_setup.COOKIE_NAME)
         return response
@@ -652,7 +608,7 @@ def inject_app(html, setup_page=False):
     """The home's config for the page's scripts (config.public_view), as window.APP before the first of them.
     Every "<" is escaped (\\u003c, still the same JSON) so no config value can close the script or open a comment."""
     now = None if setup_page else page_clock()   # the token card never shows the demo's moments
-    data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {})}, ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {"state": "local"} if MODE == "local" else {})}, ensure_ascii=False).replace("<", "\\u003c")
     return html.replace("<script src=", f"<script>window.APP = {data};</script>\n<script src=", 1)
 
 

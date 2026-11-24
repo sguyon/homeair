@@ -57,7 +57,7 @@ def repo(tmp_path, monkeypatch):
 def test_plist_starts_the_app_from_the_folder():
     plist = plistlib.loads(autostart.launchd_plist(Path("/x/a b"), Path("/h"), 5555).encode())
     assert plist["Label"] == autostart.LABEL
-    assert plist["ProgramArguments"] == ["/bin/sh", "/x/a b/scripts/run.sh", "server.py"]
+    assert plist["ProgramArguments"] == ["/x/a b/homeair", "serve"]   # macOS names the item "homeair", not "sh"
     assert plist["WorkingDirectory"] == "/x/a b"
     assert plist["RunAtLoad"] is True and plist["KeepAlive"] is True
     assert plist["EnvironmentVariables"]["PORT"] == "5555"
@@ -67,7 +67,7 @@ def test_plist_starts_the_app_from_the_folder():
 
 def test_unit_uses_an_unquoted_working_directory():
     unit = autostart.systemd_unit(Path("/x/a b"), 5600)
-    assert 'ExecStart=/bin/sh "/x/a b/scripts/run.sh" server.py' in unit
+    assert 'ExecStart="/x/a b/homeair" serve' in unit
     assert "Environment=PORT=5600" in unit
     assert "WorkingDirectory=/x/a b" in unit.splitlines()
     assert "Restart=on-failure" in unit and "WantedBy=default.target" in unit
@@ -80,7 +80,7 @@ def test_on_mac_writes_and_loads_then_checks(tmp_path, capsys):
     assert code == 0 and path.exists()
     assert run.cmds[-1] == ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(path)]
     assert checked == [1]
-    assert "It now starts by itself when you log in." in capsys.readouterr().out
+    assert autostart.LOGIN_WORDS["launchd"] + " To turn that off: ./homeair start-at-login off" in capsys.readouterr().out
 
 
 def test_on_linux_enables_the_user_service(tmp_path):
@@ -126,7 +126,7 @@ def test_linux_without_user_services_writes_nothing(tmp_path, capsys):
 def test_a_failed_check_says_so(tmp_path, capsys):
     code, _, _ = on(tmp_path, check=lambda: 1)
     assert code == 1
-    assert "It now starts by itself" not in capsys.readouterr().out
+    assert autostart.LOGIN_WORDS["launchd"] not in capsys.readouterr().out
 
 
 def test_off_when_not_on(tmp_path, capsys):
@@ -241,3 +241,15 @@ def test_on_again_unloads_the_running_one_before_the_port_check(tmp_path, platfo
         assert code == 0
     finally:
         held.close()
+
+
+def test_without_ps_the_setup_copy_is_known_by_its_answer_on_its_port(tmp_path, monkeypatch):
+    # Codex's sandbox on macOS refuses to run ps (rehearse S12, 24 Nov): setup stopped with "Couldn't read or write ps".
+    def no_ps(*a, **k):
+        raise PermissionError(1, "Operation not permitted", "ps")
+    monkeypatch.setattr(autostart.subprocess, "run", no_ps)
+    (tmp_path / "app.port").write_text("5701\n")
+    monkeypatch.setattr(autostart, "_home_air_answers", lambda port: port == 5701)
+    assert autostart._is_ours(123, tmp_path) is True
+    monkeypatch.setattr(autostart, "_home_air_answers", lambda port: False)
+    assert autostart._is_ours(123, tmp_path) is False   # can't tell: stop nothing

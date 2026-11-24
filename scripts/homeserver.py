@@ -9,13 +9,14 @@ from pathlib import Path
 IMAGE = "ghcr.io/sguyon/homeair:latest"           # published from main by .github/workflows/image.yml
 OLD_IMAGE = "ghcr.io/sguyon/home-air-quality:latest"   # the same image under the old name, still published
 FOLDER = "home-server"                             # prepared in the repo folder; gitignored (it holds a copy of .env)
-NO_TOKEN_LINE = ("Without the AirGradient token, the server stops showing live readings if a monitor's address changes: "
-                 "run this step again then (adding the token avoids it).")   # spec answer A
+NO_TOKEN_LINE = ("Without the AirGradient API token, the server stops showing live readings if a monitor's address changes: "
+                 "then run ./homeair home-server again and copy the folder over (with the token, the server reads that "
+                 "monitor from the cloud instead).")   # spec answer A
 SERVER_PORT = 8000                                 # the image's port (Dockerfile), opened to the home network
 
 COMPOSE = f"""# Home Air on a home server. In this folder: docker compose up -d
 # Then open http://<this server>:{SERVER_PORT} from any device at home. Anyone on the home network can see the page.
-# Prepared by scripts/setup.py --home-server: config.toml and .env sit next to this file.
+# Prepared by ./homeair home-server: config.toml and .env sit next to this file.
 # Keep .env private; config.toml must stay readable by the container's user.
 services:
   home-air-quality:
@@ -71,15 +72,15 @@ def with_hosts(text, cfg, find):
 def prepare(root, find=None):
     import localnet
     from config import ENV_FILE_MODE, ConfigError, env_key, load_config
-    from setup import HOME_CMD, saved_keys
+    from setup import SETUP_CMD, saved_keys
     find = find or localnet.discover
     try:
         cfg = load_config({}, root)
     except ConfigError as e:
-        print(f"config.toml has a problem ({e}). Fix it first: {HOME_CMD}")
+        print(f"config.toml has a problem ({e}). Fix that first: run {SETUP_CMD} again.")
         return 1
     if cfg is None:
-        print(f"There's no config.toml yet. Set up the home first: {HOME_CMD}")
+        print(f"There's no config.toml yet. Set up the home first: {SETUP_CMD}")
         return 1
     token = env_key("AIRGRADIENT_TOKEN", saved_keys(root))
     text, lines = with_hosts((root / "config.toml").read_text(encoding="utf-8"), cfg, find)

@@ -135,6 +135,7 @@
 
   <div class="chart-bar"><span>History</span><div class="seg" id="ranges" role="radiogroup" aria-label="Chart range"><button type="button" role="radio" aria-checked="true" class="on" data-range="1h">1 h</button><button type="button" role="radio" aria-checked="false" data-range="6h">6 h</button><button type="button" role="radio" aria-checked="false" data-range="24h">24 h</button><button type="button" role="radio" aria-checked="false" data-range="7d">7 d</button></div></div>
   <p class="hist-est" id="hist-est" hidden>Outdoor PM2.5 here is an estimate and isn't kept for History.</p>
+  <p class="hist-est" id="hist-since" hidden>Recording since <span id="hist-since-at"></span>. To add the days before, <a href="/connect">connect your AirGradient Dashboard</a>.</p>   <!-- a home read on the Wi-Fi with no token: its history starts when Home Air began reading (app.js loadCharts) -->
   <article class="card hist-off" id="hist-none" hidden></article>   <!-- a public monitor with no history: app.js fills it (home.js noHistoryHTML) -->
   <div class="grid2" id="hist-charts">
     <article class="card">

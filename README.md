@@ -19,21 +19,23 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 
 ## Installation
 
-You need one or two AirGradient monitors (indoor, outdoor or both). Home Air reads the ones on your computer's Wi-Fi directly, one reading a minute, with no account and no token. An AirGradient token is optional: it adds the last 7 days of history and is needed to put Home Air online. Works best in the US.
+You need one or two AirGradient monitors (indoor, outdoor or both). Home Air reads the ones on your computer's Wi-Fi directly, one reading a minute, with no account and no token. An AirGradient API token is optional: it adds the last 7 days of history and is needed to deploy Home Air online. Works best in the US.
 
 **With a coding agent** (Claude Code or Codex). Open your agent anywhere and paste:
 
 ```
-Clone https://github.com/sguyon/homeair into ~/homeair and set up Home Air for my home by following its SETUP.md.
+Set up Home Air for my home by following the instructions here: https://raw.githubusercontent.com/sguyon/homeair/main/SETUP.md
 ```
 
-To keep it somewhere else, name that folder instead of `~/homeair`.
+The agent puts Home Air in a `homeair` folder inside the folder it was opened in (`~/homeair` when that folder is another project). To choose the folder, name it in the prompt.
 
-It finds your monitors on the Wi-Fi, writes your config and runs the page on your computer. Your place, who lives here and the AirGradient token are all optional, and the page asks for them afterwards. It can then keep it running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)).
+The agent finds your monitors on the Wi-Fi, writes your settings and runs the page on your computer, then asks about your home: the address (for weather and pollen) and who lives with you, then, optional, your AirGradient API token and the skill for your coding agents. The agent can then keep Home Air running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)). Later, `./homeair help` in that folder lists the commands.
 
-**With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) (the home-server copy reads your monitors on the Wi-Fi with no token), then start Compose and open http://localhost:8000.
+**AI assistants:** your coding agents can ask about the air at home through the skill, and other assistants through Home Air's MCP server ([docs/agents.md](docs/agents.md)). Assistants that run in the cloud, like claude.ai, can only reach Home Air online, and that hasn't been tested yet.
 
-**Just trying it?** A fresh copy with no token opens the demo: `uv run --with-requirements requirements.txt server.py`, then http://localhost:5555.
+**With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) (Home Air on a home server reads your monitors on the Wi-Fi with no token), then start Compose and open http://localhost:8000.
+
+**Just trying it?** Without settings or a token, Home Air opens the demo: `uv run --with-requirements requirements.txt server.py`, then http://localhost:5555.
 
 ## Features
 
@@ -44,7 +46,7 @@ It finds your monitors on the Wi-Fi, writes your config and runs the page on you
 - Weather, pollen, wildfire smoke, and a nearby highway's exhaust when the wind blows it your way
 - Public AirGradient monitors nearby, to see whether bad air is regional or just around your home
 - A live sky behind the page, with the real sun, clouds, rain and haze. Useless, but my toddler's favorite feature :)
-- Installs on your phone's home screen like an app (a PWA): [how](SETUP.md#on-your-phone)
+- Installs on your phone's home screen like an app (a PWA): [how](SETUP.md#open-the-page-on-a-phone)
 
 ## Why I built it
 
@@ -58,13 +60,13 @@ It's minimal on purpose, and by necessity: I built it around what my own two mon
 
 - **Works best in the US.** Wildfire smoke (NOAA) and the forecast and pollen links use US sources. Elsewhere, turn those off in `config.toml`: your monitors' readings, the actions, the weather and the PM2.5 forecast still work.
 - **One or two monitors.** An indoor one, an outdoor one, or both. With an indoor monitor only, outdoor PM2.5 comes from a nearby public monitor or an estimate for your area; with an outdoor monitor only, the toddler profile waits for an indoor one. No rooms or several monitors of the same kind yet.
-- **Wi-Fi reads need the same network.** Home Air finds monitors by browsing the local network (mDNS), which doesn't work inside Docker or WSL, and a copy online (Railway) can't see your Wi-Fi at all. A home server reads the addresses setup found; a copy online reads AirGradient's cloud with your token, up to 5 minutes old. Monitors need firmware 3.1.4 or newer.
+- **Wi-Fi reads need the same network.** Home Air finds monitors by browsing the local network (mDNS), which doesn't work inside Docker or WSL, and Home Air online (on Railway) can't reach your Wi-Fi at all. A home server reads the addresses found during setup; Home Air online reads AirGradient's cloud with your token, up to 5 minutes old. Monitors need firmware 3.1.4 or newer.
 - **No road for new homes yet.** The road and its exhaust need a route file traced along the road, and nothing in the repo builds one yet. The demo has one; new homes start without.
 
 ## Data and privacy
 
-- **Your readings stay on your computer.** On a copy that reads your Wi-Fi (your computer, a home server), Home Air keeps its own history: one row a minute per monitor in `history.sqlite` next to `config.toml` (in the Docker volume at `/data` for Docker), readable by its owner only, kept until you delete it and never sent anywhere. The last known address of each monitor is kept beside it in `local-addresses.json`. A copy online keeps no history of its own: charts come from AirGradient's cloud, held in memory for a day at most. There are no accounts and no analytics, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
-- **What leaves your server:** your AirGradient token, when you add one, goes only to AirGradient. Reading a monitor on the Wi-Fi sends nothing outside your network. Your home's position, rounded to about 1 km by the app, goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
+- **Your readings stay on your computer.** When Home Air reads your Wi-Fi (on your computer or a home server), Home Air keeps its own history: one row a minute per monitor in `history.sqlite` next to `config.toml` (in the Docker volume at `/data` for Docker), readable by its owner only, kept until you delete it and never sent anywhere. The last known address of each monitor is kept beside it in `local-addresses.json`. A copy online keeps no history of its own: charts come from AirGradient's cloud, held in memory for a day at most. There are no accounts and no analytics, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
+- **What leaves your server:** your AirGradient API token, when you add one, goes only to AirGradient. Reading a monitor on the Wi-Fi sends nothing outside your network. Your home's exact position stays in `config.toml`; rounded to about 1 km by the app, it goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
 - **Calls to AirGradient:** with every monitor read on the Wi-Fi, the app makes no call for current readings. How often it asks AirGradient otherwise, and how it keeps that low, is in [docs/api-usage.md](docs/api-usage.md).
 
 ## How it works
@@ -73,7 +75,7 @@ The actions come from fixed rules in `summary.py` and `server.py`, not a model. 
 
 | Limit | Default | Why |
 |---|---|---|
-| CO₂ inside | 800 ppm | About twice the outdoor level (around 420). Above it the room is short on fresh air, and it starts to feel stuffy; guidelines put the line between 800 and 1,000. |
+| CO₂ inside | 800 ppm | About twice the outdoor level (around 420). Above it the room doesn't get enough fresh air, and people start to notice; guidelines put the line between 800 and 1,000. |
 | PM2.5 outside | 15 µg/m³ | The World Health Organization's guideline for a 24-hour average. Used here for any hour, so it's strict on purpose. |
 | PM2.5 outside, high | 35 µg/m³ | The US EPA's 24-hour standard. Above it, sensitive people (children, asthma) should keep time outside short. |
 | Humidity inside | 30–60%, comfortable up to 50% | Under 30% dries the nose and throat; over 60% helps mold and dust mites grow. The damp-room action stops at 55%. |
@@ -83,13 +85,13 @@ Change any of them in `config.toml`; the comments in [`config.example.toml`](con
 
 ### The PM2.5 forecast
 
-The server asks [Open-Meteo's Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (free, no key) for hourly PM2.5 at the home, the past 24 hours and the next 24, and keeps the answer 30 minutes. For each past hour it compares your outdoor monitor's average with the forecast and takes the median ratio, kept between ×0.1 and ×3, so one odd hour doesn't sway it; the coming hours are multiplied by it. With fewer than 6 matching hours it starts the forecast from the monitor's reading now instead, and the gap fades over 6 hours. Without an outdoor monitor, the home's chosen source stands in for it: the nearby public monitor's readings, or for the area estimate the hourly median of up to 5 public outdoor monitors within 15 km (at least 2). With the model alone, the forecast is used as Open-Meteo gives it. The actions look 8 hours ahead on that curve for when PM2.5 crosses the limit.
+The server asks [Open-Meteo's Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (free, no key) for hourly PM2.5 at the home, the past 24 hours and the next 24, and keeps the answer 30 minutes. For each past hour it compares your outdoor monitor's average with the forecast and takes the median ratio, kept between ×0.1 and ×3, so one unusual hour doesn't change it much; the coming hours are multiplied by it. With fewer than 6 matching hours it starts the forecast from the monitor's reading now instead, and the gap fades over 6 hours. Without an outdoor monitor, the home's chosen source stands in for it: the nearby public monitor's readings, or for the area estimate the hourly median of up to 5 public outdoor monitors within 15 km (at least 2). With the model alone, the forecast is used as Open-Meteo gives it. The actions look 8 hours ahead on that curve for when PM2.5 crosses the limit.
 
 ### Corrected PM2.5
 
 AirGradient monitors measure particles with a laser sensor (Plantower). Outdoors it reads high, more so in humid air, where particles swell with water. The US EPA published a correction for this based on humidity ([Barkjohn et al. 2021](https://amt.copernicus.org/articles/14/4617/2021/)); indoors, AirGradient may correct its sensor differently ([AirGradient on low readings](https://www.airgradient.com/blog/low-readings-from-pms5003/)).
 
-The app always uses the corrected value: for your monitors, the `pm02_corrected` value [AirGradient's API](https://api.airgradient.com/public/docs/api/v1/) sends; for public outdoor monitors, the EPA-corrected value from AirGradient's map ([AirGradient on the correction](https://meetingorganizer.copernicus.org/EGU25/EGU25-8701.html)), or the same formula when only the raw value is there. The advice compares these corrected values with the limits.
+The app always uses the corrected value: for your monitors, the `pm02_corrected` value [AirGradient's API](https://api.airgradient.com/public/docs/api/v1/) sends; for public outdoor monitors, the EPA-corrected value from AirGradient's map ([AirGradient on the correction](https://meetingorganizer.copernicus.org/EGU25/EGU25-8701.html)), or the same formula when only the raw value is there. The rules compare these corrected values with the limits.
 
 ## Screenshots
 

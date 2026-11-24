@@ -134,7 +134,7 @@
 
   // Where a monitor's reading comes from, the same words as localnet.WHERE, `setup.py --live` and `--status`.
   const WHERE_LOCAL = 'on your Wi-Fi', WHERE_CLOUD = 'cloud', WHERE_STALE = 'Not answering';
-  const HOME_SERVER_FIX = "Run setup's home server step again on your computer";   // a stale row whose copy can't reach the monitors
+  const HOME_SERVER_FIX = "Run ./homeair home-server again on your computer";   // a stale row whose copy can't reach the monitors
 
   // A monitor's row in the open Home menu: its status words and tooltip, and whether the row is greyed (`off`: the view
   // has no such monitor). `tz` is the home's timezone for the tooltip's time.

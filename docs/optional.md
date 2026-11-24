@@ -4,7 +4,7 @@ These can wait until your monitors show readings. Agents run the commands they c
 
 ## Pollen
 
-Without a Google key, pollen is off and the sinus & allergy profile uses humidity alone. Add `GOOGLE_POLLEN_API_KEY` to `.env` in your editor and restart, or transfer it to Railway with `scripts/setup.py railway --service <name>` after approval. Set `[sources] pollen = false` to turn it off entirely.
+Without a Google key, pollen is off and the sinus & allergy profile uses humidity alone. Add `GOOGLE_POLLEN_API_KEY` to `.env` in your editor and restart, or transfer it to Railway with `./homeair railway --service <name>` after approval. Set `[sources] pollen = false` to turn it off entirely.
 
 The key comes from Google's Pollen API. It needs a Google Cloud project with billing turned on: 5–10 minutes, most of it creating the account and adding a payment card. Do every step you can with `gcloud` so the user only signs in and adds the card. Google gives 5,000 calls a month free, then charges $10 per 1,000 (Google's price list, checked November 2026). The app keeps each day's pollen until midnight, so each running copy (your computer, a server) makes about one call a day, plus one after each restart or deploy, and one when the page's Refresh button is pressed more than 10 minutes after the last. The setup below caps the calls at 150 a day and limits the key to the Pollen API, so a bug or a leaked key can't run up a bill.
 
@@ -55,7 +55,7 @@ The optional `[[pollen_seasons]]` blocks in `config.example.toml` show typical n
 
 ## The road
 
-In this version the road is off for new homes: `setup.py` leaves the `[road]` section out. The page then has no road, no rush-hour rule and no exhaust on the map.
+In this version the road is off for new homes: `./homeair setup` leaves the `[road]` section out. The page then has no road, no rush-hour rule and no exhaust on the map.
 
 If the user wants one later, a road needs a route file. It's possible to build, but untested:
 

@@ -50,6 +50,10 @@ def test_answer_has_readings_but_no_token_coordinates_or_serial(client, monkeypa
     result = rpc(client, "tools/call", {"name": "home_air_now", "arguments": {}}).get_json()["result"]
     assert result["isError"] is False and result["structuredContent"]["readings"]["indoor"]["co2"] == 1250
     assert result["structuredContent"]["readings"]["indoor"]["age_minutes"] >= 0   # a quiet monitor shows as old
+    # an agent took ids 1 and 2 (placeholders for monitors read on the Wi-Fi) for the demo's data (23 Nov): no ids, and
+    # the answer says whether it's the demo
+    assert "id" not in result["structuredContent"]["readings"]["indoor"] and result["structuredContent"]["home"]["demo"] is False
+    assert result["structuredContent"]["read"]["source_line"].startswith("Bedroom monitor, ")   # ready to end the answer with
     text = json.dumps(result)
     for secret in ("SECRET123", "84fce6", "3.7.0", "39.95", "75.16", "serialno", "latitude"):
         assert secret not in text, secret

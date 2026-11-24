@@ -386,7 +386,7 @@ def test_suggest_lists_the_monitors_it_weighed_before_its_choice(tmp_path, capsy
         f"  M2, 4.0 km, corrected PM2.5 {pm:.1f} µg/m³, id 12",
         f"  M0, 6.0 km, corrected PM2.5 {pm:.1f} µg/m³, id 10",
         "Suggested outdoor_from = 11: M1, 1.2 km away, the nearest public outdoor monitor reporting now "
-        "(within 3 km, its readings stand for your street).",
+        "(within 3 km, so its readings are close to your street's air).",
     ]
     assert code == 0 and asked == 1
 

@@ -6,6 +6,8 @@ The railway command transfers saved settings through stdin. --live checks a runn
 --agent on links the Home Air skill into the agent's skills folders; off removes only those links.
 """
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -37,9 +39,11 @@ from config import (ENV_FILE_MODE, PLACE_DECIMALS, PROFILES, ConfigError, define
                     env_key, load_config, parse_dotenv, public_view, write_env_key)
 
 from upstream import USER_AGENT  # Nominatim requires an identifying User-Agent: the app's, HomeAir/<version>.
-NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
-OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"  # timezone=auto resolves a point's timezone.
+# HOMEAIR_LOOKUP_BASE (tests and rehearse only, like AIRGRADIENT_API_BASE): one local server answering both lookups.
+LOOKUP_BASE = os.environ.get("HOMEAIR_LOOKUP_BASE", "").rstrip("/")
+NOMINATIM_SEARCH = f"{LOOKUP_BASE}/search" if LOOKUP_BASE else "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE = f"{LOOKUP_BASE}/reverse" if LOOKUP_BASE else "https://nominatim.openstreetmap.org/reverse"
+OPEN_METEO_FORECAST = f"{LOOKUP_BASE}/v1/forecast" if LOOKUP_BASE else "https://api.open-meteo.com/v1/forecast"  # timezone=auto resolves a point's timezone.
 LOOKUP_RESULTS = 3  # matches: enough to catch a name shared by different states.
 AMBIGUOUS_SHOWN = 3  # matches shown when a place needs its city or state.
 LOOKUP_TIMEOUT = 15  # seconds per place or timezone request.
@@ -51,17 +55,23 @@ DISTRICT_KEYS = ("suburb", "city_district", "borough", "quarter")  # district be
 CITY_KEYS = ("city", "town", "village", "hamlet")
 NORTHEAST = {"CT": "Connecticut", "ME": "Maine", "MA": "Massachusetts", "NH": "New Hampshire", "RI": "Rhode Island",
              "VT": "Vermont", "NY": "New York", "NJ": "New Jersey", "PA": "Pennsylvania"}  # normalize known state codes.
-NOT_FOUND = "Couldn't find it. Try a nearby landmark with its city, or pass --lat and --lon from a map app."
+NOT_FOUND = "Couldn't find that address. Try a nearby landmark with its city, or pass --lat and --lon from a map app."
 KEY_NAMES = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY")  # the only keys transferred to Railway.
 STATUS_TIMEOUT = 15  # seconds for --status's one readings request: AirGradient took 7 s to connect on 2026-11-13, and 5 s read that as a refused token.
-RUN = "scripts/run.sh"  # how SETUP.md runs every command: uv, else installing uv, else Python 3.11+ (the uv ladder).
-SETUP_CMD = f"{RUN} scripts/setup.py"
+RUN = "scripts/run.sh"  # how ./homeair runs every script: uv, else installing uv, else Python 3.11+ (the uv ladder).
 SERVER_CMD = f"{RUN} server.py"
-START_CMD = f"{RUN} scripts/setup.py --start"  # starts it in the background, so it outlives the agent's session, and waits for the address; the log is in app.log
+# The commands messages name: ./homeair's short forms (the file at the repo root maps each to this script's flags).
+CLI = "./homeair"
+SETUP_CMD = f"{CLI} setup"
+START_CMD = f"{CLI} start"  # starts it in the background, so it outlives the agent's session, and waits for the address; the log is in app.log
 HOME_CMD = f'{SETUP_CMD} --address "<neighborhood or address>" --profiles <toddler,sinus,runner or none>'
-STATUS_CMD = f"{SETUP_CMD} --status"
-WAIT_TOKEN_CMD = f"{SETUP_CMD} --wait-token"
-CONNECT_CMD = f"{SETUP_CMD} --connect"  # prints the private link to the token box again
+STATUS_CMD = f"{CLI} status"
+CHECK_CMD = f"{CLI} check"  # check_config.py, then --live
+WAIT_TOKEN_CMD = f"{CLI} connect --wait"
+CONNECT_CMD = f"{CLI} connect"  # prints the token form's address
+LOGIN_ON_CMD = f"{CLI} start-at-login on"
+LOGIN_OFF_CMD = f"{CLI} start-at-login off"
+MONITOR_CMD = f"{CLI} monitors use"  # then a serial
 WAIT_TOKEN_SECONDS = 90  # one wait: under the shortest default command limit we know (Claude Code stops a command after 120 s).
 PORT_FILE = "app.port"  # the port --start chose, in the repo folder (ignored by git)
 FALLBACK_PORT = 5600  # the first port --start tries when the usual one is taken.
@@ -69,13 +79,20 @@ FALLBACK_TRIES = 20  # ports tried from FALLBACK_PORT.
 STARTUP_WAIT = 30  # seconds for the page to answer after the system starts it at login (uv may install packages first).
 OPEN_TIMEOUT = 10  # seconds the browser opener gets: it returns at once, or something is wrong.
 WAIT_POLL_SECONDS = 2  # how often --wait-token looks for the saved token: the user sees the agent move on within 2 s.
+EXACT_DECIMALS = 4  # decimals config.toml keeps on this computer: about 10 m, for picking the nearest road; the app rounds to PLACE_DECIMALS when it loads
+URL_FILE = "agent-url"  # Home Air's address the skill reads instead of this computer's (skill add --url), in the repo folder (ignored by git)
 SKILL = "home-air-quality"  # the reading skill: its folder under skills/ here, and its name in each agent's skills folder
 AGENT_FILE = "agent-links.json"  # what --agent on linked, in the repo folder (ignored by git), so --agent off removes only those
 SHARED_SKILLS = ".agents/skills"  # under the home folder: the shared folder Codex, Cursor and Gemini CLI read
 CLAUDE_SKILLS = ".claude/skills"  # under the home folder: Claude Code's own skills folder (it doesn't read the shared one)
-AGENT_OFF_CMD = f"{SETUP_CMD} --agent off"
+AGENT_ON_CMD = f"{CLI} skill add"
+AGENT_OFF_CMD = f"{CLI} skill remove"
 CODEX_VARS = ("CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID")  # set by Codex for its commands; not CODEX_HOME, a user setting
-FOR_AGENTS = {SHARED_SKILLS: "Codex, Cursor and Gemini CLI", CLAUDE_SKILLS: "Claude Code"}  # who reads each skills folder
+FOR_AGENTS = {SHARED_SKILLS: ("Codex", "Cursor", "Gemini CLI"), CLAUDE_SKILLS: ("Claude Code",)}  # who reads each skills folder
+# The coding agents setup looks for on this computer, to name the ones that get the skill: (name, its folder under the
+# home folder, its commands). Either one is enough: a folder alone (an agent used before) or a command on the PATH.
+AGENT_SIGNS = (("Claude Code", ".claude", ("claude",)), ("Codex", ".codex", ("codex",)),
+               ("Cursor", ".cursor", ("cursor", "cursor-agent")), ("Gemini CLI", ".gemini", ("gemini",)))
 
 
 class SetupError(Exception):
@@ -175,7 +192,7 @@ def place_from_osm(results, text, found_by="OpenStreetMap"):
         raise SetupError(ambiguous([_osm_words(r) for _, r in groups]))
     r, a = results[0], results[0].get("address") or {}
     country = str(a.get("country_code") or "").upper() or None
-    return Place(lat=round(float(r["lat"]), PLACE_DECIMALS), lon=round(float(r["lon"]), PLACE_DECIMALS),
+    return Place(lat=round(float(r["lat"]), EXACT_DECIMALS), lon=round(float(r["lon"]), EXACT_DECIMALS),
                  name=osm_name(results, text) if text else osm_name([r], ""), found_by=found_by, words=_osm_words(r),
                  country=country, state=_us_state(_osm_state(a)) if country == "US" else None,
                  zip=_zip5(a.get("postcode")) if country == "US" else None, region=_osm_city(a))
@@ -193,7 +210,7 @@ def find_address(text, get=None):
         results = get(NOMINATIM_SEARCH, {"q": text, "format": "jsonv2", "addressdetails": 1,
                                          "limit": LOOKUP_RESULTS, "accept-language": "en"})
     except (requests.RequestException, ValueError):
-        raise SetupError("Couldn't reach OpenStreetMap. Check the connection and run it again.") from None
+        raise SetupError("Couldn't reach OpenStreetMap. Check the internet connection and run the command again.") from None
     results = [r for r in results if isinstance(r, dict) and r.get("lat") and r.get("lon")] if isinstance(results, list) else []
     if not results:
         raise SetupError(NOT_FOUND)
@@ -209,7 +226,7 @@ def find_coordinates(lat, lon, get=None):
         r = None
     if not isinstance(r, dict) or not r.get("address"):
         raise SetupError("Couldn't look up the area around these coordinates (OpenStreetMap didn't answer). "
-                         "Run it again, or pass --address.")
+                         "Run the command again, or pass --address.")
     r = {**r, "lat": lat, "lon": lon, "name": ""}
     return place_from_osm([r], "", found_by="OpenStreetMap, from your coordinates")
 
@@ -229,7 +246,7 @@ def timezone_at(lat, lon, get=None):
     except (requests.RequestException, ValueError, AttributeError):
         tz = None
     if not valid_timezone(tz):
-        raise SetupError("Couldn't get the timezone from Open-Meteo. Run it again, or pass --timezone "
+        raise SetupError("Couldn't get the timezone from Open-Meteo. Run the command again, or pass --timezone "
                          "(an IANA name, like America/Chicago).")
     return tz
 
@@ -243,10 +260,10 @@ def resolve_place(args, get=None):
     if args.address:
         place = find_address(args.address.strip(), get)
         if args.lat is not None:   # the user's coordinates win over the lookup's
-            place.lat, place.lon = round(args.lat, PLACE_DECIMALS), round(args.lon, PLACE_DECIMALS)
+            place.lat, place.lon = round(args.lat, EXACT_DECIMALS), round(args.lon, EXACT_DECIMALS)
             place.found_by += "; coordinates yours"
     else:
-        place = find_coordinates(round(args.lat, PLACE_DECIMALS), round(args.lon, PLACE_DECIMALS), get)
+        place = find_coordinates(round(args.lat, EXACT_DECIMALS), round(args.lon, EXACT_DECIMALS), get)
     if args.timezone:
         if not valid_timezone(args.timezone):
             raise SetupError(f'--timezone "{args.timezone}" isn\'t a timezone name, like America/Chicago.', 2)
@@ -406,18 +423,22 @@ def kept_monitor_keys(old, monitors):
     return out
 
 
+READ_TRIES = 3          # reads of a found monitor before setup says it didn't answer: another program may be reading it (24 Nov)
+READ_RETRY_WAIT = 1.0   # s between those reads; a monitor answers one request at a time
+
+
 NO_MONITOR = {None: "No AirGradient monitor answered on this network",
-              "wsl": "WSL can't see your Wi-Fi's monitors",
-              "container": "a container can't see your Wi-Fi's monitors",
-              "hosted": "a hosted copy can't see your Wi-Fi's monitors"}   # by localnet.environment_blocker(): why nothing was found
+              "wsl": "WSL can't find the monitors on your Wi-Fi",
+              "container": "a container can't find the monitors on your Wi-Fi",
+              "hosted": "Home Air online can't find the monitors on your Wi-Fi"}   # by localnet.environment_blocker(): why nothing was found
 KINDS = ("indoor", "outdoor")
-HOME_SERVER_CMD = f"{SETUP_CMD} --home-server"
+HOME_SERVER_CMD = f"{CLI} home-server"
 
 
 def also_found_line(kind, item):
     """The line naming a monitor of a kind already read, and the command that reads it instead."""
     return (f"Also found: another {kind} monitor (…{item.serial[-4:]}, {item.model}). "
-            f"To read it instead: {SETUP_CMD} --monitor {item.serial}")
+            f"To read it instead: {MONITOR_CMD} {item.serial}")
 
 
 def found_monitors(found, reader=None, keep=()):
@@ -439,10 +460,16 @@ def found_monitors(found, reader=None, keep=()):
             extra.append((kind, item))
             continue
         mon = localnet.Monitor(kind, item.serial, "", localnet.LOCAL_IDS[kind], None)
-        try:
-            row = localnet.map_reading(reader(None, item.address, item.port), mon, datetime.now(timezone.utc))
-        except Exception:   # not answering, or not a monitor
-            row = None
+        row = None
+        for attempt in range(READ_TRIES):
+            try:
+                row = localnet.map_reading(reader(None, item.address, item.port), mon, datetime.now(timezone.utc))
+            except Exception:   # not answering (busy with another reader), or not a monitor
+                row = None
+            if row is not None:
+                break
+            if attempt + 1 < READ_TRIES:
+                time.sleep(READ_RETRY_WAIT)
         if row is None:
             lines.append(f"{kind}: found on your Wi-Fi, but it didn't answer a read as that monitor: check it is on, then run setup again")
             if item.serial in keep:
@@ -564,11 +591,43 @@ def switch_monitor(serial, env, root):
         serials = {str(r.get("serialno") or "").strip().lower() for r in rows if isinstance(r, dict)} - {""}
         if serials and serial not in serials:
             print(f"{serial} isn't in your AirGradient account, so Home Air would go back to the account's {kind} monitor. "
-                  f"Add it to the account in AirGradient's dashboard first.")
+                  f"Add {serial} to the account in AirGradient's dashboard first.")
             return 1
     print(f"{kind}: {serial} ({item.model}), read directly from now on")
     print(f"Settings: {write_found(root, chosen, monitor_settings(chosen))}")
     return start_app(env, root)
+
+
+def read_serials(root):
+    """{kind: serial} for the monitors config.toml reads on the Wi-Fi; {} when there is none or it can't be read."""
+    try:
+        place = tomllib.loads((root / "config.toml").read_text(encoding="utf-8")).get("place", {})
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: str(place[f"{k}_serial"]).lower() for k in KINDS if place.get(f"{k}_serial")}
+
+
+def list_monitors(env, root):
+    """--monitors: the monitors found on the Wi-Fi now, one line each, saying which ones Home Air reads and the command
+    that reads another one instead. Changes nothing: one browse of the Wi-Fi, no read, no write."""
+    read = read_serials(root)
+    found = localnet.discover(env=env, serials=list(read.values()))
+    if not found:
+        print(NO_MONITOR[localnet.environment_blocker(env)] + ".")
+    for item in found:
+        kind = localnet.kind_of(item.model)
+        why = localnet.not_readable(item)
+        if item.serial in read.values():
+            state = "read by Home Air"
+        elif why:
+            state = f"not read: {why}"
+        else:
+            state = f"not read. To read it{' instead' if kind in read else ''}: {MONITOR_CMD} {item.serial}"
+        print(f"{kind or 'monitor'} {item.serial} ({item.model}): {state}")
+    for kind, serial in read.items():
+        if serial not in {f.serial for f in found}:
+            print(f"{kind} {serial}: read by Home Air, but it didn't answer on the Wi-Fi now")
+    return 0
 
 
 def find_home(env, root):
@@ -582,10 +641,8 @@ def find_home(env, root):
         blocker = localnet.environment_blocker(env)
         if not found:
             lines.append(NO_MONITOR[blocker])
-        if not any(item.serial in known for item in found):   # a monitor already set that missed one read stays set
-            lines.append("Connect AirGradient on the page instead.")
         if blocker == "container":
-            lines.append(f"The token is entered on the computer that ran setup; then run {HOME_SERVER_CMD} again.")
+            lines.append(f"Enter the token on the computer that ran setup, then run {HOME_SERVER_CMD} again.")
     print("\n".join(lines))
     if chosen or not (root / "config.toml").exists():
         print(f"Settings: {write_found(root, chosen, unit_country)}")
@@ -594,12 +651,12 @@ def find_home(env, root):
 
 def setup(args, env, root):
     prepare_env(root)
-    profiles = [x for x in re.split(r"[,\s]+", args.profiles.lower()) if x and x != "none"]
+    profiles = [x for x in re.split(r"[,\s]+", (args.profiles or "none").lower()) if x and x != "none"]
     if any(p not in PROFILES for p in profiles):
         raise SetupError(f"Choose profiles from: {', '.join(PROFILES)}, or none. See docs/optional.md for adding one.", 2)
     token = env_key("AIRGRADIENT_TOKEN", env) or env_key("AIRGRADIENT_TOKEN", saved_keys(root))
-    if not token:
-        raise SetupError(f"Connect AirGradient first: open the private link {CONNECT_CMD} prints, or fill AIRGRADIENT_TOKEN in .env and restart.")
+    if not token or (not args.address and args.lat is None and args.lon is None):   # the account's monitors only with a place
+        return set_home(args, profiles, env, root)
     rows = account_rows(token)
     monitors = choose_monitors(rows, args)
     place = resolve_place(args)
@@ -614,7 +671,7 @@ def setup(args, env, root):
             print(f"Saved the previous config at {backup}")
         path.write_text(text, encoding="utf-8")
     print(f"Home: {place.name}, {place.lat}, {place.lon}; timezone {place.timezone}")
-    print(f"Profiles: {', '.join(profiles) or 'none'}")
+    print(f"Who lives here: {', '.join(profiles) or 'none'}")
     print(f"Temperatures in °{cfg.temp_unit}" + (" (a US home)" if cfg.temp_unit == "F" else "") + ": change [home] temp_unit in config.toml to switch")
     if outdoor is not None:
         print(f"Outdoor air: {('estimate for your area (' + outdoor + ')') if isinstance(outdoor, str) else 'public monitor ' + str(outdoor)}")
@@ -626,7 +683,8 @@ def setup(args, env, root):
     problems = []
     for kind, row in monitors.items():
         age, words = age_words(row.get("timestamp"), datetime.now(timezone.utc))
-        print(f'{kind} "{getattr(cfg.place, kind)}", {words}')
+        name = getattr(cfg.place, kind)
+        print(f'{kind} "{name}", {words}' if name != phrases.PLACE_DEFAULTS.get(kind) else f"{kind}, {words}")
         if age is None or age > publicmap.STALE_READING:
             problems.append(f'The {kind} monitor has no recent reading. Check that it is plugged in and online.')
     for problem in problems:
@@ -635,7 +693,49 @@ def setup(args, env, root):
     return 1 if problems else 0
 
 
-NO_WEB_WITHOUT_TOKEN = "A copy on the web can't see your Wi-Fi: connect AirGradient on this computer's page first."
+def set_home(args, profiles, env, root):
+    """--address/--lat/--lon and --profiles without a token: the place and who lives here, written into the config.toml
+    the Wi-Fi setup made (its monitors stay as they are), with a backup. With only --profiles, the profiles alone."""
+    path = root / "config.toml"
+    if not path.exists():
+        raise SetupError(f"No config.toml yet: run {SETUP_CMD} first, then this command again.")
+    old = path.read_text(encoding="utf-8")
+    current = parsed_place(old)
+    text = config.set_keys(old, "profiles", {key: key in profiles for key in PROFILES}) if args.profiles is not None else old
+    place = None
+    if args.address or args.lat is not None or args.lon is not None:
+        place = resolve_place(args)
+        values = {"name": place.name, "lat": place.lat, "lon": place.lon, "timezone": place.timezone}
+        if place.country == "US" and place.zip:
+            values["pollen_zip"] = place.zip
+        if place.region:
+            values["region"] = place.region
+        text = config.set_keys(text, "place", values)
+        if not (current.get("outdoor_serial") or current.get("outdoor_id")):   # no outdoor monitor: the outdoor source, once
+            text = config.set_keys(text, "sources", {"outdoor_from": outdoor_source(place)})
+        if place.country and place.country != "US":
+            text = config.set_keys(text, "sources", {"smoke": False})
+        if "temp_unit" not in (tomllib.loads(old).get("home") or {}):
+            text = config.set_keys(text, "home", {"temp_unit": temp_unit(place)})
+    load_config({"CONFIG_TOML": text}, root)   # a bad value stops here, before the file changes
+    if text != old:
+        backup = config.backup_config(path)
+        config.replace_text(path, text)
+        print(f"Saved the previous config at {backup}")
+    if place is not None:
+        print(f"Home: {place.name}; timezone {place.timezone}. The exact location stays in config.toml on this computer; "
+              "what is sent for weather and pollen, and what the page shows, is rounded to about 1 km.")
+    if args.profiles is not None:
+        print(f"Who lives here: {', '.join(profiles) or 'none'}")
+    print(f"Settings: {path}")
+    code = check_config.main(["--file", str(path)], env, root)
+    if not code:
+        print(f"Restart Home Air to use them: {START_CMD}")
+    return code
+
+
+NO_WEB_WITHOUT_TOKEN = ("Home Air on Railway reads your monitors through AirGradient's Cloud API, so it needs your AirGradient API token. "
+                        f"Run {CONNECT_CMD} to add it on this computer, then run this again.")
 
 
 def railway(service, root):
@@ -644,6 +744,13 @@ def railway(service, root):
         raise SetupError(NO_WEB_WITHOUT_TOKEN)
     # a web copy reads the cloud only: the monitors' addresses (a home-server copy's) never leave this computer
     text = config.set_monitor_keys((root / "config.toml").read_text(encoding="utf-8"), {k: {f"{k}_host": None} for k in KINDS})
+    try:
+        place = tomllib.loads(text).get("place", {})
+    except tomllib.TOMLDecodeError:
+        place = {}   # sent as it is: the check on Railway says what's wrong
+    if "lat" in place and "lon" in place:   # the exact location stays on this computer: Home Air online gets it rounded
+        text = config.set_keys(text, "place", {"lat": round(float(place["lat"]), PLACE_DECIMALS),
+                                               "lon": round(float(place["lon"]), PLACE_DECIMALS)})
     values = {"CONFIG_TOML": text}
     values.update((name, env_key(name, keys)) for name in KEY_NAMES if env_key(name, keys))
     for name, value in values.items():
@@ -713,8 +820,8 @@ def live(url, env, root, get=None, now=None, wait=0, reach=None, platform=sys.pl
             health = None
             break
     if health is None:
-        print(f"The page doesn't answer at {base}. Start it (SETUP.md, Start and verify), or pass its address: "
-              "setup.py --live http://localhost:<port>")
+        print(f"The page doesn't answer at {base}. Start Home Air ({START_CMD}), or pass the page's address: "
+              f"{CHECK_CMD} http://localhost:<port>")
         return 1
     if not isinstance(health, dict) or health.get("status") != "ok":
         print(f"{base}/health didn't say ok: is this Home Air?")
@@ -736,7 +843,7 @@ def live(url, env, root, get=None, now=None, wait=0, reach=None, platform=sys.pl
     if app is None:
         problem("the page has no settings (window.APP): is this Home Air?")
     elif "now" in app:
-        problem("the page runs the demo (made-up data). Restart it from the folder with config.toml.")
+        problem("the page runs the demo (made-up data). Restart Home Air from the folder that has config.toml.")
     elif cfg is not None:
         settings_check(app, cfg, problem)
 
@@ -746,9 +853,9 @@ def live(url, env, root, get=None, now=None, wait=0, reach=None, platform=sys.pl
         current_check(get, base, cfg, now, problem)
     all_local = bool(where) and all(w == "local" for w in where.values())
     if all_local and not token:
-        print("Note: optional: charts start from now")
+        print("Note: optional: charts start from now (the AirGradient API token adds the last 7 days)")
     if problems:
-        print("Not live yet: fix the problems above, then run setup.py --live again.")
+        print(f"Not live yet: fix the problems above, then run {CHECK_CMD} again.")
         return 1
     if not token and not all_local:
         print("Not live yet: add AIRGRADIENT_TOKEN to .env and restart the app.")
@@ -780,7 +887,7 @@ def monitors_where(health, cfg, problem, blocked=None):
             continue
         state = states[kind] if states[kind] in localnet.WHERE else "stale"
         name = getattr(cfg.place, kind, None) if cfg is not None else None
-        label = f'{kind} "{publicmap.plain_text(name)}"' if name else kind
+        label = f'{kind} "{publicmap.plain_text(name)}"' if name and name != phrases.PLACE_DEFAULTS.get(kind) else kind   # a default name (indoor "home") reads oddly
         print(f"{label}: {localnet.WHERE[state]}")
         if state == "stale" and not blocked:
             problem(f"the {kind} monitor is {localnet.WHERE['stale']}: is it plugged in and on this Wi-Fi?")
@@ -788,7 +895,7 @@ def monitors_where(health, cfg, problem, blocked=None):
     if blocked:
         line = (f"the monitors answer on this Wi-Fi, but Home Air doesn't read them: macOS's Local Network "
                 f"permission is likely off for {blocked}. In {LOCAL_NETWORK}, turn it on for {blocked}, then run "
-                f"{SETUP_CMD} --live again.")
+                f"{CHECK_CMD} again.")
         if "stale" in out.values():
             problem(line)
         else:
@@ -835,8 +942,8 @@ def settings_check(app, cfg, problem):
     shown["profiles"] = sorted(k for k, v in (app.get("profiles") or {}).items() if v)
     off = [k for k in wanted if wanted[k] != shown[k]]
     for k in off:
-        problem(f"the page's {k} is {json.dumps(shown[k])}, config.toml's is {json.dumps(wanted[k])}. Restart the "
-                "server: it reads config.toml when it starts.")
+        problem(f"the page's {k} is {json.dumps(shown[k])}, config.toml's is {json.dumps(wanted[k])}. Restart Home Air "
+                f"({START_CMD}): it reads config.toml when it starts.")
     if not off:
         print("Settings: the name, monitors, profiles" + (" and outdoor source" if of is not None else "")
               + " match config.toml")
@@ -855,7 +962,7 @@ def current_check(get, base, cfg, now, problem):
                 "in .env, then restart the server.")
         return
     if isinstance(data, dict) and data.get("state") == "no_token":
-        problem(f"the page has no token yet. Open the private link {CONNECT_CMD} prints, or fill AIRGRADIENT_TOKEN in .env and restart.")
+        problem(f"the page has no token yet. Add it at the address {CONNECT_CMD} prints, or fill AIRGRADIENT_TOKEN in .env and restart.")
         return
     rows = [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
     expect = ([k for k, n in (("indoor", cfg.place.indoor), ("outdoor", cfg.place.outdoor)) if n is not None]
@@ -895,113 +1002,70 @@ def current_check(get, base, cfg, now, problem):
 
 
 def status(env, root):
-    """What's done and the one next command, as SETUP.md names it. Read-only: writes nothing, asks nothing; its one
-    network request (the account's latest readings) is a GET. Keys are reported as set or not, never their values."""
+    """What's done in each of setup's three states (SETUP.md): a first look, your home, ready to deploy; then the one
+    next step. Read-only: writes nothing, asks nothing; its one request is a GET of the running page's /health. Keys
+    are reported as added or not, never their values."""
+    import autostart
     env = {k: v for k, v in env.items() if k != "DEMO"}
-    rows, next_cmd = [], None
-
-    def step(name, done, words, cmd):
-        nonlocal next_cmd
-        rows.append(f"  {name}: {'done' if done else 'not yet'}" + (f": {words}" if words else ""))
-        if not done and next_cmd is None:
-            next_cmd = cmd
-
-    try:
-        text = (root / ".env").read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        text = ""
-    token_set = check_config.keys_present(env, root)["AIRGRADIENT_TOKEN"]
-    prepared = token_set or any(defines(line, "AIRGRADIENT_TOKEN") for line in text.splitlines())
-    step("1. Token entry (.env)", prepared, "" if prepared else "no AIRGRADIENT_TOKEN line yet", SETUP_CMD)
-    step("2. AirGradient connected", token_set, "" if token_set else "no token yet",
-         f"{START_CMD} (then open the private link it prints; the user enters the token on that page)")
-
+    home = Path(env.get("HOME") or Path.home())
+    port = started_port(env, root)
+    nexts = []
     cfg, problem = None, None
-    # where load_config reads the home from, in its order: the variables win over the file
-    source = next((k for k in ("CONFIG_TOML", "CONFIG_FILE") if env.get(k, "").strip()), "config.toml")
     try:
         cfg = load_config(env, root)
     except ConfigError as e:
         problem = str(e)
-    if cfg is not None:
-        p = cfg.place
-        monitors = [f'{kind} "{getattr(p, kind)}"' for kind in ("indoor", "outdoor") if getattr(p, kind) is not None]
-        profiles = ", ".join(k for k, v in cfg.profiles.items() if v) or "none"
-        words = f"{p.name}; monitors: {', '.join(monitors)}; profiles: {profiles}"
-    elif problem and source == "config.toml":
-        words = f"{problem}. Running setup again replaces it and keeps a copy"
-    elif problem:
-        words = f"{problem}. Fix the {source} variable: it wins over config.toml"
-    else:
-        words = "no config.toml yet"
-    fix = HOME_CMD if source == "config.toml" else f"{RUN} scripts/check_config.py"
-    step(f"3. Home and monitors ({source})", cfg is not None, words, fix)
+    token = check_config.keys_present(env, root)["AIRGRADIENT_TOKEN"]
+    health = running_health(env, root)
 
-    health = running_health(env, root) if cfg is not None else None
-    if cfg is not None and health is not None and isinstance(health.get("monitors"), dict) and health["monitors"]:
-        words = "; ".join(f'{k} "{getattr(cfg.place, k)}": {localnet.WHERE.get(v, localnet.WHERE["stale"])}' if getattr(cfg.place, k, None)
-                          else f"{k}: {localnet.WHERE.get(v, localnet.WHERE['stale'])}" for k, v in health["monitors"].items())
-        bad = any(v not in ("local", "cloud") for v in health["monitors"].values())
-        step("4. Readings come in", not bad, words, f"check the monitor is plugged in and on this Wi-Fi, then run {STATUS_CMD}")
-    elif cfg is not None and not token_set:   # the token is optional: with the page not running there is nothing to read
-        rows.append("  4. Readings come in: not checked: the app isn't running")
-    elif not (token_set and cfg is not None):
-        rows.append("  4. Readings come in: not checked yet (needs the steps above)")
+    print("A first look")
+    if cfg is None:
+        print(f"  Settings: {problem or 'no config.toml yet'}")
+        nexts.append(SETUP_CMD)
+    if health is None:
+        print(f"  Home Air on this computer: not running")
+        nexts.append(START_CMD)
     else:
-        token = env_key("AIRGRADIENT_TOKEN", env) or env_key("AIRGRADIENT_TOKEN", saved_keys(root))
-        try:
-            account = account_rows(token, timeout=STATUS_TIMEOUT)
-        except AirGradientSlow:
-            step("4. Readings come in", False, f"couldn't check: AirGradient didn't answer within {STATUS_TIMEOUT} s; try again in a minute", STATUS_CMD)
-        except TokenRefused:
-            step("4. Readings come in", False, "AirGradient refused the token",
-                 f"{START_CMD} (then open the private link it prints and enter the token again)")
-        except SetupError:
-            step("4. Readings come in", False, "couldn't check: AirGradient's answer couldn't be read; try again in a minute", STATUS_CMD)
-        else:
-            seen, missing, stale = [], [], []
-            for kind in ("indoor", "outdoor"):
-                name, wanted = getattr(cfg.place, kind), getattr(cfg.place, kind + "_id")
-                if name is None:
-                    continue
-                row = next((r for r in account if (r.get("locationId") == wanted if wanted is not None
-                                                   else r.get("locationType") == kind)), None)
-                if row is None:
-                    missing.append(f'the {kind} monitor "{name}" isn\'t in this account')
-                    continue
-                age, when = age_words(row.get("timestamp"), datetime.now(timezone.utc))
-                seen.append(f'{kind} "{name}", {when}')
-                if age is None or age > publicmap.STALE_READING:
-                    stale.append(f'the {kind} monitor "{name}" has no recent reading')
-            if missing:
-                step("4. Readings come in", False, "; ".join(missing + stale),
-                     f"run setup again to choose from this account's monitors: {HOME_CMD}")
-            else:
-                step("4. Readings come in", not stale, "; ".join(stale or seen),
-                     f"check the monitor is plugged in and shows readings in the AirGradient app, then run {STATUS_CMD}")
+        print(f"  Home Air on this computer: running at http://localhost:{port}")
+        where = health.get("monitors") if isinstance(health.get("monitors"), dict) else {}
+        if cfg is not None and where:
+            print("  Readings: " + "; ".join(f"{k}: {localnet.WHERE.get(v, localnet.WHERE['stale'])}" for k, v in where.items()))
+    login = autostart.plist_path(home).exists() or autostart.unit_path(home).exists()
+    print(f"  Starts at login: {'yes' if login else f'no ({LOGIN_ON_CMD})'}")
 
-    print("Setup status:")
-    for row in rows:
-        print(row)
-    if next_cmd is not None:
-        print(f"Next: {next_cmd}")
-        return 0
-    # Done is SETUP.md's "Done when": the running page's --live check ends with Live OK, which needs the page started.
-    port = port_from(env)
-    start = f"cd {root} && {'PORT=' + str(port) + ' ' if port != DEFAULT_PORT else ''}{START_CMD}"
-    print("Steps 1–4 done. Last, check the running page: it should end with Live OK.")
-    print(f"Page: http://localhost:{port}")
-    print(f"Next: {start}, then {SETUP_CMD} --live http://localhost:{port} "
-          "(Railway or Docker: --live <the page's address>)")
+    print("Your home")
+    place = cfg.place if cfg is not None else None
+    has_place = place is not None and place.name is not None
+    print(f"  Address: {place.name if has_place else 'not set (to set it: say "set up my home in Home Air" to a coding agent in this folder)'}")
+    on = [k for k, v in cfg.profiles.items() if v] if cfg is not None else []
+    print(f"  Who lives here: {', '.join(on) or 'none set'}")
+    print(f"  AirGradient API token: {'added' if token else f'not added (to add your past readings to the charts: {CONNECT_CMD})'}")
+    linked = bool(agent_record(root)["links"])
+    url = (root / URL_FILE).read_text(encoding="utf-8").strip() if (root / URL_FILE).exists() else ""
+    print(f"  Skill for coding agents: {('added' + (f', reads {url}' if url else '')) if linked else f'not added (to ask about the air from any folder: {AGENT_ON_CMD})'}")
+    if cfg is not None and not has_place:
+        nexts.append('open a coding agent in this folder and say "set up my home in Home Air"')
+
+    print("On a home server or online")
+    missing = [w for w, ok in (("the AirGradient API token", token), ("the address", has_place)) if not ok]
+    print(f"  Home Air online needs: {' and '.join(missing)}" if missing else
+          "  Home Air online: ready (DEPLOYMENT.md); a home server: ./homeair home-server")
+    print(f"Next: {nexts[0]}" if nexts else f"Next: nothing needed. To check that Home Air answers: {CHECK_CMD}")
     return 0
 
 
-def page_answers(url, env, root):
-    """After the system starts the app: wait for /health, then the --live check."""
+def page_answers(url, env, root, quiet=False):
+    """After the system starts the app: wait for /health, then the --live check (quiet: its lines not printed, when
+    the one-command setup prints the same check at its end)."""
     end = time.monotonic() + STARTUP_WAIT
     while time.monotonic() < end:
         try:
             if requests.get(f"{url}/health", timeout=WAIT_POLL_SECONDS).ok:
+                if not known_serials(root) and not has_saved_token(env, root):
+                    return 0   # nothing to read yet (no monitor found, no token): the page answering is the check
+                if quiet:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        return live(url, env, root)
                 return live(url, env, root)
         except requests.RequestException:
             pass
@@ -1034,7 +1098,7 @@ def restart_login_copy(kind, port, env, root):
     pid_file = root / autostart.PID_FILE
     before = pid_file.read_text().strip() if pid_file.exists() else None
     if autostart.restart(kind, lambda cmd: subprocess.run(cmd, capture_output=True).returncode) != 0:
-        print(f"The copy that starts at login didn't restart. Its log: app.log. Set it up again: {SETUP_CMD} --start-at-login on")
+        print(f"Home Air started at login didn't restart. Its log: app.log. Turn start at login on again: {LOGIN_ON_CMD}")
         return 1
     end = time.monotonic() + STARTUP_WAIT
     while time.monotonic() < end:
@@ -1043,10 +1107,10 @@ def restart_login_copy(kind, port, env, root):
             break
         time.sleep(1)
     else:
-        print(f"The copy that starts at login isn't answering yet at http://localhost:{port}. See app.log, then run {START_CMD} again.")
+        print(f"Home Air started at login isn't answering yet at http://localhost:{port}. See app.log, then run {START_CMD} again.")
         return 1
     (root / PORT_FILE).write_text(f"{port}\n")
-    print(f"Restarted: http://localhost:{port}, the copy that starts at login (log: app.log)")
+    print(f"Restarted: http://localhost:{port}, Home Air started at login (log: app.log)")
     if not has_saved_token(env, root):
         print_connect_link(port, root)
     return 0
@@ -1094,23 +1158,39 @@ def start_app(env, root):
     return 0
 
 
+def stop_app(env, root):
+    """--stop: stop the copy --start started, by the pid it recorded in app.pid (autostart.stop_setup_copy checks that
+    pid is this app's server.py). The copy that starts at login is the system's to restart, so it is left running and
+    the message names the command that turns it off."""
+    import autostart
+    item = autostart.login_item(root, Path(env.get("HOME") or Path.home()))
+    if item is not None and autostart.port_answers(item[1]):
+        print(f"Home Air at http://localhost:{item[1]} is Home Air started at login, and the system starts it again "
+              f"when it stops. To stop it, turn start at login off: {LOGIN_OFF_CMD}")
+        return 1
+    if autostart.stop_setup_copy(root):
+        print(f"Stopped Home Air (it was at http://localhost:{started_port(env, root)}). To start it again: {START_CMD}")
+    else:
+        print(f"Home Air isn't running from this folder: nothing to stop. To start it: {START_CMD}")
+    return 0
+
+
 def has_saved_token(env, root):
     return bool(env_key("AIRGRADIENT_TOKEN", env) or env_key("AIRGRADIENT_TOKEN", saved_keys(root)))
 
 
-def private_link(port, root):
-    """The private link to the token box: the owner's code (token_setup.owner_code, kept in connect-code) sets the
-    owner cookie in the browser that opens it, for a year."""
-    return f"http://localhost:{port}/connect?code={token_setup.owner_code(root / token_setup.CODE_FILE)}"
+def token_link(port):
+    """The token form's address on this computer's page."""
+    return f"http://localhost:{port}/connect"
 
 
 def print_connect_link(port, root):
-    """Printed here for the agent to open, never by the app, whose output goes to app.log."""
-    print(f"Connect AirGradient here (a private link: don't share it): {private_link(port, root)}")
+    """Printed for the agent to open: the page's token form."""
+    print(f"Add your AirGradient API token at {token_link(port)}")
 
 
 def connect_link(env, root):
-    """--connect: the private link again, for the copy --start started (or PORT, or 5555)."""
+    """--connect: the token form's address, for the Home Air --start started (or PORT, or 5555)."""
     port = started_port(env, root)
     if has_saved_token(env, root):
         print(f"A token is already saved: nothing to connect. The page: http://localhost:{port}")
@@ -1119,14 +1199,16 @@ def connect_link(env, root):
     return 0
 
 
-def start_at_login(state, env, root):
+def start_at_login(state, env, root, quiet=False):
     import autostart
     run = lambda cmd: subprocess.run(cmd, capture_output=True).returncode
     home = Path(env.get("HOME") or Path.home())
     if state == "off":
         return autostart.turn_off(root, home, run, shutil.which, sys.platform)
+    if not str(env.get("PORT") or "").strip():   # the port setup or --start chose (5555 may be another program's)
+        env = {**env, "PORT": str(started_port(env, root))}
     url = f"http://localhost:{port_from(env)}"
-    code = autostart.turn_on(root, home, env, run, shutil.which, sys.platform, lambda: page_answers(url, env, root))
+    code = autostart.turn_on(root, home, env, run, shutil.which, sys.platform, lambda: page_answers(url, env, root, quiet=quiet))
     if code == 0:   # the port the login item serves: --live, --connect and --status ask app.port's
         (root / PORT_FILE).write_text(f"{port_from(env)}\n")
         if sys.platform == "darwin" and known_serials(root) and not wait_wifi_reads(url, kinds_read_locally(root)):
@@ -1163,12 +1245,12 @@ def wait_wifi_reads(url, kinds, get=None, clock=time.monotonic, sleep=time.sleep
         except Exception:   # restarting: ask again
             states = {}
         if kinds and all(states.get(k) == "local" for k in kinds):
-            print(f"{', '.join(kinds).capitalize()}: read on your Wi-Fi by the copy that starts at login.")
+            print(f"{', '.join(kinds).capitalize()}: read on your Wi-Fi by Home Air started at login.")
             return True
         waited = clock() - start
         if waited >= LOGIN_READ_WAIT:
-            print(f"No reading on your Wi-Fi after {LOGIN_READ_WAIT} s. If macOS asked about \"uv\", it needs Allow: "
-                  f'{LOCAL_NETWORK}, turn on "uv", then run {SETUP_CMD} --live.')
+            print(f"No reading on your Wi-Fi after {LOGIN_READ_WAIT} s. If macOS asked about \"uv\", turn on \"uv\" in "
+                  f"{LOCAL_NETWORK}, then run {CHECK_CMD}.")
             return False
         if not told and waited >= LOGIN_READ_QUIET:
             print(f'Waiting for the first reading on your Wi-Fi (up to {LOGIN_READ_WAIT} s): press Allow on macOS\'s '
@@ -1178,8 +1260,8 @@ def wait_wifi_reads(url, kinds, get=None, clock=time.monotonic, sleep=time.sleep
 
 
 def running_agent(env):
-    """The coding agent running setup, from the variables it sets for its commands; None when it can't be told. Only
-    picks the folders to link: the message names an agent only when it's certain (Claude Code's CLAUDECODE=1)."""
+    """The coding agent running setup, from the variables it sets for its commands; None when it can't be told. It
+    picks the folders to link, and counts as found (agents_found) for the message."""
     if env.get("CLAUDECODE"):
         return "Claude Code"
     if any(env.get(k) for k in CODEX_VARS):
@@ -1193,12 +1275,26 @@ def running_agent(env):
 
 def agent_targets(env, home):
     """Where --agent on links the skill: always the shared folder; Claude Code's own folder too when Claude Code runs
-    setup, or when the agent can't be told and this computer has Claude Code (~/.claude)."""
+    setup or this computer has Claude Code (~/.claude), whichever agent runs it (Claude Code doesn't read the shared one)."""
     agent = running_agent(env)
     targets = [home / SHARED_SKILLS / SKILL]
-    if agent == "Claude Code" or (agent is None and (home / ".claude").is_dir()):
+    if agent == "Claude Code" or (home / ".claude").is_dir():
         targets.append(home / CLAUDE_SKILLS / SKILL)
     return agent, targets
+
+
+def agents_found(env, home):
+    """The coding agents on this computer, in AGENT_SIGNS' order: each one's folder in the home folder, or one of its
+    commands on env's PATH. Only names them; where the skill is linked stays agent_targets' choice."""
+    path = env.get("PATH", "")
+    return [name for name, folder, commands in AGENT_SIGNS
+            if (home / folder).is_dir() or any(shutil.which(c, path=path) for c in commands)]
+
+
+def words_and(names):
+    """"A", "A and B", "A, B and C"; "" for none."""
+    names = list(names)
+    return " and ".join(names) if len(names) < 3 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def links_to(path, source):
@@ -1226,32 +1322,35 @@ def agent_skill(state, env, root):
     record = agent_record(root)
     if state == "status":
         paths = list(dict.fromkeys([home / SHARED_SKILLS / SKILL, home / CLAUDE_SKILLS / SKILL] + [Path(p) for p in record["links"]]))
+        found = agents_found(env, home)
+        print(f"Coding agents on this computer: {words_and(found) if found else 'none found'}")
         print(f"Home Air skill ({SKILL}):")
         for p in paths:
             if links_to(p, source):
-                words = "linked by setup" if str(p) in record["links"] else "linked to this folder, not by setup (--agent off leaves it)"
+                words = "linked by setup" if str(p) in record["links"] else f"linked to this folder, not by setup ({AGENT_OFF_CMD} leaves it)"
             elif p.is_symlink() or p.exists():
-                words = "a different skill with this name (setup leaves it)"
+                words = "a different skill with this name (left as it is)"
             else:
                 words = "not linked"
             print(f"  {short(p)}: {words}")
         return 0
     if state == "off":
         if not record["links"]:
-            print("Setup hasn't linked the Home Air skill anywhere: nothing to undo.")
+            print("Setup hasn't linked the Home Air skill anywhere: nothing to remove.")
             return 0
         for p in map(Path, record["links"]):
             if p.is_symlink() and os.readlink(p) == record["skill"]:
                 p.unlink()
                 print(f"Removed {short(p)}")
             elif p.is_symlink() or p.exists():
-                print(f"Left {short(p)}: it's no longer the link setup made")
+                print(f"Left {short(p)}: it's no longer the link made during setup")
         (root / AGENT_FILE).unlink(missing_ok=True)
-        print("The Home Air skill is removed from your agent.")
+        print("The Home Air skill is removed from your coding agents.")
         return 0
     if not (source / "SKILL.md").is_file():
-        raise SetupError(f"This Home Air folder has no skills/{SKILL}. Update it with git pull, then run {SETUP_CMD} --agent on again.")
+        raise SetupError(f"This Home Air folder has no skills/{SKILL}. Update the folder with git pull, then run {AGENT_ON_CMD} again.")
     agent, targets = agent_targets(env, home)
+    found = agents_found(env, home) + ([agent] if agent else [])   # before linking: a link can create ~/.claude
     ours_before = set(record["links"])   # links this setup made earlier, perhaps from a folder since moved
     if record["skill"] and record["skill"] != str(source):
         record["links"] = []   # a record from another folder: its links aren't this folder's to remove
@@ -1277,18 +1376,42 @@ def agent_skill(state, env, root):
             # recorded as soon as it's made, so --agent off removes it even if a later link fails
             (root / AGENT_FILE).write_text(json.dumps({"skill": str(source), "links": sorted(set(record["links"]))}, indent=2) + "\n")
     for p in foreign:
-        print(f"Left {short(p)}: a different skill named {SKILL} is already there. Setup doesn't replace it.")
+        print(f"Left {short(p)}: a different skill named {SKILL} is already there, and it isn't replaced.")
     if not linked:
         print("The skill wasn't added: see above." + (" Remove or rename that skill, then run this again." if foreign else ""))
         return 1
-    where = " and ".join(f"{short(p)} (read by {FOR_AGENTS.get(p.parent.relative_to(home).as_posix(), 'an agent')})"
-                         for p in linked)   # every target is under home (agent_targets)
-    print(f"Added the Home Air skill to {'Claude Code' if agent == 'Claude Code' else 'your agent'}: linked this folder's "
-          f"skills/{SKILL} into {where}.")
-    print("With it, the agent answers from your monitors, and changes your settings only when you ask and say yes.")
-    print("Ask it about the air at home, in a new session if this one doesn't see the skill yet. "
-          "The first time, the agent asks before running the skill's script.")
-    print(f"Undo: {AGENT_OFF_CMD}")
+    folders = [p.parent.relative_to(home).as_posix() for p in linked]   # every target is under home (agent_targets)
+    where = " and ".join(f"{short(p)} (read by {words_and(FOR_AGENTS.get(f, ('an agent',)))})" for p, f in zip(linked, folders))
+    readers = {name for f in folders for name in FOR_AGENTS.get(f, ())}
+    named = [name for name, _, _ in AGENT_SIGNS if name in found and name in readers]
+    print(f"Added the Home Air skill to {words_and(named) or 'your coding agents'} on this computer: "
+          f"linked this folder's skills/{SKILL} into {where}.")
+    print("With the skill, an agent answers from your monitors, and changes your settings only when you ask and say yes.")
+    print("Ask an agent about the air at home. If the agent's current session doesn't list the skill yet, start a new "
+          "session. The first time, the agent asks before it runs the skill's script.")
+    print(f"To remove the skill: {AGENT_OFF_CMD}")
+    return 0
+
+
+def skill_url(url, root):
+    """skill add --url: the address the skill reads Home Air at, saved in this folder (URL_FILE); "local" goes back to
+    this computer's. Checked once with a GET of /health, so a typo doesn't leave the skill reading nothing."""
+    path = root / URL_FILE
+    if url == "local":
+        path.unlink(missing_ok=True)
+        print("The Home Air skill reads Home Air on this computer again.")
+        return 0
+    url = url.strip().rstrip("/")
+    if not re.fullmatch(r"https?://[^\s/]+(/[^\s]*)?", url):
+        raise SetupError(f'"{url}" isn\'t a full address. Use one like http://<server>.local:8000 or https://<name>.up.railway.app, then run the command again.', 2)
+    try:
+        ok = requests.get(f"{url}/health", timeout=LOOKUP_TIMEOUT).ok
+    except requests.RequestException:
+        ok = False
+    if not ok:
+        raise SetupError(f"Home Air didn't answer at {url}. Check the address, then run the command again.")
+    path.write_text(url + "\n", encoding="utf-8")
+    print(f"The Home Air skill now reads Home Air at {url}. To read Home Air on this computer again: {AGENT_ON_CMD} --url local")
     return 0
 
 
@@ -1316,19 +1439,20 @@ def one_run(env, root):
     code = start_app(env, root)
     if code:
         return code
-    if start_at_login("on", env, root) != 0 and not page_up(started_port(env, root)):
+    if start_at_login("on", env, root, quiet=True) != 0 and not page_up(started_port(env, root)):
         code = start_app(env, root)   # turning it on stopped the copy started above: bring it back for this session
         if code:
             return code
-    agent_skill("on", env, root)   # says why when it can't link; the home works without it
+    print(f"To ask a coding agent about the air at home from any folder: {AGENT_ON_CMD}")
     port = started_port(env, root)
     url = f"http://localhost:{port}"
-    # Without a token, the private link: this browser gets the owner cookie, so the token box opens later from the page
-    # (in "local" mode the link then shows the home, with the box at /connect; with nothing found it shows the box).
-    open_page(url if has_saved_token(env, root) else private_link(port, root), env)
+    # The home when there is something to read; the token form when nothing answered on the Wi-Fi and no token is saved
+    open_page(url if has_saved_token(env, root) or known_serials(root) else token_link(port), env)
     if not has_saved_token(env, root) and not known_serials(root):
-        print(f"Nothing is read yet. The AirGradient token is optional (it adds the last 7 days and putting it online): "
-              f"enter it on the page at {url}, or in .env, then run {SETUP_CMD} again.")
+        # Written to the person, so an agent can pass it on as it is (SETUP.md) and someone running setup reads it the same way
+        print(f"Nothing is read yet: no AirGradient monitor answered on your Wi-Fi, so Home Air needs your AirGradient "
+              f"API token. The page that just opened at {url} shows how to add the token (about 1 min). "
+              f"{CONNECT_CMD} --wait says when it's saved.")
         return 0
     if has_saved_token(env, root):
         try:
@@ -1339,13 +1463,17 @@ def one_run(env, root):
 
 
 def parser():
-    ap = argparse.ArgumentParser(description="Set up a home from its location and profiles. With no answers, prepare .env.")
+    ap = argparse.ArgumentParser(description="Set up Home Air for a home. With no options: find the monitors on the Wi-Fi, "
+                                             "start Home Air, add the skill, open the page and check it. Usually run as "
+                                             "./homeair setup (./homeair help lists the short commands).")
     ap.add_argument("--address", help="an address, neighborhood or nearby landmark with its city")
-    ap.add_argument("--profiles", default="none", help="toddler,sinus,runner, or none (default)")
+    ap.add_argument("--profiles", help="toddler,sinus,runner, or none")
     ap.add_argument("--indoor-id", type=int, help="which indoor monitor, only when ambiguous")
     ap.add_argument("--outdoor-id", type=int, help="which outdoor monitor, only when ambiguous")
     ap.add_argument("--monitor", metavar="SERIAL",
                     help="read this monitor found on the Wi-Fi instead of the one of its kind read now")
+    ap.add_argument("--monitors", action="store_true",
+                    help="list the monitors found on the Wi-Fi and which ones Home Air reads; changes nothing")
     ap.add_argument("--name", help="a correction to the area's name")
     ap.add_argument("--lat", type=float, help="latitude, together with --lon")
     ap.add_argument("--lon", type=float, help="longitude, together with --lat")
@@ -1355,13 +1483,17 @@ def parser():
     ap.add_argument("--live", nargs="?", const="", metavar="URL", help="check the running page with GET requests")
     ap.add_argument("--status", action="store_true", help="list what's done and the next command; changes nothing")
     ap.add_argument("--start", action="store_true", help="start the app in the background and wait until it answers")
-    ap.add_argument("--connect", action="store_true", help="print the private link to the token box (no token saved yet)")
+    ap.add_argument("--stop", action="store_true", help="stop the Home Air that --start started")
+    ap.add_argument("--connect", action="store_true", help="print the token form's address (no token saved yet)")
     ap.add_argument("--start-at-login", choices=("on", "off"),
                     help="start the app by itself at login (a Mac or Linux with systemd), or stop doing so")
     ap.add_argument("--home-server", action="store_true",
                     help="prepare a folder for a home server with Docker (Compose, settings, token) and say the two steps")
     ap.add_argument("--agent", choices=("on", "off", "status"),
-                    help="connect the agent running setup to this Home Air (a skill, linked), undo it, or say what's linked")
+                    help="add the Home Air skill to the coding agents on this computer (as links), remove it, or "
+                         "show the links")
+    ap.add_argument("--url", help="with --agent on: the address of Home Air the skill reads (Home Air online or on a home "
+                                   "server), or local for this computer's")
     ap.add_argument("--wait-token", action="store_true",
                     help=f"wait up to {WAIT_TOKEN_SECONDS} s for the token page to save the token, then say what the account has")
     return ap
@@ -1383,24 +1515,36 @@ def main(argv, env, root=ROOT):
             return wait_token(env, root)
         if args.monitor:
             return switch_monitor(args.monitor, env, root)
+        if args.monitors:
+            return list_monitors(env, root)
         if args.home_server:
             import homeserver
             return homeserver.prepare(root)
         if args.start:
             return start_app(env, root)
+        if args.stop:
+            return stop_app(env, root)
         if args.connect:
             return connect_link(env, root)
         if args.start_at_login:
             return start_at_login(args.start_at_login, env, root)
         if args.agent:
-            return agent_skill(args.agent, env, root)
+            code = agent_skill(args.agent, env, root)
+            if args.agent == "off":
+                (root / URL_FILE).unlink(missing_ok=True)
+            return skill_url(args.url, root) if args.url and args.agent == "on" and not code else code
         if args.live is not None:
             return live(args.live or f"http://localhost:{started_port(env, root)}", env, root, wait=LIVE_RETRY_SECONDS)
-        if not args.address and args.lat is None and args.lon is None:
+        if not args.address and args.lat is None and args.lon is None and args.profiles is None:
             return one_run(env, root)
         return setup(args, env, root)
     except (SetupError, ConfigError, OSError, UnicodeError) as error:
-        print(str(error) if isinstance(error, (SetupError, ConfigError)) else "Couldn't read or write a setup file. Check its permissions.")
+        if isinstance(error, (SetupError, ConfigError)):
+            print(str(error))
+        else:   # name the file, so the person (or the agent's sandbox rules) can be fixed
+            where = getattr(error, "filename", None)
+            print(f"Couldn't read or write {where}: {getattr(error, 'strerror', None) or type(error).__name__}. Check its permissions."
+                  if where else "Couldn't read or write a setup file. Check its permissions.")
         return error.code if isinstance(error, SetupError) else 1
 
 

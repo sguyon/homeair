@@ -67,6 +67,9 @@ def test_a_recorded_port_that_does_not_answer_falls_back_to_the_default(home_air
     assert home_air.call("/api/agent/now") == {"read": "ok"}
     monkeypatch.setenv("HOME_AIR_URL", "http://example.invalid/")
     assert home_air.base_urls() == ["http://example.invalid"]   # set by the user: the only address
+    monkeypatch.delenv("HOME_AIR_URL")
+    (tmp_path / "agent-url").write_text("https://home.example/\n")   # ./homeair skill add --url: Home Air online
+    assert home_air.base_urls() == ["https://home.example"]
 
 
 def test_a_404_says_out_of_date_only_when_the_port_is_home_air(home_air, serve, monkeypatch):

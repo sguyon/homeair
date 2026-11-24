@@ -12,21 +12,24 @@ def section(title):
     return setup_md().split(f"## {title}", 1)[1].split("\n## ", 1)[0]
 
 
-def test_setup_asks_the_user_nothing_and_is_one_command():
-    # The 14 Nov rehearsals lost turns on the address and profile questions (buttons that sent no text, a box that picked one)
-    # and on a second window for the token: setup now asks nothing, and the page asks for what's left.
+def test_the_first_look_asks_nothing_and_the_home_questions_follow_the_released_rules():
+    # The 14 Nov rehearsals lost turns on question boxes (buttons that sent no text, a box that picked one); the first
+    # look asks nothing, and the home's questions (23 Nov, restored) keep the released rules: the address as plain text,
+    # the profiles as a typed list where the box picks one.
     text = setup_md()
-    assert "Setup asks the user nothing" in text.split("## Get ready", 1)[0]
-    assert "```bash\nscripts/run.sh scripts/setup.py\n```" in section("Set it up")
+    assert "Don't ask about the home before `./homeair setup` has run" in text.split("## 1. Get Home Air", 1)[0]
+    assert "```bash\n./homeair setup\n```" in section("2. Run the setup command")
+    home = section("4. Your home")
+    assert "the address and the profiles are always plain text" in home and "Codex's picks one" in home
+    assert "Type the numbers, like **1 3**. If none apply, type **none**." in home
     assert "Describe your home" not in text and "Connect AirGradient" not in text
 
 
 def test_the_home_server_steps_without_offering_ssh():
     # Codex asked for the SSH address to copy the folder itself
-    again = section("Use it again")
-    assert "Don't offer to copy it over SSH" in again
+    assert "Don't offer to copy the folder over SSH" in section("5. On a home server or online")
 
 
 def test_the_check_uses_the_address_the_app_printed():
     # Claude Code checked localhost:5555, which another server held, while the app ran elsewhere
-    assert "Use the address it prints" in section("Set it up")
+    assert "Use the address it prints" in section("2. Run the setup command")

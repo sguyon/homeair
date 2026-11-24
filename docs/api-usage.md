@@ -38,11 +38,11 @@
 | Map, area search | 2,000 |
 | Map, one monitor | 8,000 |
 
-- **`GET /api/usage`** on any copy shows today's calls per source, the caps, paused sources and 429 counts. No personal data.
+- **`GET /api/usage`** on any Home Air shows today's calls per source, the caps, paused sources and 429 counts. No personal data.
 
 ## Calls per day for one home with two monitors, read through the cloud
 
-A home read on the Wi-Fi makes none of these: its two monitors make 2,880 reads a day on your own network, counted as `ag_local`. The table is for a copy online, or a home read only through the cloud.
+A home read on the Wi-Fi makes none of these: its two monitors make 2,880 reads a day on your own network, counted as `ag_local`. The table is for Home Air online, or a home read only through the cloud.
 
 | Use | Token calls | Map calls with Nearby on |
 |---|---|---|

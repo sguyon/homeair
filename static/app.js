@@ -42,6 +42,8 @@ const CO2_EXCELLENT = 600, CO2_FAIR = 1000, CO2_POOR = 1500;   // ppm: the CO₂
 const RH_OUT_DAMP = 80;          // %: outdoor humidity the outdoor card calls damp
 const LEGEND_OUT_W = 74;         // px (chart units): the History legend's Outdoor entry; Indoor moves into its place without it
 const RANGE_HOURS = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
+const DAY_LABEL_HALF = 14;   // px in the chart's 560-wide drawing: half a weekday label ("Wed" at the axis size), so a centred label that would run off the edge is anchored inside
+const HIST_LATE_MS = 60 * 60e3;   // ms: a home's own history starting later than this after the range's start gets the "Recording since" line (a shorter gap is a monitor's normal pause)
 const RANGE_LABEL = { '1h': 'Last hour', '6h': 'Last 6 hours', '24h': 'Last 24 hours', '7d': 'Last 7 days' };
 const READ_MAX_AGE = 10 * 60 * 1000;
 // v3: the read's "needs" became "profiles" (2026-11-09), so a saved v2 read would show no profile icons
@@ -690,7 +692,15 @@ function draw(id, a, b, times, range, spec) {
   const ticks = 5;
   // evenly spaced along the axis (not by sample index, which bunches the last labels together)
   const t0 = +times[0], t1 = +times[times.length - 1];
-  for (let k = 0; k <= ticks; k++) {
+  if (range === '7d') {   // one label per day, at the day's start in the home's timezone (even fractions skipped days: Wed, Fri)
+    const day = t => new Date(t).toLocaleDateString('en-US', { timeZone: TZ });
+    for (let t = t0 + 3600e3; t <= t1; t += 3600e3) {
+      if (day(t) === day(t - 3600e3)) continue;
+      const f = (t - t0) / (t1 - t0);
+      const x = L + f * iw, anchor = x - DAY_LABEL_HALF < 0 ? 'start' : x + DAY_LABEL_HALF > W ? 'end' : 'middle';   // centred on its day unless it would run off the drawing
+      g += `<text x="${x.toFixed(1)}" y="${H - 6}" text-anchor="${anchor}">${new Date(t).toLocaleString('en-US', opt)}</text>`;
+    }
+  } else for (let k = 0; k <= ticks; k++) {
     const f = k / ticks;
     g += `<text x="${(L + f * iw).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === ticks ? 'end' : 'middle'}">${new Date(t0 + f * (t1 - t0)).toLocaleString('en-US', opt)}</text>`;
   }
@@ -783,6 +793,14 @@ async function loadCharts({ fresh = false, quiet = false } = {}) {
     ih = ih || []; oh = oh || [];
   }
   if ($('hist-est')) $('hist-est').hidden = !noOutLine();
+  // A home read on the Wi-Fi with no token has only its own history, from when Home Air began reading: say so, and how
+  // to add the week from the AirGradient Dashboard (the cloud fills the gaps once a token is saved)
+  const first = [...ih, ...oh].reduce((m, r) => Math.min(m, +new Date(r.timestamp) || Infinity), Infinity);
+  const late = APP.state === 'local' && range === '7d' && Number.isFinite(first) && first - from > HIST_LATE_MS;   // the week is what a token adds
+  if ($('hist-since')) {
+    $('hist-since').hidden = !late;
+    if (late) $('hist-since-at').textContent = atLabel(first).replace(/^Yesterday/, 'yesterday');
+  }
   const none = !!PUB && !oh.length && !(hist.week && hist.week.oh.length);
   showHistory(!none);
   if (none) return;

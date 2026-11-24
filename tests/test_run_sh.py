@@ -124,6 +124,6 @@ def test_setup_prints_commands_through_the_launcher():
     import sys
     sys.path.insert(0, str(ROOT / "scripts"))
     import setup
-    assert setup.SETUP_CMD == "scripts/run.sh scripts/setup.py"
+    assert setup.SETUP_CMD == "./homeair setup"   # the short form messages name; ./homeair runs it through scripts/run.sh
     assert setup.SERVER_CMD == "scripts/run.sh server.py"
     assert not hasattr(setup, "UV")
