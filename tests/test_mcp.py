@@ -75,3 +75,12 @@ def test_agent_history_works_without_a_cloud_id(wifi, monkeypatch, tmp_path):
     assert result["isError"] is False and result["structuredContent"]["samples"] > 0
     text = json.dumps(result)
     assert "84fce6" not in text and not re.search(r"\d+\.\d+\.\d+\.\d+", text)
+
+
+def test_source_line_names_a_monitor_once():
+    # a monitor already named "... monitor" read "Main monitor monitor, 12:58 AM" on the real home (24 Nov)
+    settings = {"place": {"timezone": "America/New_York"}}
+    line = agent_tools._source_line({"name": "Main monitor", "at": "2026-11-24T05:58:51Z"}, "indoor", settings)
+    assert line == "Main monitor, 12:58 AM"
+    line = agent_tools._source_line({"name": "Bedroom", "at": "2026-11-24T05:58:51Z"}, "indoor", settings)
+    assert line == "Bedroom monitor, 12:58 AM"

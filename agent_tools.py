@@ -101,7 +101,10 @@ def _source_line(r, kind, settings):
     if not r or not r.get("at"):
         return None
     name = r.get("name")
-    label = f"{name} monitor" if name and name != DEFAULT_NAMES.get(kind) else f"{kind.capitalize()} monitor"
+    if not name or name == DEFAULT_NAMES.get(kind):
+        label = f"{kind.capitalize()} monitor"
+    else:   # "Bedroom" becomes "Bedroom monitor"; a name that already says monitor stays as it is
+        label = name if name.lower().endswith("monitor") else f"{name} monitor"
     try:
         tz = ZoneInfo((settings.get("place") or {}).get("timezone") or "UTC")
         at = _utc(r["at"]).astimezone(tz)
