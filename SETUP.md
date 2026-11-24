@@ -1,20 +1,20 @@
 # Setup
 
-**Done when** `./homeair setup` ends with `Live OK`, or with "Nothing is read yet" (no monitor found: the page is open on the token step, not a failure), and the user has answered or skipped step 4.
+**Done when** `./homeair setup` ends with `Live OK` or "Nothing is read yet" (no monitor found; not a failure), and the user has answered or skipped step 4.
 
-For a coding agent setting up Home Air for someone's home. Run the commands yourself; don't hand them to the user. Steps 1 to 3 ask nothing and show the home's air in about a minute. Step 4 asks about the home, then the end asks where Home Air runs (step 5). Don't ask about the home before `./homeair setup` has run. Don't change the app's code. Never ask for a key in chat, read or print `.env`, or commit private settings. Ask before changing a live service or account.
+For a coding agent setting up Home Air for someone's home. Run the commands yourself. Steps 1 to 3 ask nothing. Don't ask about the home before `./homeair setup` has run. Don't change the app's code. Never ask for a key in chat, read or print `.env`, or commit private settings. Ask before changing a live service or account.
 
-One question per message, in plain words; wait for the answer. With a question tool (Claude Code's AskUserQuestion), ask every question with it, the default first; step 4 lists the exceptions. Before the next question, say what you did with the answer. Don't ask what the user already said.
+One question per message, in plain words; wait for the answer. With a question tool (Claude Code's AskUserQuestion), ask every question with it, the default first, except where step 4 says. Before the next question, say what you did with the answer. Don't ask what the user already said.
 
 ## 1. Get Home Air
 
-Tested on Mac and Linux; on Windows, use WSL or Docker. In a cloud sandbox (Claude Code on the web, Codex cloud), say the app can't stay there and to run setup on their own computer, then stop. Development in a sandbox is fine: see AGENTS.md, "Run".
+Tested on Mac and Linux; on Windows, use WSL or Docker. In a cloud sandbox (Claude Code on the web, Codex cloud), say the app can't stay there and to run setup on their own computer, then stop. Developing in a sandbox is fine (AGENTS.md, "Run").
 
 Run this in the folder you were opened in, or the one the user names:
 
 ```bash
 linked=$(cd -P ~/.agents/skills/home-air-quality/../.. 2>/dev/null && pwd)
-if [ -x "$linked/homeair" ]; then dir=$linked                                   # Home Air is already set up here: use that folder
+if [ -x "$linked/homeair" ]; then dir=$linked                                   # already set up here: use that folder
 elif [ -x ./homeair ] && [ -f SETUP.md ]; then dir=.                           # this is Home Air's folder
 elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then dir=~/homeair   # inside another project: keep Home Air out of it
 elif [ -z "$(ls -A)" ]; then dir=.                                             # an empty folder made for it
@@ -25,11 +25,11 @@ cd "$dir" && pwd
 
 Tell the user the printed folder, with: "Home Air is set up on this computer first. After that, you can keep Home Air on this computer, or run it on a home server or online, with the same settings." If the folder is `~/homeair` because you were inside another project, say so in one line.
 
-Run every command below from this folder. `./homeair` runs them through `scripts/run.sh` with uv (installed if missing), else Python 3.11 or newer, and says which, or what to install. `./homeair help` lists the commands. Some commands wait: `./homeair connect --wait` up to 90 s, `start` 30 s, `start-at-login on` 60 s on a Mac, `check` 10 s after a start. Use a timeout of at least 100 s so one call returns; don't poll.
+Run every command below from this folder. `./homeair` runs them through `scripts/run.sh` with uv (installed if missing), else Python 3.11 or newer, and says which, or what to install. Some commands wait: `./homeair connect --wait` up to 90 s, `start` 30 s, `start-at-login on` 60 s on a Mac, `check` 10 s after a start. Use a timeout of at least 100 s; don't poll.
 
 ## 2. Run the setup command
 
-If your commands run in a sandbox (Codex's default blocks the network and writing outside the folder it was opened in, and asks before either: [Codex docs](https://learn.chatgpt.com/docs/agent-approvals-security)), ask the user once to let you run Home Air's commands outside it.
+If your commands run in a sandbox (Codex's default blocks the network and writing outside the opened folder, and asks before either: [Codex docs](https://learn.chatgpt.com/docs/agent-approvals-security)), ask the user once to let you run Home Air's commands outside it.
 
 ```bash
 ./homeair setup
@@ -37,14 +37,14 @@ If your commands run in a sandbox (Codex's default blocks the network and writin
 
 About a minute: at most 3 s for the monitors, 30 s for the app, 60 s for macOS's prompt. Use a timeout of at least 150 s; don't poll. On a Mac, say as you run it: "macOS will say "homeair" can run in the background, and ask to allow "uv" to find devices on local networks: "uv" is the program Home Air runs through. Choose Allow."
 
-The command reads each AirGradient monitor on the Wi-Fi once and writes `config.toml` (serials, default names, units; no place or profiles). It starts the app now and at each login, opens the page (on the token form when no monitor answered), and checks the page and each reading. It doesn't add the skill; step 4 asks.
+It reads each AirGradient monitor on the Wi-Fi once, writes `config.toml` (serials, default names, units; no place or profiles), starts the app now and at each login, opens the page (on the token form when no monitor answered), and checks the page and each reading. It doesn't add the skill; step 4 asks.
 
 Its lines:
 
-- `indoor: found on your Wi-Fi, read directly`: that monitor is read on the Wi-Fi once a minute. One monitor per kind is read: the one in `config.toml`, else the lowest serial. `Also found: … To read it instead: ./homeair monitors use <serial>`: run that if the user wants the other one; it checks the monitor, saves with a backup and restarts the app. Firmware older than 3.1.4, or a model setup doesn't read: that monitor isn't read; tell the user.
+- `indoor: found on your Wi-Fi, read directly`: read on the Wi-Fi once a minute. One monitor per kind is read: the one in `config.toml`, else the lowest serial. `Also found: … To read it instead: ./homeair monitors use <serial>`: run it if the user wants that one (it checks the monitor, saves with a backup, restarts the app). Firmware older than 3.1.4, or a model setup doesn't read: not read; tell the user.
 - `Settings: <path>`: the file written. An existing `config.toml` is first copied to `config.toml.bak-<time>`; the household's choices are kept.
 - `Started: http://localhost:5555`: the page's address (from port 5600 up if 5555 is taken). Use the address it prints.
-- `Nothing is read yet` (after "No AirGradient monitor answered on this network"): an ordinary home; the page is open on the token form, and the token is step 1, required here. The user doesn't see your output: send this, then end your turn:
+- `Nothing is read yet` (after "No AirGradient monitor answered on this network"): an ordinary home; the token is step 1, required here. The user doesn't see your output: send this, then end your turn:
 
   > **Home Air is running at http://localhost:5555**
   >
@@ -56,17 +56,17 @@ Its lines:
   >
   > Follow the steps on the token page (about 1 min). You type the token on that page, not in this chat. When the page says Saved, reply **done** here.
 
-  On their reply, run `./homeair connect --wait` (it prints the account's monitors, never the token); on "Not saved yet", say so in one line and wait for done again. Then send step 3's message with "Saved. The token is in `.env` in Home Air's folder. Your AirGradient account has <n> monitors, and the page now shows <them>:" before the readings, and "Step 1 is done. Next come 3 optional steps (about 2 min). To stop at any step and do the rest later, reply **skip**." as its last line, then go on with step 4's address. If the page says the token was refused or the account has no monitor, pass that on. No monitor at all: the user can set one up with AirGradient's instructions; meanwhile [the demo](https://homeair.app) shows any public monitor ("Near me").
-- `WSL can't find the monitors on your Wi-Fi` (also with `a container` or `Home Air online`): `./homeair setup` can't look from there. WSL: the token path above works. Docker: `./homeair home-server` (step 5). Cloud sandbox: step 1.
+  On their reply, run `./homeair connect --wait` (it prints the account's monitors, never the token); on "Not saved yet", say so in one line and wait for done again. Then send step 3's message with "Saved. The token is in `.env` in Home Air's folder. Your AirGradient account has <n> monitors, and the page now shows <them>:" before the readings, and "Step 1 is done. Next come 3 optional steps (about 2 min). To stop at any step and do the rest later, reply **skip**." as its last line, then go on to step 4's address. A refused token or an account with no monitor: pass on what the page says. No monitor at all: the user can set one up with AirGradient's instructions; meanwhile [the demo](https://homeair.app) shows any public monitor ("Near me").
+- `WSL can't find the monitors on your Wi-Fi` (also with `a container` or `Home Air online`): `./homeair setup` can't find the monitors from there. WSL: use the token path above. Docker: `./homeair home-server` (step 5). Cloud sandbox: step 1.
 - `Waiting for the first reading on your Wi-Fi … press Allow`: Home Air started at login waits for macOS's prompt "Allow "uv" to find devices on local networks?". `No reading on your Wi-Fi after 60 s`: tell the user to turn on "uv" in System Settings › Privacy & Security › Local Network, then run `./homeair check`.
 - `Start at login isn't available here (…)`: the app stops when the computer restarts; say so. `./homeair start` starts it again.
 - `Problem:` or `Not live yet`: fix what the line says, then run the command again (safe to repeat).
 
-The token is optional; Home Air online needs it. With the token, Home Air matches monitors by serial and fills past readings; a Wi-Fi monitor not in the account (a neighbour's) is replaced by the account's monitor of that kind.
+With the token, Home Air matches monitors by serial and fills past readings; a Wi-Fi monitor not in the account (a neighbour's) is replaced by the account's monitor of that kind.
 
 ## 3. Tell the user it's ready
 
-Send this, with the real address and readings (from `python3 -I skills/home-air-quality/scripts/home_air.py now`, run from this folder; the skill needn't be loaded). One line per monitor: its name, its kind, the reading nearest its limit, the unit and the limit (the home's own limits from the answer); over a limit, Home Air's first action instead ("**Open a window for 10 minutes:** CO₂ is 1,100 ppm, over the 800 ppm limit."). Leave out a missing reading. Never "Live OK" or a check's name.
+Send this, with the real address and readings (`python3 -I skills/home-air-quality/scripts/home_air.py now`; the skill needn't be loaded). One line per monitor: name, kind, the reading nearest its limit, unit and limit (the home's own limits, from that output); over a limit, Home Air's first action instead ("**Open a window for 10 minutes:** CO₂ is 1,100 ppm, over the 800 ppm limit."). Leave out a missing reading. Never "Live OK" or a check's name.
 
 > **Home Air is running at http://localhost:5555**
 >
@@ -80,11 +80,11 @@ Send this, with the real address and readings (from `python3 -I skills/home-air-
 >
 > Next come 4 optional steps (about 4 min). To stop at any step and do the rest later, reply **skip**.
 
-Adjust: on Linux, "It starts again each time you turn on this computer and sign in."; no login sentence after "Start at login isn't available here". Setup run again: skip the steps already done (`./homeair status`), and say how many are left. Then step 4, in the same turn.
+Adjust: on Linux, "It starts again each time you turn on this computer and sign in."; no login sentence after "Start at login isn't available here". Setup run again: skip the steps already done (`./homeair status`) and say how many are left. Then step 4, in the same turn.
 
 ## 4. Your home: four optional steps
 
-Each step is one message: a bold title "Step N of 4: …", one italic line saying optional (or required) and why, the facts, then the question and the exact reply. One step per message; wait for the answer, then say in one line what was saved and what the page now shows. With a question tool (Claude Code's AskUserQuestion), ask yes/no and choices with it, the default first, so Enter keeps it; the address and the profiles are always plain text (Claude Code's box adds its own "Type something" and "Chat about this" rows; Codex's picks one). Reached from step 3, or later when the user says "set up my home in Home Air" (`./homeair status` lists what's left): skip what's done.
+Each step is one message, sent as written below: a bold title "Step N of 4: …", a blank line, one italic line saying optional (or required) and why, the facts, then the question and the exact reply. After each answer, say in one line what was saved and what the page now shows. With the question tool, the default goes first so Enter keeps it; the address and the profiles are always plain text (Claude Code's box adds its own "Type something" and "Chat about this" rows; Codex's picks one). Reached from step 3, or later when the user says "set up my home in Home Air": skip what's done (`./homeair status` lists what's left).
 
 **skip**, at any step: send "**No more questions for now.** Your settings stay as they are. To answer them later, open Claude Code or Codex in <Home Air's folder> and say: set up my home in Home Air." and stop.
 
@@ -102,7 +102,7 @@ Each step is one message: a bold title "Step N of 4: …", one italic line sayin
 
    Question tool: "Add your AirGradient API token now?", options "Yes" ("Opens the token page. The charts then show readings from before setup.") and "Not now" ("To add it later: ./homeair connect"). Plain text: "Add the token now? Reply **yes** to open the token page, or **no** to go to step 2 (to add the token later: `./homeair connect`)."
 
-   On yes: run `./homeair connect` and open the address it prints (`open` on Mac, `xdg-open` on Linux); send "The token page is open in your browser: http://localhost:5555/connect. Follow the steps on that page. When the page says Saved, reply **done** here." and end your turn. On done: `./homeair connect --wait`, then "**Saved.** The token is in `.env` in Home Air's folder. The charts now show readings from before setup." Can't find the token: the page's "Show me where", under the page's own step 1, opens a marked picture of AirGradient's settings (General Settings, Connectivity, API Access); walk them through it in words. If the page can't open: the user types the token into `.env` (`open -e .env` on Mac, `xdg-open .env` on Linux), then `./homeair start`; `./homeair check` says whether the token is set, never its value.
+   On yes: run `./homeair connect` and open the address it prints (`open` on Mac, `xdg-open` on Linux); send "The token page is open in your browser: http://localhost:5555/connect. Follow the steps on that page. When the page says Saved, reply **done** here." and end your turn. On done: `./homeair connect --wait`, then "**Saved.** The token is in `.env` in Home Air's folder. The charts now show readings from before setup." Can't find the token: "Show me where", under the page's own step 1, opens a marked picture of AirGradient's settings (General Settings, Connectivity, API Access); walk them through it in words. The page can't open: the user types the token into `.env` (`open -e .env` on Mac, `xdg-open .env` on Linux), then `./homeair start`; `./homeair check` says whether the token is set, never its value.
 
 2. **The address** (plain text):
 
@@ -118,7 +118,7 @@ Each step is one message: a bold title "Step N of 4: …", one italic line sayin
    >
    > **What is your home's address?** Type it as you would in a map app.
 
-   Run `./homeair setup --address "<their answer>"`, then `./homeair start`, and send "**Saved:** <the place setup printed>. The page now shows the weather there and the nearby public monitors." Never invent a location. Not found: retry with what the user gave (a ZIP code, a nearby street or landmark) before asking again. Several matches: ask which city or state, then run the command again. Other fixes: `--name`, `--lat` with `--lon`, `--timezone`. No token is needed; the monitors found on the Wi-Fi stay.
+   Run `./homeair setup --address "<their answer>"`, then `./homeair start`, and send "**Saved:** <the place setup printed>. The page now shows the weather there and the nearby public monitors." Never invent a location. Not found: retry with what the user gave (a ZIP code, a nearby street or landmark) before asking again. Several matches: ask which city or state, then run the command again. Other fixes: `--name`, `--lat` with `--lon`, `--timezone`. No token needed; the monitors found on the Wi-Fi stay.
 
 3. **Who lives here** (plain text, in every agent):
 
@@ -162,7 +162,7 @@ Then ask where, as step 5 says.
 
 ## 5. On a home server or online
 
-Ask with a question tool when you have one, "Only this computer" first (the default):
+With the question tool, "Only this computer" goes first (the default):
 
 > Where should Home Air run?
 > 1. **Only this computer:** nothing more to do. You can close this window.
@@ -174,7 +174,7 @@ Ask with a question tool when you have one, "Only this computer" first (the defa
 
 Also when the user asks later ("put Home Air online"). Before deploying, ask only what `./homeair status` lists as missing, one line each: the address (step 4's step 2) and, for online, the token ("Home Air online reads your monitors through AirGradient's Cloud API, so it needs your AirGradient API token", then step 4's step 1).
 
-- A home server: run `./homeair home-server` and pass on the two steps it prints (the server needs Docker). Don't offer to copy the folder over SSH; do more only if asked. Once Home Air runs there, run `./homeair check http://<the server>:8000` if you can reach the server.
+- A home server: run `./homeair home-server` and pass on the two steps it prints. Don't offer to copy the folder over SSH; do more only if asked. Once Home Air runs there, if you can reach the server, run `./homeair check http://<the server>:8000`.
 - Online: [DEPLOYMENT.md](DEPLOYMENT.md#railway), with its one OK before anything changes on Railway. The location sent is rounded to about 1 km.
 - Another host: the [Dockerfile](Dockerfile) and the variables DEPLOYMENT.md lists for Railway; not covered here.
 
@@ -182,11 +182,11 @@ Afterwards: "Home Air online is at <the address>. Home Air on this computer stil
 
 ## Commands for later
 
-`./homeair help` lists them all. The ones to know:
+`./homeair help` lists them all.
 
-- `./homeair start`: starts the app in the background (put `PORT=` first if the port isn't 5555; the log is `app.log`). Without a saved token, `./homeair connect` prints the token form's address (`http://localhost:5555/connect`); open it with `open` on Mac or `xdg-open` on Linux. Run the start command again to restart the app.
-- `./homeair stop` stops what `./homeair start` started; Home Air started at login keeps running until `./homeair start-at-login off`. `./homeair start-at-login on` (or `off`) works on a Mac, or Linux with systemd; elsewhere the command says why not.
-- `./homeair check [address]`: read-only checks of `config.toml` and the page (this computer's, or the address of a home server or Railway); `Live OK` means each monitor has a recent reading.
+- `./homeair start`: starts the app in the background (`PORT=` first for a port other than 5555; the log is `app.log`). Without a saved token, `./homeair connect` prints the token form's address (`http://localhost:5555/connect`). Run the start command again to restart the app.
+- `./homeair stop` stops what `./homeair start` started; Home Air started at login runs until `./homeair start-at-login off`. `./homeair start-at-login on` (or `off`) works on a Mac, or Linux with systemd; elsewhere the command says why not.
+- `./homeair check [address]`: read-only checks of `config.toml` and the page (this computer's, or a home server's or Railway's address); `Live OK` means each monitor has a recent reading.
 - `./homeair skill add` (or `remove`, `status`): never replaces another skill, and says so; `--url <address>` makes the skill read Home Air on a home server or online, `--url local` this computer's again. Other AI assistants: [docs/agents.md](docs/agents.md).
 - `./homeair status` (each part of setup and the next step) and `./homeair monitors` (the monitors found and which are read) change nothing.
 
