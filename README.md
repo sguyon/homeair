@@ -2,7 +2,7 @@
 
 An app for your AirGradient monitors that tells you what to do about your air: when to open the window, when to keep it shut, when to go for a run. It combines your readings with the forecast, pollen, wildfire smoke and the public monitors around you.
 
-**[Try the demo](https://homeair.app)** · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
+**[Try the demo](https://homeair.app)** (an example home, or any public AirGradient monitor) · [Installation](#installation) · [Features](#features) · [How it works](#how-it-works)
 
 <p align="center">
   <picture>
@@ -12,10 +12,6 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 </p>
 
 <sub>Screenshots from the demo, with sample data.</sub>
-
-## Demo
-
-[The demo](https://homeair.app) shows an example home or the live readings of any public AirGradient monitor.
 
 ## Installation
 
@@ -27,19 +23,15 @@ You need one or two AirGradient monitors (indoor, outdoor or both). Home Air rea
 Set up Home Air for my home by following the instructions here: https://raw.githubusercontent.com/sguyon/homeair/main/SETUP.md
 ```
 
-The agent puts Home Air in a `homeair` folder inside the folder it was opened in (`~/homeair` when that folder is another project). To choose the folder, name it in the prompt.
+Home Air goes in a `homeair` folder; to choose another folder, name it in the prompt.
 
-The agent finds your monitors on the Wi-Fi, writes your settings and runs the page on your computer, then asks about your home: the address (for weather and pollen) and who lives with you, then, optional, your AirGradient API token and the skill for your coding agents. The agent can then keep Home Air running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)). Later, `./homeair help` in that folder lists the commands.
+The agent finds your monitors on the Wi-Fi and opens your page, then asks a few questions about your home, most of them optional. You can keep Home Air on your computer, or put it on a home server or online later ([DEPLOYMENT.md](DEPLOYMENT.md)).
 
-**AI assistants:** your coding agents can ask about the air at home through the skill, and other assistants through Home Air's MCP server ([docs/agents.md](docs/agents.md)). You can add Home Air's MCP server to claude.ai and ChatGPT too (tried with both), only with Home Air online: they reach it from their companies' servers.
+**AI assistants:** ask Claude, ChatGPT and other agents about the air at home, and they answer from your monitors. Coding agents use Home Air's skill, other assistants its MCP server ([how](docs/agents.md)); claude.ai and ChatGPT need Home Air online.
 
-**With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) (Home Air on a home server reads your monitors on the Wi-Fi with no token), then start Compose and open http://localhost:8000.
+**With Docker,** on a home server or NAS: [Docker setup](DEPLOYMENT.md#docker).
 
 **Just trying it?** Without settings or a token, Home Air opens the demo: `uv run --with-requirements requirements.txt server.py`, then http://localhost:5555.
-
-### On your phone
-
-To add the page to the home screen: Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); the page then opens like an app. It works offline only on https, which Home Air online (on Railway) has.
 
 ## Features
 
@@ -50,7 +42,7 @@ To add the page to the home screen: Share › Add to Home Screen (iPhone, Safari
 - Weather, pollen, wildfire smoke, and a nearby highway's exhaust when the wind blows it your way
 - Public AirGradient monitors nearby, to see whether bad air is regional or just around your home
 - A live sky behind the page, with the real sun, clouds, rain and haze. Useless, but my toddler's favorite feature :)
-- Installs on your phone's home screen like an app (a PWA): [how](#on-your-phone)
+- Installs on your phone's home screen like an app (a PWA): Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); it works offline only on https, which Home Air online (on Railway) has
 
 ## Why I built it
 
@@ -69,7 +61,9 @@ It's minimal on purpose, and by necessity: I built it around what my own two mon
 
 ## Data and privacy
 
-- **Your readings stay on your computer.** When Home Air reads your Wi-Fi (on your computer or a home server), Home Air keeps its own history: one row a minute per monitor in `history.sqlite` next to `config.toml` (in the Docker volume at `/data` for Docker), readable by its owner only, kept until you delete it and never sent anywhere. The last known address of each monitor is kept beside it in `local-addresses.json`. A copy online keeps no history of its own: charts come from AirGradient's cloud, held in memory for a day at most. There are no accounts and no analytics, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
+- **Your readings stay on your computer.** When Home Air reads your monitors on the Wi-Fi (on your computer or a home server), it keeps their readings in its own history: one row a minute per monitor in `history.sqlite` next to `config.toml` (the `/data` volume with Docker), readable by its owner only, kept until you delete it and never sent anywhere. Each monitor's last known address is kept beside it in `local-addresses.json`.
+- **Home Air online keeps no history of its own:** its charts come from AirGradient's cloud, held in memory for a day at most.
+- **No accounts, no analytics in Home Air.** The server's logs list which sources it called, never readings or keys. Only the public demo site counts page views and loading speed (Vercel Web Analytics and Speed Insights: no cookies, nothing personal); Home Air on your computer, a home server or online has none.
 - **What leaves your server:** your AirGradient API token, when you add one, goes only to AirGradient. Reading a monitor on the Wi-Fi sends nothing outside your network. Your home's exact position stays in `config.toml`; rounded to about 1 km by the app, it goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
 - **Calls to AirGradient:** with every monitor read on the Wi-Fi, the app makes no call for current readings. How often it asks AirGradient otherwise, and how it keeps that low, is in [docs/api-usage.md](docs/api-usage.md).
 
@@ -87,15 +81,7 @@ The actions come from fixed rules in `summary.py` and `server.py`, not a model. 
 
 Change any of them in `config.toml`; the comments in [`config.example.toml`](config.example.toml) say what each one does.
 
-### The PM2.5 forecast
-
-The server asks [Open-Meteo's Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (free, no key) for hourly PM2.5 at the home, the past 24 hours and the next 24, and keeps the answer 30 minutes. For each past hour it compares your outdoor monitor's average with the forecast and takes the median ratio, kept between ×0.1 and ×3, so one unusual hour doesn't change it much; the coming hours are multiplied by it. With fewer than 6 matching hours it starts the forecast from the monitor's reading now instead, and the gap fades over 6 hours. Without an outdoor monitor, the home's chosen source stands in for it: the nearby public monitor's readings, or for the area estimate the hourly median of up to 5 public outdoor monitors within 15 km (at least 2). With the model alone, the forecast is used as Open-Meteo gives it. The actions look 8 hours ahead on that curve for when PM2.5 crosses the limit.
-
-### Corrected PM2.5
-
-AirGradient monitors measure particles with a laser sensor (Plantower). Outdoors it reads high, more so in humid air, where particles swell with water. The US EPA published a correction for this based on humidity ([Barkjohn et al. 2021](https://amt.copernicus.org/articles/14/4617/2021/)); indoors, AirGradient may correct its sensor differently ([AirGradient on low readings](https://www.airgradient.com/blog/low-readings-from-pms5003/)).
-
-The app always uses the corrected value: for your monitors, the `pm02_corrected` value [AirGradient's API](https://api.airgradient.com/public/docs/api/v1/) sends; for public outdoor monitors, the EPA-corrected value from AirGradient's map ([AirGradient on the correction](https://meetingorganizer.copernicus.org/EGU25/EGU25-8701.html)), or the same formula when only the raw value is there. The rules compare these corrected values with the limits.
+How the PM2.5 forecast is fitted to your monitor, and which corrected PM2.5 values the rules use: [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Screenshots
 
