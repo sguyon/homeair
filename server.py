@@ -248,7 +248,7 @@ def api_headers(resp):
     """No browser HTTP caching of live data (the server cache does that); say how fresh the answer is."""
     if request.path.startswith("/api/"):
         # never kept: the token form, and the setup state the Connected card polls while setup restarts the app
-        resp.headers["Cache-Control"] = "no-store" if request.path in ("/api/token", "/api/setup") else "no-cache"
+        resp.headers["Cache-Control"] = "no-store" if request.path in ("/api/token", "/api/setup") or request.path.startswith("/api/agent/") else "no-cache"
         if getattr(g, "cache_state", None):
             resp.headers["X-Cache"] = g.cache_state
             resp.headers["X-Data-Age"] = str(g.cache_age)
@@ -785,6 +785,10 @@ def monitors():
     except demo_data.WORLD_ERRORS:
         return jsonify({"error": public.WORLD_DOWN}), 502
     return jsonify({"near": near, "monitors": publicmap.nearest(rows, lat, lon)})
+
+
+import mcp_server   # /mcp for AI assistants and /api/agent/* for the skill (agent_tools.py: the tools and their answers)
+mcp_server.init(app, lambda: {**page_view(), "real_clock": page_clock() is None})   # a lambda: the demo replaces page_view below
 
 
 if MODE == "demo":   # every outside source becomes made-up data, generated per request (demo/data.py)

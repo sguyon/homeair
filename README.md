@@ -21,11 +21,13 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 
 You need one or two AirGradient monitors (indoor, outdoor or both) on AirGradient's cloud, and your API token. Works best in the US.
 
-**With a coding agent** (Claude Code or Codex). Open your agent in an empty folder and paste:
+**With a coding agent** (Claude Code or Codex). Open your agent anywhere and paste:
 
 ```
-Clone https://github.com/sguyon/homeair and set up Home Air for my home by following its SETUP.md.
+Clone https://github.com/sguyon/homeair into ~/homeair and set up Home Air for my home by following its SETUP.md.
 ```
+
+To keep it somewhere else, name that folder instead of `~/homeair`.
 
 It connects AirGradient, asks your location and profiles, writes your config and runs the page on your computer. It can then keep it running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)).
 

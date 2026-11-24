@@ -3,7 +3,10 @@
 .env.*
 !.env.example
 config.toml
+config.toml.*
+!config.example.toml
 !demo/config.toml
+agent-links.json
 PRODUCT.md
 CLAUDE.local.md
 internal/

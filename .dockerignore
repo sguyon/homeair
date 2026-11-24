@@ -4,7 +4,9 @@
 **/.env*
 config.toml
 **/config.toml
-config.toml.bak-*
+config.toml.*
+!config.example.toml
+agent-links.json
 !demo/config.toml
 
 # Private notes, tests, docs and build output

@@ -11,11 +11,15 @@ __pycache__/
 !.env.example
 /config.toml
 /config.toml.bak-*
+/config.toml.pre-restore-*
+/config.toml.restoring
 
 # The running app's log and pid, and the folder prepared for a home server (it holds a copy of .env)
 /app.log
 /app.pid
 /app.port
+# what setup.py --agent on linked into the agent's skills folders, so --agent off removes only those
+/agent-links.json
 /home-server/
 
 # Private notes: a separate private repo cloned here

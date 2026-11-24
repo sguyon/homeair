@@ -3,6 +3,7 @@
 Run with no answers to prepare .env; with --address and --profiles to finish setup.
 The railway command transfers saved settings through stdin. --live checks a running page.
 --status lists what's done and the next command; it changes nothing.
+--agent on links the Home Air skill into the agent's skills folders; off removes only those links.
 """
 import argparse
 import json
@@ -60,6 +61,13 @@ FALLBACK_PORT = 5600  # the first port --start tries when the usual one is taken
 FALLBACK_TRIES = 20  # ports tried from FALLBACK_PORT.
 STARTUP_WAIT = 30  # seconds for the page to answer after the system starts it at login (uv may install packages first).
 WAIT_POLL_SECONDS = 2  # how often --wait-token looks for the saved token: the user sees the agent move on within 2 s.
+SKILL = "home-air-quality"  # the reading skill: its folder under skills/ here, and its name in each agent's skills folder
+AGENT_FILE = "agent-links.json"  # what --agent on linked, in the repo folder (ignored by git), so --agent off removes only those
+SHARED_SKILLS = ".agents/skills"  # under the home folder: the shared folder Codex, Cursor and Gemini CLI read
+CLAUDE_SKILLS = ".claude/skills"  # under the home folder: Claude Code's own skills folder (it doesn't read the shared one)
+AGENT_OFF_CMD = f"{SETUP_CMD} --agent off"
+CODEX_VARS = ("CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID")  # set by Codex for its commands; not CODEX_HOME, a user setting
+FOR_AGENTS = {SHARED_SKILLS: "Codex, Cursor and Gemini CLI", CLAUDE_SKILLS: "Claude Code"}  # who reads each skills folder
 
 
 class SetupError(Exception):
@@ -422,7 +430,8 @@ def setup(args, env, root):
     if old != text:
         if old is not None:
             backup = backup_path(path)
-            shutil.copy2(path, backup)
+            shutil.copyfile(path, backup)   # not copy2: the modified time is now, as settings.py sorts backups by it
+            shutil.copymode(path, backup)
             print(f"Saved the previous config at {backup}")
         path.write_text(text, encoding="utf-8")
     print(f"Home: {place.name}, {place.lat}, {place.lon}; timezone {place.timezone}")
@@ -790,6 +799,121 @@ def start_at_login(state, env, root):
     return autostart.turn_on(root, home, env, run, shutil.which, sys.platform, lambda: page_answers(url, env, root))
 
 
+def running_agent(env):
+    """The coding agent running setup, from the variables it sets for its commands; None when it can't be told. Only
+    picks the folders to link: the message names an agent only when it's certain (Claude Code's CLAUDECODE=1)."""
+    if env.get("CLAUDECODE"):
+        return "Claude Code"
+    if any(env.get(k) for k in CODEX_VARS):
+        return "Codex"
+    if env.get("GEMINI_CLI"):
+        return "Gemini CLI"
+    if env.get("CURSOR_AGENT"):
+        return "Cursor"
+    return None
+
+
+def agent_targets(env, home):
+    """Where --agent on links the skill: always the shared folder; Claude Code's own folder too when Claude Code runs
+    setup, or when the agent can't be told and this computer has Claude Code (~/.claude)."""
+    agent = running_agent(env)
+    targets = [home / SHARED_SKILLS / SKILL]
+    if agent == "Claude Code" or (agent is None and (home / ".claude").is_dir()):
+        targets.append(home / CLAUDE_SKILLS / SKILL)
+    return agent, targets
+
+
+def links_to(path, source):
+    """Whether `path` is a symlink to this folder's skill (also when this folder has moved since)."""
+    if not path.is_symlink():
+        return False
+    target = os.readlink(path)
+    return target == str(source) or path.resolve() == source.resolve()
+
+
+def agent_record(root):
+    try:
+        data = json.loads((root / AGENT_FILE).read_text(encoding="utf-8"))
+        return {"skill": str(data["skill"]), "links": [str(p) for p in data["links"]]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"skill": "", "links": []}
+
+
+def agent_skill(state, env, root):
+    """--agent on|off|status: link this folder's skill into the agent's skills folders, as symlinks so a
+    git pull updates it. Never replaces a skill that's already there; off removes only the links on made."""
+    home = Path(env.get("HOME") or Path.home())
+    source = root / "skills" / SKILL
+    short = lambda p: "~/" + str(p.relative_to(home)) if p.is_relative_to(home) else str(p)
+    record = agent_record(root)
+    if state == "status":
+        paths = list(dict.fromkeys([home / SHARED_SKILLS / SKILL, home / CLAUDE_SKILLS / SKILL] + [Path(p) for p in record["links"]]))
+        print(f"Home Air skill ({SKILL}):")
+        for p in paths:
+            if links_to(p, source):
+                words = "linked by setup" if str(p) in record["links"] else "linked to this folder, not by setup (--agent off leaves it)"
+            elif p.is_symlink() or p.exists():
+                words = "a different skill with this name (setup leaves it)"
+            else:
+                words = "not linked"
+            print(f"  {short(p)}: {words}")
+        return 0
+    if state == "off":
+        if not record["links"]:
+            print("Setup hasn't linked the Home Air skill anywhere: nothing to undo.")
+            return 0
+        for p in map(Path, record["links"]):
+            if p.is_symlink() and os.readlink(p) == record["skill"]:
+                p.unlink()
+                print(f"Removed {short(p)}")
+            elif p.is_symlink() or p.exists():
+                print(f"Left {short(p)}: it's no longer the link setup made")
+        (root / AGENT_FILE).unlink(missing_ok=True)
+        print("The Home Air skill is removed from your agent.")
+        return 0
+    if not (source / "SKILL.md").is_file():
+        raise SetupError(f"This Home Air folder has no skills/{SKILL}. Update it with git pull, then run {SETUP_CMD} --agent on again.")
+    agent, targets = agent_targets(env, home)
+    ours_before = set(record["links"])   # links this setup made earlier, perhaps from a folder since moved
+    if record["skill"] and record["skill"] != str(source):
+        record["links"] = []   # a record from another folder: its links aren't this folder's to remove
+    linked, foreign = [], []
+    for p in targets:
+        if links_to(p, source):
+            linked.append(p)
+        elif p.is_symlink() and not p.exists() and str(p) in ours_before:
+            p.unlink()   # our own link, broken because the Home Air folder moved: link it again below
+            p.symlink_to(source, target_is_directory=True)
+            record["links"].append(str(p))
+        elif p.is_symlink() or p.exists():
+            foreign.append(p)
+        else:
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.symlink_to(source, target_is_directory=True)
+            except OSError as e:
+                print(f"Couldn't link {short(p)} ({e.strerror or e}). Check that folder's permissions, then run this again.")
+                continue
+            record["links"].append(str(p))
+            linked.append(p)
+            # recorded as soon as it's made, so --agent off removes it even if a later link fails
+            (root / AGENT_FILE).write_text(json.dumps({"skill": str(source), "links": sorted(set(record["links"]))}, indent=2) + "\n")
+    for p in foreign:
+        print(f"Left {short(p)}: a different skill named {SKILL} is already there. Setup doesn't replace it.")
+    if not linked:
+        print("The skill wasn't added: see above." + (" Remove or rename that skill, then run this again." if foreign else ""))
+        return 1
+    where = " and ".join(f"{short(p)} (read by {FOR_AGENTS.get(p.parent.relative_to(home).as_posix(), 'an agent')})"
+                         for p in linked)   # every target is under home (agent_targets)
+    print(f"Added the Home Air skill to {'Claude Code' if agent == 'Claude Code' else 'your agent'}: linked this folder's "
+          f"skills/{SKILL} into {where}.")
+    print("With it, the agent answers from your monitors, and changes your settings only when you ask and say yes.")
+    print("Ask it about the air at home, in a new session if this one doesn't see the skill yet. "
+          "The first time, the agent asks before running the skill's script.")
+    print(f"Undo: {AGENT_OFF_CMD}")
+    return 0
+
+
 def parser():
     ap = argparse.ArgumentParser(description="Set up a home from its location and profiles. With no answers, prepare .env.")
     ap.add_argument("--address", help="an address, neighborhood or nearby landmark with its city")
@@ -809,6 +933,8 @@ def parser():
                     help="start the app by itself at login (a Mac or Linux with systemd), or stop doing so")
     ap.add_argument("--home-server", action="store_true",
                     help="prepare a folder for a home server with Docker (Compose, settings, token) and say the two steps")
+    ap.add_argument("--agent", choices=("on", "off", "status"),
+                    help="connect the agent running setup to this Home Air (a skill, linked), undo it, or say what's linked")
     ap.add_argument("--wait-token", action="store_true",
                     help=f"wait up to {WAIT_TOKEN_SECONDS} s for the token page to save the token, then say what the account has")
     return ap
@@ -835,6 +961,8 @@ def main(argv, env, root=ROOT):
             return start_app(env, root)
         if args.start_at_login:
             return start_at_login(args.start_at_login, env, root)
+        if args.agent:
+            return agent_skill(args.agent, env, root)
         if args.live is not None:
             return live(args.live or f"http://localhost:{started_port(env, root)}", env, root, wait=LIVE_RETRY_SECONDS)
         if not args.address and args.lat is None and args.lon is None:
