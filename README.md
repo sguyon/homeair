@@ -31,7 +31,7 @@ The agent puts Home Air in a `homeair` folder inside the folder it was opened in
 
 The agent finds your monitors on the Wi-Fi, writes your settings and runs the page on your computer, then asks about your home: the address (for weather and pollen) and who lives with you, then, optional, your AirGradient API token and the skill for your coding agents. The agent can then keep Home Air running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)). Later, `./homeair help` in that folder lists the commands.
 
-**AI assistants:** your coding agents can ask about the air at home through the skill, and other assistants through Home Air's MCP server ([docs/agents.md](docs/agents.md)). Assistants that run in the cloud, like claude.ai, can only reach Home Air online, and that hasn't been tested yet.
+**AI assistants:** your coding agents can ask about the air at home through the skill, and other assistants through Home Air's MCP server ([docs/agents.md](docs/agents.md)). You can add Home Air's MCP server to claude.ai and ChatGPT too (tried with both), only with Home Air online: they reach it from their companies' servers.
 
 **With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) (Home Air on a home server reads your monitors on the Wi-Fi with no token), then start Compose and open http://localhost:8000.
 
