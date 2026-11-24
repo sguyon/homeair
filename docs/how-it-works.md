@@ -1,6 +1,20 @@
-# How Home Air works: the forecast and corrected PM2.5
+# How Home Air works
 
-The actions and their limits are in the [README](../README.md#how-it-works). Below are two details the actions depend on: the PM2.5 forecast and the corrected PM2.5 values.
+The limits behind the actions, the PM2.5 forecast, and the corrected PM2.5 values the rules use.
+
+## The limits
+
+The actions come from fixed rules in `summary.py` and `air_read.py`, not a model. Each rule compares a reading with a limit from your `config.toml` (`[limits]`). The defaults, and why:
+
+| Limit | Default | Why |
+|---|---|---|
+| CO₂ inside | 800 ppm | About twice the outdoor level (around 420). Above it the room doesn't get enough fresh air, and people start to notice; guidelines put the line between 800 and 1,000. |
+| PM2.5 outside | 15 µg/m³ | The World Health Organization's guideline for a 24-hour average. Used here for any hour, so it's strict on purpose. |
+| PM2.5 outside, high | 35 µg/m³ | The US EPA's 24-hour standard. Above it, sensitive people (children, asthma) should keep time outside short. |
+| Humidity inside | 30–60%, comfortable up to 50% | Under 30% dries the nose and throat; over 60% helps mold and dust mites grow. The damp-room action stops at 55%. |
+| Pollen | 3 of 5 | "Moderate" on Google's pollen index, where people with allergies start to feel it. |
+
+Change any of them in `config.toml`; the comments in [`config.example.toml`](../config.example.toml) say what each one does.
 
 ## The PM2.5 forecast
 
