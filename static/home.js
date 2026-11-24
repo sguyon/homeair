@@ -73,7 +73,10 @@
   // null when it is on and set up (its card then shows the reading, or an error). `pub`: a public monitor's page, where
   // pollen has no key, smoke is off outside North America and there is no road.
   // calendar: the card keeps its season calendar, greyed (pollen without a key).
+  // needs_place: the home has no place yet, so the source can't look at anywhere ("Add your place").
+  const NEEDS_PLACE = { wx: 'the weather', pollen: 'daily pollen levels', smoke: 'wildfire smoke', nearby: 'public monitors nearby' };
   function sourceOff(id, state, pub = false) {
+    if (state === 'needs_place' && NEEDS_PLACE[id]) return { word: 'Off', line: `Add your place to see ${NEEDS_PLACE[id]}.`, calendar: id === 'pollen' };
     if (id === 'pollen' && (state === 'not_set_up' || (state === 'off' && pub))) return { word: 'Off', line: 'Needs a Google Pollen key', calendar: true };
     if (id === 'smoke' && state === 'off' && pub) return { word: 'Off', line: 'NOAA\u2019s smoke map covers North America only.' };
     if (id === 'road' && state === 'off' && pub) return { word: 'Off', line: 'Not available for public monitors yet.' };
@@ -129,15 +132,24 @@
     return { text: n === 1 ? '1 monitor, not live' : `${ok} of ${n} monitors live`, tone };
   }
 
+  // Where a monitor's reading comes from, the same words as localnet.WHERE, `setup.py --live` and `--status`.
+  const WHERE_LOCAL = 'on your Wi-Fi', WHERE_CLOUD = 'cloud', WHERE_STALE = 'Not answering';
+  const HOME_SERVER_FIX = "Run setup's home server step again on your computer";   // a stale row whose copy can't reach the monitors
+
   // A monitor's row in the open Home menu: its status words and tooltip, and whether the row is greyed (`off`: the view
   // has no such monitor). `tz` is the home's timezone for the tooltip's time.
   function monitorRow(m, now, absent, tz) {
     const f = freshness(m, now, absent);
     if (f.tone === 'off') return { tone: 'off', text: f.label, title: f.label, off: true };
     const mins = m && m.timestamp ? Math.max(0, Math.round((now - new Date(m.timestamp)) / 60000)) : null;
-    const text = f.tone === 'good' ? `Live · ${mins < 1 ? 'just now' : mins + ' min ago'}` : f.label;
-    const title = m && m.timestamp ? 'Last reading ' + new Date(m.timestamp).toLocaleString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' }) : 'No reading';
-    return { tone: f.tone, text, title, off: false };
+    const ago = mins === null ? '' : mins < 1 ? 'just now' : mins < MIN_PER_H ? `${mins} min ago` : `${Math.floor(mins / MIN_PER_H)} h ago`;
+    const stale = !!(m && m.stale);
+    // where it was read and how old it is, both on the row: a number is only as good as its source and age
+    let text = f.tone === 'good' ? `Live · ${m && m.via === 'local' ? WHERE_LOCAL : WHERE_CLOUD}${ago ? ' · ' + ago : ''}` : f.label;
+    if (stale) text = `${WHERE_STALE} · ${ago || 'no reading'}`;   // keeps the numbers: the page still shows the last reading
+    const title0 = m && m.timestamp ? 'Last reading ' + new Date(m.timestamp).toLocaleString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' }) : 'No reading';
+    const title = stale && m.fix === 'home_server' ? `${title0}. ${HOME_SERVER_FIX}` : title0;
+    return { tone: stale && f.tone === 'good' ? 'warn' : f.tone, text, title, off: false };
   }
 
   // ── A home with one monitor ──

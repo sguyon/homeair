@@ -10,6 +10,11 @@ const APP = window.APP;
 // A public monitor's view has no indoor monitor; neither has a view whose place names none (APP.place.indoor null).
 const PUB = APP.public && !APP.public.error ? APP.public : null;
 const NO_INDOOR = APP.place.indoor === null || !!PUB;
+// A home that hasn't been given its place yet (the agent sets it): the sources that look at its coordinates stay off and say so,
+// the neighborhood map is hidden, and the page calls the home "Your home".
+const NO_PLACE = APP.place.lat === null || APP.place.lat === undefined;
+const HOME_NAME = APP.place.name || 'Your home';
+const SRC_ON = NO_PLACE ? { ...APP.sources, pollen: false, smoke: false, nearby: false } : APP.sources || {};   // a source turned off in the config, or waiting for a place, is not counted
 const VIEW_PLACE = NO_INDOOR ? { ...APP.place, indoor: null } : APP.place;   // what home.js reads to draw the indoor slot disabled
 // An indoor-only home: no outdoor monitor of its own; its outdoor PM2.5 comes from a chosen source (APP.outdoor_from), which
 // /api/current names on its outdoor entry ("source"): a nearby public monitor's readings, or an estimate for the area.
@@ -54,12 +59,12 @@ function applyConfig() {
   const set = (el, attr, v) => { if (v) el.setAttribute(attr, v); else el.removeAttribute(attr); };
   const runner = `Runner: adds the run check, saying when the outdoor air${road ? ` and ${road.name} traffic` : ''} make${road ? '' : 's'} a run worth it.`;
   const fill = {
-    'place': el => { el.textContent = PUB ? PUB.street || '' : place.name; el.title = el.textContent; el.hidden = !!PUB && !PUB.street; },   // the pill: a monitor's street (full text on hover when cut)
+    'place': el => { el.textContent = PUB ? PUB.street || '' : HOME_NAME; el.title = el.textContent; el.hidden = !!PUB && !PUB.street; },   // the pill: a monitor's street (full text on hover when cut)
     'home-name': el => { if (PUB) el.textContent = PUB.name; el.title = el.textContent; },   // the pill names the monitor, not "Home"
     'road-card': el => { el.hidden = !road && !PUB; },   // a public monitor shows the road as Off, like pollen
-    'map-home': el => { el.href = links.map_home; el.textContent = place.name; },
-    'nearby-about': el => { el.textContent = `Other AirGradient monitors around ${place.name}.`; },
-    'forecast': el => { el.href = links.forecast; el.title = `Hourly forecast for ${place.name}, National Weather Service`; },
+    'map-home': el => { set(el, 'href', links.map_home); el.textContent = HOME_NAME; if (!links.map_home) { el.removeAttribute('target'); el.removeAttribute('title'); } },   // no place, no map to open
+    'nearby-about': el => { el.textContent = `Other AirGradient monitors around ${HOME_NAME}.`; },
+    'forecast': el => { set(el, 'href', links.forecast); set(el, 'title', links.forecast && `Hourly forecast for ${HOME_NAME}, National Weather Service`); if (!links.forecast) el.removeAttribute('target'); },
     'wx-about': el => { el.textContent = road ? `Open-Meteo. Wind direction changes how ${road.name} exhaust drifts.` : 'Open-Meteo.'; },
     'pollen-link': el => {   // pollen.com needs a US ZIP; without one the heading is plain text
       set(el, 'href', links.pollen); set(el, 'title', place.pollen_zip && `5-day pollen forecast for ZIP ${place.pollen_zip}, pollen.com`);
@@ -78,7 +83,7 @@ function applyConfig() {
     'smoke-about': el => { el.textContent = smokeText(place.region); },
     'smoke-card-about': el => { el.textContent = smokeMapText(place.region); },
     'profiles-for': el => { const t = profilesFor(profiles); el.textContent = t; el.parentElement.hidden = !t; },
-    'sources-label': el => { el.setAttribute('aria-label', sourcesLabel(APP.sources, !!road, !NO_INDOOR, !NO_OUTDOOR, !!PUB)); },
+    'sources-label': el => { el.setAttribute('aria-label', sourcesLabel(SRC_ON, !!road, !NO_INDOOR, !NO_OUTDOOR, !!PUB)); },
     'monitors-title': el => { if (PUB) el.textContent = 'Monitor'; },
     'self-legend': el => { el.textContent = SELF.legend; },
   };
@@ -88,7 +93,7 @@ function applyConfig() {
     'road-estimate-title': el => { el.title = `${road.name} estimate`; },
     'road-exhaust': el => { el.textContent = `${road.name} exhaust`; },
     'road-about-label': el => { el.setAttribute('aria-label', `About the ${road.name} estimate`); },
-    'traffic': el => { el.href = links.traffic; el.title = `Live traffic on the ${road.name} near ${place.name}, Google Maps`; },
+    'traffic': el => { set(el, 'href', links.traffic); el.title = `Live traffic on the ${road.name} near ${HOME_NAME}, Google Maps`; },
     'road-why': el => { if (!road) return; const why = roadWhyText(road); el.setAttribute('data-tip', why); el.setAttribute('aria-label', why); },   // the ⓘ in the map legend
     'road-clock': el => { el.textContent = roadClockText(road); },
     'road-wind': el => { el.textContent = roadWindText(road); },
@@ -117,11 +122,13 @@ if ($('demo-top') && Picker.showsTop(APP, location.search)) {
   Picker.mount($('demo-top'), APP);
   document.documentElement.classList.add('has-demo-top');
 }
-// Nearby monitors turned off in the config: the section says so in one line instead of showing an empty table and map.
-if ((APP.sources || {}).nearby === false) {
+// Nearby monitors turned off in the config, or no place to look around: the section says so in one line instead of showing an
+// empty table and map (no map without a place).
+if ((APP.sources || {}).nearby === false || NO_PLACE) {
   const off = document.getElementById('nb-off'), card = document.querySelector('.nb-card');
-  if (off) { off.textContent = 'Off. ' + sourceOff('nearby', 'off').line; off.hidden = false; }
+  if (off) { off.textContent = 'Off. ' + sourceOff('nearby', (APP.sources || {}).nearby === false ? 'off' : 'needs_place').line; off.hidden = false; }
   if (card) card.hidden = true;
+  document.body.dataset.mapReady = 'none';   // no map to wait for (scripts/screenshot.sh)
 }
 // Zero is a real reading; only null and undefined mean missing.
 const has = v => v !== null && v !== undefined && !Number.isNaN(v);
@@ -173,7 +180,8 @@ function homeHour() {
 
 
 // Connection status for a row in the Home panel: a dot plus a few words.
-const SRC_ON = APP.sources || {};   // a source turned off in the config is not counted
+// why a source is off: the config turned it off (first), or the home has no place yet
+const offState = id => (APP.sources || {})[id] === false ? 'off' : NO_PLACE ? 'needs_place' : '';
 const srcOk = { ...(SRC_ON.nearby !== false ? { nearby: null } : {}), wx: null, ...(SRC_ON.pollen !== false ? { pollen: null } : {}), ...(SRC_ON.smoke !== false ? { smoke: null } : {}), ...(APP.road ? { bqe: true } : {}) };
 function setStatus(id, tone, text, title) {
   const el = $('st-' + id); if (!el) return;
@@ -384,17 +392,19 @@ function setEdges() {
 
 function contextStatus(ctx) {
   const w = (ctx && ctx.weather) || {}, pollen = (ctx && ctx.pollen) || [], sm = (ctx && ctx.smoke) || {};
-  setStatus('wx', has(w.temperature) ? 'good' : 'bad', has(w.temperature) ? 'Live' : 'No data', has(w.temperature) ? 'Current weather from Open-Meteo' : 'Open-Meteo did not answer');
+  if (NO_PLACE || (ctx && ctx.status && ctx.status.weather === 'needs_place')) setStatus('wx', 'neutral', 'Off', sourceOff('wx', 'needs_place').line);
+  else setStatus('wx', has(w.temperature) ? 'good' : 'bad', has(w.temperature) ? 'Live' : 'No data', has(w.temperature) ? 'Current weather from Open-Meteo' : 'Open-Meteo did not answer');
   // Google returns every pollen type even out of season, so an empty list means no answer.
   const st = (ctx && ctx.status) || {};
-  const offOf = id => sourceOff(id, st[id] || (SRC_ON[id] === false ? 'off' : ''), !!PUB);
+  const offOf = id => sourceOff(id, st[id] || offState(id), !!PUB);
   for (const id of ['pollen', 'smoke']) {
     const o = offOf(id);
     if (o) setStatus(id, 'neutral', o.word, o.line);
   }
   if (!offOf('pollen')) setStatus('pollen', pollen.length ? 'good' : 'bad', pollen.length ? 'Today' : 'No data', pollen.length ? "Today's pollen from Google" : 'Google Pollen did not answer');
   if (!offOf('smoke')) setStatus('smoke', sm.checked ? 'good' : 'bad', sm.checked ? `${sm.date ? new Date(sm.date + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Today'} map` : 'Not checked', sm.checked ? `NOAA smoke map${sm.date ? ' for ' + sm.date : ''}` : 'The NOAA smoke map did not load');
-  if (SRC_ON.nearby === false || st.nearby === 'off') setStatus('nearby', 'neutral', 'Off', sourceOff('nearby', 'off').line);
+  const nearbyOff = st.nearby === 'off' || st.nearby === 'needs_place' ? st.nearby : offState('nearby');
+  if (nearbyOff) setStatus('nearby', 'neutral', 'Off', sourceOff('nearby', nearbyOff).line);
   setStatus('bqe', 'neutral', 'Estimated', 'Calculated from the hour and the wind; nothing to connect');
   updateStatus();
 }
@@ -414,11 +424,14 @@ function idleCard(id, { word, line, calendar }) {
 function renderContext(ctx) {
   state.ctx = ctx;   // kept so a unit switch can redraw without a reload
   redrawEstimate();
-  const w = ctx.weather || {}, b = ctx.bqe || {}, pollen = ctx.pollen || [];
+  const w = ctx.weather || {}, b = ctx.bqe || {}, pollen = ctx.pollen || [], st0 = ctx.status || {};
   window.__wx = w; window.__bqe = b; window.__road = ctx.road || null; window.__fc = Array.isArray(ctx.forecast) ? ctx.forecast : []; window.__pollenT = Array.isArray(ctx.pollen_tomorrow) ? ctx.pollen_tomorrow : [];
   if (state.neighbors && state.neighbors.length) renderNeighborhood();
   if (typeof SKY !== 'undefined' && SKY) SKY.weather(w);
-  if (has(w.wind_speed)) {
+  const wxOff = st0.weather === 'needs_place' || NO_PLACE ? sourceOff('wx', 'needs_place') : null;
+  $('wx-hero').closest('.card').classList.remove('off');   // idleCard greys it again if still off
+  if (wxOff) idleCard('wx', wxOff);
+  else if (has(w.wind_speed)) {
     $('wx-hero').textContent = `${w.wind_cardinal} ${num(w.wind_speed)} km/h`;
     $('wx-sub').textContent = 'Wind direction and speed';
     const risk = String(w.dew_point_risk || '');
@@ -437,8 +450,8 @@ function renderContext(ctx) {
     $('wx-kv').innerHTML = '';
   }
 
-  const st = ctx.status || {}, pollenOff = sourceOff('pollen', st.pollen || (SRC_ON.pollen === false ? 'off' : ''), !!PUB);
-  const smokeOff = sourceOff('smoke', st.smoke || (SRC_ON.smoke === false ? 'off' : ''), !!PUB);
+  const st = ctx.status || {}, pollenOff = sourceOff('pollen', st.pollen || offState('pollen'), !!PUB);
+  const smokeOff = sourceOff('smoke', st.smoke || offState('smoke'), !!PUB);
   for (const id of ['pollen', 'smoke']) $(id + '-hero').closest('.card').classList.remove('off');   // idleCard greys it again if still off
   if (pollenOff) idleCard('pollen', pollenOff);
   else if (pollen.length) {
@@ -486,7 +499,7 @@ function renderContext(ctx) {
   } else {
     $('smoke-hero').textContent = sm.detected ? `${sm.density} smoke` : 'Not detected';
     $('smoke-hero').style.setProperty('--c', sm.detected ? (sm.density === 'Light' ? 'var(--warn)' : 'var(--bad)') : 'var(--good)');
-    $('smoke-sub').textContent = sm.detected ? `Satellites mapped wildfire smoke over ${APP.place.name}` : `No wildfire smoke mapped over ${APP.place.name}`;
+    $('smoke-sub').textContent = sm.detected ? `Satellites mapped wildfire smoke over ${HOME_NAME}` : `No wildfire smoke mapped over ${HOME_NAME}`;
   }
   if (!smokeOff) $('smoke-kv').innerHTML = kv([mapped && ['Map date', mapped], ['Source', 'NOAA satellite smoke map']]);
   setEdges();
@@ -574,7 +587,7 @@ function showFindings() {
 // The table's rows (the open one with its band), and the nearest 8 under the map with "Show all" for the rest.
 function drawNbRows() {
   const { rows, you, scale, fmt } = state.nb;
-  $('nb').innerHTML = rows.map(n => nbRowHTML(n, n === you, SELF, APP.place.name, scale, fmt, n.locationId === state.nbOpen)).join('');
+  $('nb').innerHTML = rows.map(n => nbRowHTML(n, n === you, SELF, HOME_NAME, scale, fmt, n.locationId === state.nbOpen)).join('');
   const more = $('nb-more'), extra = rows.length - 8;
   document.querySelector('.nb-card').classList.toggle('nb-all', !!state.nbAll);
   more.hidden = extra <= 0;
@@ -1218,7 +1231,7 @@ if ('serviceWorker' in navigator) {
 const SOURCES = [['AirGradient ONE', 'one', 'Your indoor monitor'], NO_OUTDOOR ? [OUT_ROW, 'openair', OUT_ROW] : ['AirGradient Open Air', 'openair', PUB ? 'This monitor' : 'Your outdoor monitor'],
   ['Open-Meteo', 'wx', 'Weather · Open-Meteo'], ['Google Pollen', 'pollen', 'Pollen · Google'], ['NOAA HMS', 'smoke', 'Smoke · NOAA'],
   ...(APP.road ? [[`${APP.road.name} estimate`, 'bqe', `Traffic · ${APP.road.name} estimate`]] : [])]
-  .filter(([, id]) => sourcesOn(APP.sources, !!APP.road, !NO_INDOOR).includes(id));   // what the config turned off is not listed or counted
+  .filter(([, id]) => sourcesOn(SRC_ON, !!APP.road, !NO_INDOOR).includes(id) && !(NO_PLACE && id === 'wx'));   // what the config turned off is not listed or counted
 function renderSources() {
   const box = $('s-src'); if (!box) return;
   const rows = [...document.querySelectorAll('.blocks .pr')];

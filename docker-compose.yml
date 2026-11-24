@@ -14,8 +14,16 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # The history of the readings and the monitors' addresses (history.sqlite and local-addresses.json). A named
+      # volume survives `docker compose up -d --force-recreate` and a new image; `docker compose down -v` deletes it.
+      - homeair-history:/data
     env_file:
       # AIRGRADIENT_TOKEN and GOOGLE_POLLEN_API_KEY. Optional, but without a token there are no readings.
       - path: .env
         required: false
+    environment:
+      HISTORY_FILE: /data/history.sqlite   # the addresses are kept next to it, in /data/local-addresses.json
     restart: unless-stopped
+
+volumes:
+  homeair-history:

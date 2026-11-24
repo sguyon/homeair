@@ -23,6 +23,12 @@ COPY . .
 # CONFIG_FILE that can't be read stops it. CONFIG_FILE or CONFIG_TOML still win when set.
 RUN ln -s /config/config.toml /app/config.toml \
  && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+
+# The history of the readings and the monitors' remembered addresses live in /data, owned by the app user. A named
+# volume mounted there (docker-compose.yml) is created with this owner and keeps the files across a recreated
+# container and a new image.
+RUN mkdir /data && chown app:app /data
+ENV HISTORY_FILE=/data/history.sqlite
 USER app
 
 EXPOSE 8000

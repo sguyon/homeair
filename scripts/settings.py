@@ -10,13 +10,13 @@ Folder: --dir, else HOME_AIR_DIR, else this Home Air folder. Backups sit next to
 import argparse
 import json
 import os
-import shutil
 import sys
 import tomllib
-from datetime import datetime, timezone
 from pathlib import Path
 
-KEEP = 5  # newest backups kept; older ones are deleted by `backup`
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # the app's config.py holds the backup helpers
+from config import backup_config, backups, copy_now, unique  # noqa: E402
+
 COORDINATES = ("lat", "lon")  # [place] keys `show` with no section leaves out; `show place` prints them
 
 
@@ -25,38 +25,10 @@ def fail(msg):
     sys.exit(1)
 
 
-def backups(cfg: Path):
-    """Backups of cfg, newest first, by when they were made: each copy gets the time it was made as its modified time
-    (copy_now), here and in scripts/setup.py, which makes them with the same prefix."""
-    found = [p for p in cfg.parent.glob(cfg.name + ".bak-*") if p.is_file()]
-    return sorted(found, key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
-
-
-def unique(cfg: Path, kind):
-    """config.toml.<kind>-<UTC time>, with -2, -3… when one was already made in the same second."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    dest, n = cfg.with_name(f"{cfg.name}.{kind}-{stamp}"), 2
-    while dest.exists():
-        dest, n = cfg.with_name(f"{cfg.name}.{kind}-{stamp}-{n}"), n + 1
-    return dest
-
-
-def copy_now(src: Path, dest: Path):
-    """Copy the contents and permissions, with now as the modified time: copy2 would keep the config's old time, and an
-    older backup could then sort as the newest."""
-    shutil.copyfile(src, dest)
-    shutil.copymode(src, dest)
-    os.utime(dest)
-
-
 def cmd_backup(cfg: Path, _):
     if not cfg.is_file():
         fail(f"No config.toml in {cfg.parent}. Run setup first (SETUP.md) or check the folder.")
-    dest = unique(cfg, "bak")
-    copy_now(cfg, dest)
-    for old in backups(cfg)[KEEP:]:
-        old.unlink()
-    print(dest)
+    print(backup_config(cfg))
 
 
 def cmd_restore(cfg: Path, args):

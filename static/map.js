@@ -114,6 +114,7 @@ var NBMAP = (() => {
 
   // called by renderNeighborhood with the monitors on the table and the wind
   function update(you, others, wind) {
+    if (APP.place.lat == null) return;   // no place: no map (the section says so)
     data = { you, others: others.map(n => ({ ...n, id: n.locationId })), wind };
     const box = $('nb-map'); if (!box) return;
     if (!('IntersectionObserver' in window)) return draw();

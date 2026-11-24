@@ -37,6 +37,9 @@ def test_image_uses_the_repo_python_and_runs_as_a_user():
     assert re.search(rf"^FROM python:{re.escape(read('.python-version').strip())}-slim-bookworm$", dockerfile, re.M)
     assert re.search(r"^USER (?!root\b)\S+$", dockerfile, re.M)
     assert "requirements-dev" not in dockerfile
+    assert re.search(r"^ENV HISTORY_FILE=/data/history\.sqlite$", dockerfile, re.M)
+    # /data is created and handed to the app user before USER, so a named volume mounted there inherits it
+    assert dockerfile.index("chown app:app /data") < re.search(r"^USER ", dockerfile, re.M).start()
     assert "/health" in dockerfile   # the HEALTHCHECK
 
 
@@ -73,6 +76,10 @@ def test_compose_is_local_only_with_optional_keys_and_a_read_only_config():
                      r"\s+bind:\n\s+create_host_path: false\n", compose)
     assert re.search(r"- path: \.env\n\s+required: false", compose)
     assert "restart: unless-stopped" in compose
+    # the history survives a recreated container and a new image: a named volume at /data, and the store inside it
+    assert "      - homeair-history:/data\n" in compose
+    assert re.search(r"^volumes:\n  homeair-history:\n?$", compose, re.M)
+    assert "HISTORY_FILE: /data/history.sqlite" in compose
     assert "build: ." in compose
 
 

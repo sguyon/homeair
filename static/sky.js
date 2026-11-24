@@ -24,7 +24,8 @@ var SKY = (() => {
   const COMPASS_NEEDLE = 140;    // deg the needle swings the other way, on top of the wind's direction
   const COMPASS_TURN = .38;      // share of the time spent turning away; the rest settles back
   const COMPASS_EASE_AWAY = 'cubic-bezier(.4, 0, .2, 1)', COMPASS_EASE_BACK = 'cubic-bezier(.34, 1.4, .5, 1)';   // the way back overshoots a little
-  const LAT = APP.place.lat, LON = APP.place.lon, reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const LAT = APP.place.lat ?? 0, LON = APP.place.lon,   // no place yet: the sun is placed on the equator, at the timezone's own longitude
+     reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Start from the last real weather this browser saw, so a reload never shows made-up defaults.
   const LIVE_KEY = 'aq-sky-live' + (APP.now ? ':' + APP.now.moment : '');   // the demo keeps one per moment
   const live = { dir: 200, spd: 0, cloud: 0, pm: 0, rain: 0, thunder: false, temp: null, loaded: false };
@@ -48,7 +49,7 @@ var SKY = (() => {
     const g = 2 * Math.PI / 365 * (day - 1 + (minutes / 60 - 12) / 24);
     const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
     const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
-    const ha = ((minutes + offset + eqt + 4 * LON) / 4 - 180) * Math.PI / 180, lat = LAT * Math.PI / 180;
+    const ha = ((minutes + offset + eqt + 4 * (LON ?? -offset / 4)) / 4 - 180) * Math.PI / 180, lat = LAT * Math.PI / 180;
     const cosz = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha), zen = Math.acos(Math.max(-1, Math.min(1, cosz)));
     let az = Math.acos(Math.max(-1, Math.min(1, (Math.sin(lat) * Math.cos(zen) - Math.sin(decl)) / (Math.cos(lat) * Math.sin(zen) || 1e-6)))) * 180 / Math.PI;
     az = ha > 0 ? (az + 180) % 360 : (540 - az) % 360;   // degrees clockwise from north

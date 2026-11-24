@@ -19,7 +19,7 @@ An app for your AirGradient monitors that tells you what to do about your air: w
 
 ## Installation
 
-You need one or two AirGradient monitors (indoor, outdoor or both) on AirGradient's cloud, and your API token. Works best in the US.
+You need one or two AirGradient monitors (indoor, outdoor or both). Home Air reads the ones on your computer's Wi-Fi directly, one reading a minute, with no account and no token. An AirGradient token is optional: it adds the last 7 days of history and is needed to put Home Air online. Works best in the US.
 
 **With a coding agent** (Claude Code or Codex). Open your agent anywhere and paste:
 
@@ -29,9 +29,9 @@ Clone https://github.com/sguyon/homeair into ~/homeair and set up Home Air for m
 
 To keep it somewhere else, name that folder instead of `~/homeair`.
 
-It connects AirGradient, asks your location and profiles, writes your config and runs the page on your computer. It can then keep it running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)).
+It finds your monitors on the Wi-Fi, writes your config and runs the page on your computer. Your place, who lives here and the AirGradient token are all optional, and the page asks for them afterwards. It can then keep it running, or help you put it on a home server with Docker or online with Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)).
 
-**With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) to create `config.toml` and enter the token in `.env`, then start Compose and open http://localhost:8000.
+**With Docker,** on a home server or NAS: follow [Docker setup](DEPLOYMENT.md#docker) (the home-server copy reads your monitors on the Wi-Fi with no token), then start Compose and open http://localhost:8000.
 
 **Just trying it?** A fresh copy with no token opens the demo: `uv run --with-requirements requirements.txt server.py`, then http://localhost:5555.
 
@@ -58,14 +58,14 @@ It's minimal on purpose, and by necessity: I built it around what my own two mon
 
 - **Works best in the US.** Wildfire smoke (NOAA) and the forecast and pollen links use US sources. Elsewhere, turn those off in `config.toml`: your monitors' readings, the actions, the weather and the PM2.5 forecast still work.
 - **One or two monitors.** An indoor one, an outdoor one, or both. With an indoor monitor only, outdoor PM2.5 comes from a nearby public monitor or an estimate for your area; with an outdoor monitor only, the toddler profile waits for an indoor one. No rooms or several monitors of the same kind yet.
-- **AirGradient's cloud.** The page reads your monitors through AirGradient's API with your token, not from the monitors on your network.
+- **Wi-Fi reads need the same network.** Home Air finds monitors by browsing the local network (mDNS), which doesn't work inside Docker or WSL, and a copy online (Railway) can't see your Wi-Fi at all. A home server reads the addresses setup found; a copy online reads AirGradient's cloud with your token, up to 5 minutes old. Monitors need firmware 3.1.4 or newer.
 - **No road for new homes yet.** The road and its exhaust need a route file traced along the road, and nothing in the repo builds one yet. The demo has one; new homes start without.
 
 ## Data and privacy
 
-- **Nothing is stored on the server.** No database, no accounts, no analytics: history comes from AirGradient's cloud and is kept in the server's memory for a day at most, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
-- **What leaves your server:** your AirGradient token goes only to AirGradient. Your home's position, rounded to about 1 km by the app, goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
-- **Calls to AirGradient:** how often the app asks AirGradient, and how it keeps that low, is in [docs/api-usage.md](docs/api-usage.md).
+- **Your readings stay on your computer.** On a copy that reads your Wi-Fi (your computer, a home server), Home Air keeps its own history: one row a minute per monitor in `history.sqlite` next to `config.toml` (in the Docker volume at `/data` for Docker), readable by its owner only, kept until you delete it and never sent anywhere. The last known address of each monitor is kept beside it in `local-addresses.json`. A copy online keeps no history of its own: charts come from AirGradient's cloud, held in memory for a day at most. There are no accounts and no analytics, and the server's logs list which sources it called, never readings or keys. The one exception is the public demo site, which counts page views and loading speed with Vercel Web Analytics and Speed Insights (no cookies, nothing personal); a copy you run has none.
+- **What leaves your server:** your AirGradient token, when you add one, goes only to AirGradient. Reading a monitor on the Wi-Fi sends nothing outside your network. Your home's position, rounded to about 1 km by the app, goes to Open-Meteo (weather and forecast) and to Google if you add a pollen key.
+- **Calls to AirGradient:** with every monitor read on the Wi-Fi, the app makes no call for current readings. How often it asks AirGradient otherwise, and how it keeps that low, is in [docs/api-usage.md](docs/api-usage.md).
 
 ## How it works
 

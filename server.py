@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,11 +22,13 @@ import phrases
 import token_setup
 import upstream
 import summary as summary_rules
-from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, env_key, load_config, public_view,
-                    real_value, route_path, write_env_key)
+from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, add_key, backup_config, config_path, env_key,
+                    load_config, public_view, monitors as config_monitors, real_value, replace_text, route_path,
+                    set_monitor_keys, write_env_key)
 
 # Load .env file if it exists
 env_path = Path(__file__).parent / ".env"
+code_path = Path(__file__).parent / token_setup.CODE_FILE   # the owner's code for the token box (token_setup.owner_code)
 if env_path.exists():
     for key, val in parse_dotenv(env_path.read_text()).items():
         os.environ.setdefault(key, val)
@@ -69,7 +72,7 @@ def _note_cache(info):
 
 
 app = Flask(__name__)
-token_state = token_setup.TokenState(TOKEN)
+token_state = token_setup.TokenState()
 
 
 def use_config(cfg):
@@ -126,16 +129,42 @@ def boot_config(env=os.environ, root=None):
 
 
 def server_mode(cfg, token):
-    """"demo" (made-up data, demo/), "live" (a config and a token) or "no_token" (a config, no token yet)."""
+    """"demo" (made-up data, demo/), "live" (a config and a token), "local" (no token, a monitor with a serial: read on the
+    Wi-Fi) or "no_token" (a config, no token and no monitor)."""
     if cfg is not None and cfg.demo:
         return "demo"
-    return "live" if real_value(token) else "no_token"
+    if real_value(token):
+        return "live"
+    return "local" if cfg is not None and cfg.place is not None and config_monitors(cfg) else "no_token"
 
 
 use_config(boot_config())
 
 
-MODE = server_mode(CFG, TOKEN)   # "demo", "live" or "no_token"; local token entry switches to live
+MODE = server_mode(CFG, TOKEN)   # "demo", "live", "local" or "no_token"; local token entry switches to live
+
+STORE = None    # the home's own history (history_store); None where this copy doesn't read monitors on the Wi-Fi
+POLLER = None   # reads the monitors on the Wi-Fi every minute; None where there is nothing to read that way
+
+
+def start_local_reads():
+    """The history store and the poller for the config's monitors with a serial. Only a config that holds serials:
+    the tests' reference config has none, so they never browse."""
+    global STORE, POLLER
+    import address_memory
+    import history_store
+    import localnet
+    STORE = STORE or history_store.HistoryStore(history_store.store_path())
+    POLLER = localnet.Poller(config_monitors(CFG), browse=localnet.environment_blocker() is None,
+                             on_row=lambda row: STORE.add(row["serialno"], row),
+                             on_resume=lambda mon, gap_s: sources.start_fill("resume"),
+                             memory=address_memory.AddressMemory(address_memory.default_path()))   # last good address first after a restart
+    POLLER.start()
+
+
+if sources.local_reads_on():
+    start_local_reads()
+    sources.start_fill("start")
 
 
 def get_build_info():
@@ -308,27 +337,97 @@ def inline_touch_icon(html):
 
 @app.route("/")
 def index():
-    if "setup" in request.args:
-        response = redirect("/", code=303)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        if (setup_mode() and token_setup.local_entry(request, env_path)
-                and not token_setup.has_token(env_path, TOKEN)
-                and token_state.authorized(request.args["setup"])):
-            response.set_cookie(token_setup.COOKIE_NAME, token_state.code, httponly=True,
-                                samesite="Strict", secure=request.is_secure)
-        return response
     return render_page()
 
 
+@app.route("/connect")
+def connect():
+    """The token box on this computer's page, whenever no token is saved (also when monitors are read on the Wi-Fi), for
+    a browser holding the owner cookie. /connect?code= (the private link setup prints) sets that cookie. Anywhere else,
+    or with a token saved, the card says where to add it instead."""
+    if token_setup.forwarded(request):
+        return Response(FORWARDED_ERROR + "\n", 403, mimetype="text/plain", headers={"Cache-Control": "no-store"})
+    if not token_mode() or token_setup.has_token(env_path, TOKEN):
+        return redirect("/", code=303)
+    if "code" in request.args:
+        return owner_login(request.args.get("code", ""))
+    return render_page(card=True)
+
+
+def current_code():
+    """The owner's code, read (setup.py writes it); None when there is none yet or it can't be read: the box stays closed."""
+    try:
+        return token_setup.owner_code(code_path, create=False)
+    except (OSError, UnicodeError):
+        return None
+
+
+def is_owner(req):
+    code = current_code()
+    return code is not None and token_setup.owner_cookie(req, code)[0]
+
+
+def owner_login(given):
+    """The private link: the right code sets the owner cookie, then the page reloads without the code: at the home in
+    "local" mode (its readings come first; the box stays at /connect for this browser), else at /connect. A refresh
+    rather than a redirect: the next request then comes from this page, so the Strict cookie goes with it even when
+    the link was clicked on another site. A wrong code sets nothing."""
+    code = current_code() if token_setup.local_entry(request, env_path) else None
+    if code is None or not token_setup.code_matches(given, code):
+        return render_page(WRONG_CODE_ERROR if code is not None else None, 403, card=True)
+    target, words = ("/", "Open Home Air") if MODE == "local" else ("/connect", "Open the token box")
+    response = make_response(OWNER_PAGE.format(target=target, words=words))
+    response.set_cookie(token_setup.OWNER_COOKIE, token_setup.owner_value(code), max_age=token_setup.OWNER_COOKIE_AGE,
+                        path="/", httponly=True, samesite="Strict", secure=request.is_secure)
+    response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+                             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"})
+    return response
+
+
+def sets_cookie(response, name):
+    return any(h.startswith(name + "=") for h in response.headers.getlist("Set-Cookie"))
+
+
+@app.after_request
+def tidy_token_cookies(response):
+    """Another program on localhost can plant cookies of the same names (ports share cookies; a more specific path is
+    sent first). Each value is checked; a value this server didn't issue is cleared at both paths, keeping a valid one."""
+    if (request.path not in ("/connect", "/api/token") and not (request.path == "/" and token_mode())
+            or not token_setup.local_entry(request, env_path)):
+        return response
+    checks = []
+    owners = request.cookies.getlist(token_setup.OWNER_COOKIE)
+    if owners:
+        code = current_code()
+        valid = code is not None and token_setup.owner_cookie(request, code)[0]
+        checks.append((token_setup.OWNER_COOKIE, valid, len(owners) > 1 or not valid))
+    forms = request.cookies.getlist(token_setup.COOKIE_NAME)
+    if forms:
+        known = [token_state.known(v) for v in forms]
+        checks.append((token_setup.COOKIE_NAME, any(known), not all(known)))
+    for name, valid, stray in checks:
+        if not stray:
+            continue
+        for path in token_setup.COOKIE_PATHS:
+            if path != "/" or not (valid or sets_cookie(response, name)):
+                response.delete_cookie(name, path=path)
+    return response
+
+
 def setup_mode():
-    # A fresh copy opens the demo; its startup link must collect the token before setup can discover monitors.
+    # A fresh copy opens the demo; the token box at /connect collects the token before setup can discover monitors.
     return MODE == "no_token" or (MODE == "demo" and CFG.demo and os.environ.get("DEMO") != "1")
 
 
+def token_mode():
+    """The modes in which the token box may open: no token saved, whether nothing is read yet or monitors are read on the Wi-Fi."""
+    return setup_mode() or MODE == "local"
+
+
 def print_setup_link(port):
-    if not real_value(TOKEN) and token_state.code:
-        print(f"Paste your AirGradient token here: http://localhost:{port}/?setup={token_state.code}", flush=True)
+    """The start line names the command that prints the private link, never the link: this output goes to app.log."""
+    if not real_value(TOKEN):
+        print(f"No AirGradient token yet. For the private link to the token box, run: {CONNECT_CMD}", flush=True)
 
 
 TOKEN_FORMAT_ERROR = ("This doesn't look like an AirGradient token. Press the copy button next to API Access "
@@ -336,8 +435,15 @@ TOKEN_FORMAT_ERROR = ("This doesn't look like an AirGradient token. Press the co
 TOKEN_REFUSED_ERROR = ("AirGradient refused this token. Check that API Access is turned on for the place that shows your monitor, "
                        "then copy the token again.")
 FORM_EXPIRED_ERROR = "This form had expired, so nothing was sent. Paste the token again."
-LINK_EXPIRED_ERROR = ("This page is from before the app restarted, so it can't connect. Ask your agent for the new setup link, "
-                      "or restart the app to get one.")
+CONNECT_CMD = "scripts/run.sh scripts/setup.py --connect"   # prints the private link to the token box
+OWNER_NEEDED_ERROR = f"Open the private link setup printed first, or run {CONNECT_CMD} to see it."
+WRONG_CODE_ERROR = "This link isn't the private one setup printed."
+FORWARDED_ERROR = "The token box opens only on the computer Home Air runs on, not through a proxy or tunnel."
+# The private link's answer: the owner cookie, then the page reloads itself without the code, at {target}: the token
+# box (/connect), or the home (/) when monitors are read on the Wi-Fi.
+OWNER_PAGE = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+              '<meta http-equiv="refresh" content="0; url={target}"><title>Home Air</title>'
+              '<p><a href="{target}">{words}</a></p></html>')
 
 
 # The public demo's head only (never a copy a household runs): Vercel Web Analytics and Speed Insights (cookieless, nothing
@@ -368,22 +474,23 @@ def demo_head_tags():
 
 def render_page(error=None, status=200, card=False):
     """The missing-token card works without JavaScript; no credential is ever embedded in the page.
-    card: show the token card even without a valid setup cookie (an expired link explains itself instead of showing the demo)."""
+    card: show the token card even where the page would show the demo or the home (/connect, an expired form)."""
     html_path = Path(__file__).parent / "index.html"
     html = inline_touch_icon(tag_env(version_assets(html_path.read_text())))
     html = html.replace("</head>", demo_head_tags() + "</head>", 1)
     browser = None
     # A fresh copy (the demo, no home yet) shows only the card: the token box with its link, then "saved" until setup restarts it.
     saved = setup_mode() and MODE == "demo" and token_state.saved
-    show_setup = MODE == "no_token" or saved or (setup_mode() and (card or token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, ""))))
+    show_setup = MODE == "no_token" or saved or (token_mode() and card)
     html = inject_app(html, setup_page=show_setup)
     if show_setup:
-        entry = (token_setup.allowed(request, env_path, TOKEN, "no_token")
-                 and token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, "")))
-        value, browser = token_state.issue(request) if entry else (None, None)
-        card = render_template("token_card.html", entry=entry and not saved, saved=saved,
+        entry = token_setup.allowed(request, env_path, TOKEN, "no_token" if MODE != "local" else "local")
+        owner = entry and not saved and is_owner(request)
+        value, browser = token_state.issue(request) if owner and token_setup.form_request(request) else (None, None)
+        card = render_template("token_card.html", entry=bool(owner and value), saved=saved, owner_needed=entry and not saved and not owner,
+                               forms_full=bool(owner and not value), connect_cmd=CONNECT_CMD,
                                found=token_state.saved["monitors"] if saved else [], shown=SAVED_NAMES_SHOWN, nonce=value, error=error,
-                               instructions=token_setup.instructions(request), max_length=token_setup.TOKEN_MAX_LENGTH)
+                               instructions=token_setup.instructions(request), port=token_setup.app_port(), max_length=token_setup.TOKEN_MAX_LENGTH)
         card = version_assets(card)
         html = html.replace('id="no-token" hidden', 'id="no-token"')
         html = html.replace("<!-- token-setup -->", card)
@@ -411,61 +518,123 @@ def render_page(error=None, status=200, card=False):
 
 @app.route("/api/token", methods=["POST"])
 def save_token():
-    """First-run local setup only. Validate unlocked, then serialize the final check and save."""
+    """The token box's save, whenever no token is saved. Validate unlocked, then serialize the final check and save.
+    Every answer that keeps the box open shows it with its error (card=True): in "local" mode / is the home, not the box."""
     global TOKEN, MODE
     with token_state.lock:
         if (MODE == "demo" and not setup_mode()) or not token_setup.local_entry(request, env_path) or not token_setup.same_origin(request):
             return jsonify(error="Token entry is only available on this computer's local page."), 403
+        if not is_owner(request):
+            return jsonify(error=OWNER_NEEDED_ERROR), 403   # a program on this computer without the private link stops here
         if token_setup.has_token(env_path, TOKEN):
             return redirect("/", code=303)   # sent twice, or from an old tab: the page shows where things stand
-        if not setup_mode():
+        if not token_mode():
             return jsonify(error="Token entry is only available on this computer's local page."), 403
         request.max_content_length = token_setup.TOKEN_POST_MAX_BYTES
         if not token_state.consume(request, request.form.get("setup_nonce", "")):
-            # A page, never raw JSON: a fresh form when this browser still holds the setup link, else what to do.
-            if token_state.authorized(request.cookies.get(token_setup.COOKIE_NAME, "")):
-                return render_page(FORM_EXPIRED_ERROR, 403)
-            return render_page(LINK_EXPIRED_ERROR, 403, card=True)
+            # A page, never raw JSON: a fresh form, ready for the token.
+            return render_page(FORM_EXPIRED_ERROR, 403, card=True)
         retry = token_state.retry_after()
         if retry:
-            response = render_page("Too many attempts. Wait five minutes, then try again.", 429)
+            response = render_page("Too many attempts. Wait five minutes, then try again.", 429, card=True)
             response.headers["Retry-After"] = str(retry)
             return response
         candidate = request.form.get("token", "").strip()
         if (not candidate or len(candidate) > token_setup.TOKEN_MAX_LENGTH
                 or not token_setup.TOKEN_CHARACTERS.fullmatch(candidate) or not real_value(candidate)):
             token_state.failed()
-            return render_page(TOKEN_FORMAT_ERROR, 400)
+            return render_page(TOKEN_FORMAT_ERROR, 400, card=True)
     try:
         accepted = sources.validate_token(candidate)
     except (sources.requests.RequestException, ValueError):
         with token_state.lock:
             token_state.failed()
-            return render_page("AirGradient didn't answer. Try again shortly.", 502)
+            return render_page("AirGradient didn't answer. Try again shortly.", 502, card=True)
 
     with token_state.lock:
         if accepted is None:
             token_state.failed()
-            return render_page(TOKEN_REFUSED_ERROR, 400)
+            return render_page(TOKEN_REFUSED_ERROR, 400, card=True)
         # Recheck for a token written while the validation call was waiting.
         if token_setup.has_token(env_path, TOKEN):
             return redirect("/", code=303)   # another tab or the terminal won: keep theirs, show the page
         try:
             write_env_key(env_path, "AIRGRADIENT_TOKEN", candidate)
         except (OSError, UnicodeError, ValueError):
-            return render_page("Couldn't save the token. Check that the app's folder is writable.", 500)
+            return render_page("Couldn't save the token. Check that the app's folder is writable.", 500, card=True)
         os.environ["AIRGRADIENT_TOKEN"] = candidate
         TOKEN, MODE = candidate, server_mode(CFG, candidate)
         budgets.clear("ag_current")   # a refused token's pause ends with a new one
         budgets.clear("ag_history")
-        token_state.code = None
-        token_state.saved = {"monitors": accepted}   # the account's monitors and their kinds, for the "connected" card
+        take_account(accepted)
+        token_state.saved = {"monitors": sources.account_monitors(accepted)}   # their names and kinds, for the "connected" card
         token_state.nonces.clear()
         token_state.failures.clear()
         response = redirect("/", code=303)
         response.headers["Cache-Control"] = "no-store"
         response.delete_cookie(token_setup.COOKIE_NAME)
         return response
+
+
+def take_account(rows):
+    """After a token is saved: the home's monitors matched to the account's (sources.match_account) are written to the
+    config file, a backup first, and the app switches to it with no restart: the new mode, the poller's monitors, then
+    the history's last FILL_DAYS filled from the cloud. An indoor-only home with a place gets the area's estimate as its
+    outdoor source (the config needs one). A config that isn't a file (CONFIG_TOML), the demo, or a file that can't be
+    read or written stays as it was; the token is saved either way."""
+    global MODE
+    path = config_path(CFG)
+    if path is None:
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+        new = set_monitor_keys(text, sources.match_account(load_config({"CONFIG_TOML": text}), rows))
+        try:
+            load_config({"CONFIG_TOML": new})
+        except ConfigError:   # an indoor monitor with a place and no outdoor one: the area's estimate, which needs no call now
+            new = add_key(new, "sources", "outdoor_from", "area")
+            load_config({"CONFIG_TOML": new})   # never write a file the app can't start with
+        if new != text:
+            backup_config(path)
+            replace_text(path, new)
+        cfg = load_config(os.environ)
+    except (OSError, UnicodeError, ConfigError) as error:
+        print(f"The token is saved, but the monitors couldn't be written to the config ({type(error).__name__})", file=sys.stderr, flush=True)
+        return
+    if cfg is None or cfg.demo:
+        return
+    use_config(cfg)
+    MODE = server_mode(CFG, TOKEN)
+    if POLLER is not None:
+        POLLER.use(config_monitors(CFG))
+    elif sources.local_reads_on():
+        start_local_reads()
+    sources.start_fill("token")
+
+
+def adopt_saved_token(start=lambda fn: threading.Thread(target=fn, daemon=True, name="token-match").start()):
+    """A token typed into .env by hand never went through the box: at start, when a monitor read on the Wi-Fi has no
+    cloud id yet, do what saving it on the page does (take_account: the ids written with a backup, the 7-day fill),
+    after one call for the account's monitors. In the background: the start never waits on the cloud."""
+    if MODE != "live" or POLLER is None or not any(m.location_id in sources.localnet.LOCAL_IDS.values() for m in config_monitors(CFG)):
+        return
+
+    def match():
+        try:
+            rows = sources.validate_token(TOKEN)
+        except (sources.requests.RequestException, ValueError) as error:
+            print(f"AirGradient didn't answer, so the monitors' cloud ids weren't matched ({type(error).__name__}); "
+                  "the next start tries again", file=sys.stderr, flush=True)
+            return
+        if rows is None:
+            print("AirGradient refused the token in .env: the monitors stay read on the Wi-Fi", file=sys.stderr, flush=True)
+            return
+        with token_state.lock:
+            take_account(rows)
+    start(match)
+
+
+adopt_saved_token()
 
 
 def page_view():
@@ -545,9 +714,13 @@ def service_worker():
 
 @app.route("/health")
 def health():
+    states = sources.monitor_states()   # kinds only: no address, no serial
+    others = POLLER.others() if POLLER is not None and states else {}   # by kind: the serial's last 4 and the model
     return jsonify({
         "status": "ok",
         "airgradient_token_set": bool(TOKEN),
+        **({"monitors": states} if states else {}),
+        **({"also_found": others} if others else {}),
     })
 
 
@@ -560,29 +733,31 @@ def usage():
 
 @app.route("/api/current")
 def current():
-    if MODE == "no_token":   # a config but no token yet: the page says so; an expired token is a 502 below
+    if MODE == "no_token" or (MODE == "local" and POLLER is None):   # nothing to read yet: the page says so; an expired token is a 502 below
         return jsonify({"state": "no_token"})
     try:
-        value, info = sources.current_rows(force=sources._force())
+        value, info = sources.home_rows(force=sources._force())
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 502
     _note_cache(info)
-    value = sources.place_rows(value)
-    src = sources.outdoor_source(with_history=False) if isinstance(value, list) else None
-    if src is not None:   # an indoor-only home: its outdoor source stands as the outdoor monitor (a copy: the cache keeps its list)
-        value = value + [sources.source_monitor(src)]
     return jsonify(value)
 
 
 @app.route("/api/history/<int:location_id>")
 def history(location_id):
     chart_keep = sources.HIST_KEEP   # PM2.5, CO2 and humidity: the three History charts
+    frm_to = None
     try:
         frm, to = sources._iso(request.args["from"]), sources._iso(request.args["to"])
+        frm_to = (frm if frm.tzinfo else frm.replace(tzinfo=timezone.utc), to if to.tzinfo else to.replace(tzinfo=timezone.utc))
         hours = round((to - frm).total_seconds() / 3600)
         standard = hours in sources.HIST_TTL and abs((datetime.now(timezone.utc) - to).total_seconds()) < 120
     except (KeyError, ValueError):
         standard = False
+    if frm_to is not None:
+        kept = sources.store_rows(location_id, *frm_to)
+        if kept is not None:   # the home's own history: no call to the cloud
+            return jsonify([{k: r.get(k) for k in chart_keep if r.get(k) is not None} for r in kept])
     of = sources.outdoor_from()
     if isinstance(of, int) and location_id == of:   # an indoor-only home's public monitor: its history from the map
         utc = lambda t: t if t.tzinfo else t.replace(tzinfo=timezone.utc)
@@ -609,7 +784,7 @@ def history(location_id):
 
 @app.route("/api/neighborhood")
 def neighborhood():
-    if not sources.source_on("nearby"):
+    if sources.source_state("nearby"):   # off, or the home has no place yet
         return jsonify([])
     try:
         value = sources._fetch_nearby()   # one area request on AirGradient's map, at most every 15 min per place
@@ -623,7 +798,7 @@ def context():
     """Return external data sources (weather, pollen, the road, smoke) as structured JSON."""
     # Fetch independents in parallel; pollen has its own hard deadline inside get_pollen_data.
     weather_fut = _CONTEXT_POOL.submit(sources.get_open_meteo_data)
-    smoke_fut = _CONTEXT_POOL.submit(sources.smoke_status) if sources.source_on("smoke") else None
+    smoke_fut = _CONTEXT_POOL.submit(sources.smoke_status) if not sources.source_state("smoke") else None
     pollen_fut = _CONTEXT_POOL.submit(sources.get_pollen_days) if sources.pollen_live() else None
     air_fut = _CONTEXT_POOL.submit(sources.get_air_forecast)
 
@@ -698,10 +873,12 @@ def context():
     pollen_s = sources.pollen_state()
     status = {
         "pollen": ("ok" if pollen else "error") if pollen_s == "ok" else pollen_s,
-        "smoke": ("ok" if smoke.get("checked") else "error") if sources.source_on("smoke") else "off",
+        "smoke": sources.source_state("smoke") or ("ok" if smoke.get("checked") else "error"),
         "road": "ok" if road_cfg else "off",
-        "nearby": "ok" if sources.source_on("nearby") else "off",
+        "nearby": sources.source_state("nearby") or "ok",
     }
+    if not sources.place_known():   # the weather and the air forecast wait for a place too (the others say so above)
+        status["weather"] = status["air_forecast"] = "needs_place"
 
     return jsonify({
         "weather": {

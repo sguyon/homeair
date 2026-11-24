@@ -7,6 +7,7 @@ config.toml
 config.toml.*
 !config.example.toml
 agent-links.json
+connect-code
 !demo/config.toml
 
 # Private notes, tests, docs and build output
@@ -47,3 +48,7 @@ tools/
 Dockerfile
 docker-compose.yml
 .dockerignore
+history.sqlite*
+# What setup.py --home-server prepares to copy to a server: a copy of the settings and keys
+home-server/
+local-addresses.json

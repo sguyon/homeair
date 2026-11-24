@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from config import DEFAULT_LIMITS, parse_dotenv, OLD_PROFILES_TABLE, PROFILES, ConfigError, _clean, limit_order_problems, load_config, real_value, route_path  # noqa: E402
+from config import DEFAULT_LIMITS, parse_dotenv, OLD_PROFILES_TABLE, PROFILES, ConfigError, _clean, limit_order_problems, load_config, located, real_value, route_path  # noqa: E402
 import publicmap  # noqa: E402
 from publicmap import AREA_KM, AREA_MIN_MONITORS, NEARBY_SOURCE_KM, PINNED_OFFLINE_DAYS  # noqa: E402
 
@@ -79,6 +79,8 @@ def extra_problems(raw: dict, root: Path) -> list[str]:
 def outdoor_source_line(cfg) -> str:
     """Which monitors the home has, and where the outdoor PM2.5 comes from without one. Static: no network."""
     p = cfg.place
+    if p.indoor is None and p.outdoor is None:
+        return "Monitors: none yet"
     if p.indoor is not None and p.outdoor is not None:
         return "Monitors: indoor and outdoor"
     if p.outdoor is not None:
@@ -230,10 +232,12 @@ def main(argv, env, root: Path = ROOT) -> int:
         print(f"{k} {'set' if ok else 'missing'}")
     if cfg:
         print(outdoor_source_line(cfg))
+        if not located(cfg):
+            print("Place: not set yet (weather, pollen, smoke and nearby monitors wait for it)")
     for note in (old_name_note(raw), outdoor_from_note(raw)):
         if note:
             print(note)
-    check_source = cfg is not None and cfg.place.outdoor is None and cfg.outdoor_from != "model"
+    check_source = located(cfg) and cfg.place.outdoor is None and cfg.outdoor_from != "model"
     if check_source or args.suggest:
         lines, more = outdoor_source_check(cfg if check_source else None, raw, args.suggest)
         for line in lines:
@@ -253,8 +257,20 @@ def main(argv, env, root: Path = ROOT) -> int:
         return 0   # not "Config OK" yet: the source is still to write
     print("Config OK")
     if not keys.get("AIRGRADIENT_TOKEN"):
-        print("Not live yet: add your AirGradient token to .env in your text editor, then restart the app.")
+        print(token_note(cfg))
     return 0
+
+
+def token_note(cfg) -> str:
+    """The line after Config OK when no token is set: the token is optional for monitors read on the Wi-Fi by serial."""
+    p = cfg.place
+    named = [(p.indoor, p.indoor_serial), (p.outdoor, p.outdoor_serial)]
+    named = [serial for name, serial in named if name is not None]
+    if not named:
+        return "Not live yet: connect AirGradient on the page"
+    if all(named):
+        return "Optional: the AirGradient token adds the last 7 days (charts start from now)"
+    return "Not live yet: add your AirGradient token to .env in your text editor, then restart the app."
 
 
 def outdoor_source_check(cfg, raw: dict, suggest: bool) -> tuple[list[str], list[str]]:

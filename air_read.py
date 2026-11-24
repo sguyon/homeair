@@ -62,6 +62,11 @@ def hourly_forecast(weather, air):
     } for k in range(start, min(start + 13, len(times)))]
 
 
+def home_name():
+    """The home's place name in a sentence; "your home" until it has a place."""
+    return runtime.CFG.place.name or "your home"
+
+
 def active_road():
     """The road /api/context reports: the home's, or None. demo/data.py turns it off for a public monitor."""
     return runtime.ROAD
@@ -98,7 +103,7 @@ def road_traffic(hour, wind_direction):
         wind_impact = "Unknown"
         wind_multiplier = WIND_WEIGHT["unknown"]
     elif toward:
-        wind_impact = f"Blowing toward {runtime.CFG.place.name}"
+        wind_impact = f"Blowing toward {home_name()}"
         wind_multiplier = WIND_WEIGHT["toward"]
     elif bearing_in(wind_direction, ((lo + 180) % 360, (hi + 180) % 360)):
         wind_impact = "Blowing away"
@@ -170,14 +175,14 @@ def rule_run(outdoor_pm, smoke, rush, wind_toward, hour):
     base = f"Outdoor PM2.5 is {pm} µg/m³, under {runtime.PM_FINE}."
     if rush["in_rush"] and wind_toward:
         return verdict(f"After {fmt_hour(rush['end'])}", "warn",
-                       f"{base} The {runtime.ROAD.name} {rush['name']} rush runs until {fmt_hour(rush['end'])} with the wind toward {runtime.CFG.place.name}, so run after that.")
+                       f"{base} The {runtime.ROAD.name} {rush['name']} rush runs until {fmt_hour(rush['end'])} with the wind toward {home_name()}, so run after that.")
     if hour >= RUN_NIGHT[0] or hour < RUN_NIGHT[1]:
         windows = rush_hours()
         return verdict("Fine", "good", f"{base} Tonight is fine, and so is the morning before the {fmt_hour(windows[0][0])} rush."
                        if windows else f"{base} Tonight is fine.")
     if not rush["in_rush"] and not rush.get("tomorrow") and wind_toward:
         return verdict(f"Fine until {fmt_hour(rush['start'])}", "good",
-                       f"{base} Fine for a run, and for the toddler outside, until {fmt_hour(rush['start'])}. Then the {runtime.ROAD.name} rush starts, with the wind toward {runtime.CFG.place.name}.")
+                       f"{base} Fine for a run, and for the toddler outside, until {fmt_hour(rush['start'])}. Then the {runtime.ROAD.name} rush starts, with the wind toward {home_name()}.")
     return verdict("Fine", "good", f"{base} Fine for a run, and for the toddler outside.")
 
 
@@ -278,7 +283,7 @@ def summary_inputs(payload, co2, rh, rh_out, t_in, t_out, pm_out, pts_in, pts_ou
     return {"r": {"co2": co2, "rh": rh, "rh_out": rh_out, "t_in": t_in, "t_out": t_out, "pm_now": pm_out},
             "cams": cams, "hourly": hourly,
             "co2_pts": [(t, co2_of(x)) for t, x in pts_in], "rh_pts": [(t, rh_in_of(x)) for t, x in pts_in],
-            "pm_past": pm_past, "smoke": sources.get_smoke_data() if sources.source_on("smoke") else False,
+            "pm_past": pm_past, "smoke": sources.get_smoke_data() if not sources.source_state("smoke") else False,
             "pollen_today": top(days.get("today")), "pollen_tomorrow": top(days.get("tomorrow")),
             "rush": rush_windows(hourly, now), "road": road.name if road else None, "sun": sun, "now": now,
             # whose reading the PM2.5 forecast is fitted to, in its sentence: a public monitor's page says "this monitor";
@@ -350,7 +355,7 @@ def build_air_read(payload):
         t_out = sources.fnum(row.get("atmp")) if row else sources.fnum(weather.get("temperature_2m"))
     wind_direction = weather.get("wind_direction_10m")
     wind_toward = road_traffic(now.hour, wind_direction)["toward"]
-    smoke = sources.get_smoke_data() if sources.source_on("smoke") else False
+    smoke = sources.get_smoke_data() if not sources.source_state("smoke") else False
     pollen = sources.get_pollen_data(runtime.HOME_LAT, runtime.HOME_LON) if sources.pollen_live() else []
     rush = rush_state(now.hour)
 
@@ -395,7 +400,7 @@ def build_air_read(payload):
     elif w == "Keep it short":
         actions.append({"key": "run", "tone": "warn", "text": "Keep a run short and easy", "why": run_v["text"].split(". ")[0] + "."})
     elif w.startswith("After"):
-        actions.append({"key": "run", "tone": "warn", "text": "Run " + w.lower(), "why": f"The {runtime.ROAD.name} rush runs until {w[6:]}, with the wind toward {runtime.CFG.place.name}."})
+        actions.append({"key": "run", "tone": "warn", "text": "Run " + w.lower(), "why": f"The {runtime.ROAD.name} rush runs until {w[6:]}, with the wind toward {home_name()}."})
     elif w.startswith("Fine until"):
         run_item = {"key": "run", "tone": "good", "text": "Run before " + w[11:], "why": f"The air outside is clean; the {w[11:]} rush blows this way."}
     elif w == "Fine":

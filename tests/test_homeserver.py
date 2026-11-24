@@ -38,6 +38,9 @@ def test_writes_three_files(root):
     assert '- "8000:8000"' in compose
     assert "restart: unless-stopped" in compose
     assert "target: /config/config.toml" in compose and "read_only: true" in compose
+    # the history survives a new image (Task 18's rule, for the copy sent to the server)
+    assert "- homeair-history:/data" in compose and "HISTORY_FILE: /data/history.sqlite" in compose
+    assert "\nvolumes:\n  homeair-history:" in compose
     assert (folder / "config.toml").read_text() == CONFIG
 
 
@@ -49,12 +52,44 @@ def test_env_copy_is_private(root, capsys):
     assert TOKEN not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("missing", ["config.toml", ".env"])
-def test_stops_without_token_or_config(root, missing, capsys):
-    (root / missing).unlink()
+def test_stops_without_a_config(root, capsys):
+    (root / "config.toml").unlink()
     assert homeserver.prepare(root) == 1
     assert not (root / homeserver.FOLDER).exists()
     assert capsys.readouterr().out.strip()
+
+
+def test_runs_without_a_token_and_says_the_ip_line(root, capsys):
+    """Spec answer A: a server without the token is allowed, and the person is told an IP change stops live readings."""
+    (root / ".env").unlink()
+    assert homeserver.prepare(root) == 0
+    env = root / homeserver.FOLDER / ".env"
+    assert env.read_text() == "" and stat.S_IMODE(env.stat().st_mode) == ENV_FILE_MODE
+    assert homeserver.NO_TOKEN_LINE in capsys.readouterr().out
+    homeserver.prepare(root)   # with a token the line is not printed
+    (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
+    capsys.readouterr()
+    homeserver.prepare(root)
+    assert homeserver.NO_TOKEN_LINE not in capsys.readouterr().out
+
+
+def test_writes_hosts_for_found_serials(root, capsys):
+    """A container can't browse the Wi-Fi, so the copy carries the addresses found now; the computer's file never does,
+    and a serial not found gets no (or no old) host."""
+    import localnet
+    text = CONFIG + 'indoor_serial = "84fce6000001"\noutdoor_serial = "84fce6000002"\noutdoor_host = "192.168.1.99"\n'
+    (root / "config.toml").write_text(text)
+    seen = []
+    def find(serials):
+        seen.append(list(serials))
+        return [localnet.Found("84fce6000001", "I-9PSL", "3.1.4", "192.168.1.20", 80)]
+    assert homeserver.prepare(root, find=find) == 0
+    assert seen == [["84fce6000001", "84fce6000002"]]
+    copy = (root / homeserver.FOLDER / "config.toml").read_text()
+    assert 'indoor_host = "192.168.1.20"' in copy and "192.168.1.99" not in copy and "outdoor_host" not in copy
+    assert (root / "config.toml").read_text() == text
+    out = capsys.readouterr().out
+    assert "outdoor: not found" in out and "192.168" not in out
 
 
 def test_second_run_replaces_the_folder(root):
@@ -75,7 +110,7 @@ def test_prints_the_two_steps(root, capsys):
 def test_setup_command_dispatches(root, monkeypatch):
     import setup
     seen = []
-    monkeypatch.setattr(homeserver, "prepare", lambda r: seen.append(r) or 0)
+    monkeypatch.setattr(homeserver, "prepare", lambda r, find=None: seen.append(r) or 0)
     assert setup.main(["--home-server"], {}, root) == 0
     assert seen == [root]
 

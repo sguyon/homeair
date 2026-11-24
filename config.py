@@ -1,12 +1,15 @@
 """Reads the one config file that holds everything specific to a home."""
+import ipaddress
 import json
 import math
 import os
 import re
+import shutil
 import tempfile
 import tomllib
 from collections import namedtuple
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -101,6 +104,167 @@ def write_env_key(path, key, value):
         tmp.unlink(missing_ok=True)
 
 
+BACKUPS_KEPT = 5   # newest config.toml backups kept; older ones are deleted when a new one is made
+
+
+def backups(cfg: Path):
+    """Backups of cfg, newest first, by when they were made: each copy gets the time it was made as its modified time
+    (copy_now)."""
+    found = [p for p in cfg.parent.glob(cfg.name + ".bak-*") if p.is_file()]
+    return sorted(found, key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
+
+
+def unique(cfg: Path, kind):
+    """config.toml.<kind>-<UTC time>, with -2, -3... when one was already made in the same second."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest, n = cfg.with_name(f"{cfg.name}.{kind}-{stamp}"), 2
+    while dest.exists():
+        dest, n = cfg.with_name(f"{cfg.name}.{kind}-{stamp}-{n}"), n + 1
+    return dest
+
+
+def copy_now(src: Path, dest: Path):
+    """Copy the contents and permissions, with now as the modified time: copy2 would keep the config's old time, and an
+    older backup could then sort as the newest."""
+    shutil.copyfile(src, dest)
+    shutil.copymode(src, dest)
+    os.utime(dest)
+
+
+def backup_config(path: Path) -> Path:
+    """Copy config.toml to config.toml.bak-<UTC time>, keep the BACKUPS_KEPT newest, and return the new file."""
+    dest = unique(path, "bak")
+    copy_now(path, dest)
+    for old in backups(path)[BACKUPS_KEPT:]:
+        old.unlink()
+    return dest
+
+
+def _zone(name):
+    """The name when it is an IANA timezone name, else None."""
+    try:
+        ZoneInfo(name)
+        return name
+    except (ValueError, ZoneInfoNotFoundError, OSError):
+        return None
+
+
+def local_timezone(env=os.environ, localtime=Path("/etc/localtime")) -> str:
+    """This computer's timezone name: TZ when it is a valid name, else the name after zoneinfo/ in the /etc/localtime
+    link, else UTC."""
+    name = str(env.get("TZ", "")).strip().lstrip(":")
+    if name and not name.startswith("/") and _zone(name):
+        return name
+    try:
+        target = os.readlink(localtime)
+    except OSError:
+        return "UTC"
+    name = target.split("zoneinfo/", 1)[1] if "zoneinfo/" in target else ""
+    return name if name and _zone(name) else "UTC"
+
+
+MONITOR_KEY_ORDER = ("", "_id", "_serial", "_host")   # a monitor's [place] keys in the order they are written: <kind>, <kind>_id...
+SECTION_RE = re.compile(r"\s*\[")
+
+
+def set_monitor_keys(text: str, values: dict) -> str:
+    """config.toml text with the monitors' [place] keys set (a string or an integer) or removed (None). values is
+    {"indoor": {"indoor_id": 7, "indoor_host": None}}. Every other line and comment stays as it is, in order; a new key
+    goes after the monitor's last key before it in MONITOR_KEY_ORDER, else after the monitor's other keys, else at the
+    end of [place]; [place] is added at the end when absent. Single-line values only, as the file's keys are."""
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, l in enumerate(lines) if re.fullmatch(r"\s*\[place\]\s*(#.*)?", l.rstrip("\r\n"))), None)
+    if start is None:
+        wanted = [(k, v) for kv in values.values() for k, v in kv.items() if v is not None]
+        if not wanted:
+            return text
+        head = "".join(lines)
+        if head and not head.endswith("\n"):
+            head += "\n"
+        return head + ("\n" if head else "") + "[place]\n" + "".join(f"{k} = {_toml_value(v)}\n" for k, v in wanted)
+    end = next((i for i in range(start + 1, len(lines)) if SECTION_RE.match(lines[i])), len(lines))
+    if not lines[end - 1].endswith("\n"):
+        lines[end - 1] += "\n"
+    for kind, kv in values.items():
+        for key in sorted(kv, key=lambda k: MONITOR_KEY_ORDER.index(k.removeprefix(kind)) if k.removeprefix(kind) in MONITOR_KEY_ORDER else 99):
+            value = kv[key]
+            at = next((i for i in range(start + 1, end) if re.match(rf"\s*{re.escape(key)}\s*=", lines[i])), None)
+            if value is None:
+                if at is not None:
+                    del lines[at]
+                    end -= 1
+                continue
+            line = f"{key} = {_toml_value(value)}\n"
+            if at is not None:
+                lines[at] = line
+                continue
+            before = MONITOR_KEY_ORDER.index(key.removeprefix(kind)) if key.removeprefix(kind) in MONITOR_KEY_ORDER else len(MONITOR_KEY_ORDER)
+            mine = [i for i in range(start + 1, end) if any(re.match(rf"\s*{re.escape(kind + s)}\s*=", lines[i]) for s in MONITOR_KEY_ORDER)]
+            earlier = [i for i in mine if any(re.match(rf"\s*{re.escape(kind + s)}\s*=", lines[i]) for s in MONITOR_KEY_ORDER[:before])]
+            if earlier:
+                where = max(earlier) + 1
+            elif mine:
+                where = min(mine)
+            else:   # after the last key line of [place], not after the blank lines or comments that precede the next section
+                keys = [i for i in range(start + 1, end) if re.match(r"\s*[A-Za-z0-9_-]+\s*=", lines[i])]
+                where = (max(keys) + 1) if keys else start + 1
+            lines.insert(where, line)
+            end += 1
+    return "".join(lines)
+
+
+def add_key(text: str, section: str, key: str, value) -> str:
+    """config.toml text with `key = value` after the last key of [section] ([section] added at the end when absent);
+    the text as it is when [section] already sets the key. Every other line stays as it is, in order."""
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, l in enumerate(lines) if re.fullmatch(rf"\s*\[{re.escape(section)}\]\s*(#.*)?", l.rstrip("\r\n"))), None)
+    line = f"{key} = {_toml_value(value)}\n"
+    if start is None:
+        head = "".join(lines)
+        if head and not head.endswith("\n"):
+            head += "\n"
+        return head + ("\n" if head else "") + f"[{section}]\n" + line
+    end = next((i for i in range(start + 1, len(lines)) if SECTION_RE.match(lines[i])), len(lines))
+    if any(re.match(rf"\s*{re.escape(key)}\s*=", lines[i]) for i in range(start + 1, end)):
+        return text
+    if not lines[end - 1].endswith("\n"):
+        lines[end - 1] += "\n"
+    keys = [i for i in range(start + 1, end) if re.match(r"\s*[A-Za-z0-9_-]+\s*=", lines[i])]
+    lines.insert((max(keys) + 1) if keys else start + 1, line)
+    return "".join(lines)
+
+
+def config_path(cfg, env: Mapping[str, str] = os.environ, root: Path = ROOT) -> Path | None:
+    """The file cfg was read from, for the app to write it back: CONFIG_FILE's or root/config.toml. None for the demo
+    and CONFIG_TOML (a variable: the app can't change it)."""
+    if cfg is None or cfg.demo:
+        return None
+    if cfg.source == "CONFIG_FILE":
+        return Path(env.get("CONFIG_FILE", "").strip())
+    return root / "config.toml" if cfg.source == "config.toml" else None
+
+
+def replace_text(path: Path, text: str):
+    """Write the file whole or not at all (a temporary file beside it, then a rename), keeping its permissions. A
+    symlink's target is written, not the link."""
+    target = path.resolve() if path.is_symlink() else path
+    fd, name = tempfile.mkstemp(prefix=f".{target.name}-", dir=target.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        shutil.copymode(target, tmp)
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _toml_value(value) -> str:
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) else json.dumps(str(value))
+
+
 class ConfigError(Exception):
     """The message names the source and the problem."""
 
@@ -111,9 +275,9 @@ Here = namedtuple("Here", "key lat lon tz")   # a place the fetchers can look at
 
 @dataclass(frozen=True)
 class Place:
-    name: str
-    lat: float
-    lon: float
+    name: str | None      # None with lat and lon: a home that hasn't been given its place yet (the page says "Your home")
+    lat: float | None
+    lon: float | None
     timezone: str
     indoor: str | None    # None: no indoor monitor
     outdoor: str | None   # None: no outdoor monitor; Config.outdoor_from says where outdoor PM2.5 comes from
@@ -121,6 +285,10 @@ class Place:
     region: str | None = None   # city or region for a few sentences ("the usual New York season"); None: neutral wording
     indoor_id: int | None = None  # account monitor chosen at setup; older configs select by type.
     outdoor_id: int | None = None
+    indoor_serial: str | None = None    # the monitor's serial, lowercase: how it is found and read on the Wi-Fi
+    outdoor_serial: str | None = None
+    indoor_host: str | None = None      # "a.b.c.d" or "a.b.c.d:port": only in the home-server copy, written by setup
+    outdoor_host: str | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +383,55 @@ def _monitor_id(place, kind, source):
     return value
 
 
+SERIAL_RE = re.compile(r"[0-9a-f]{12}")   # an AirGradient serial: 12 hex characters (the monitor's MAC address)
+MONITOR_KINDS = ("indoor", "outdoor")
+
+
+def _serial(place, kind, source):
+    value = place.get(kind + "_serial")
+    if value is None:
+        return None
+    if not (isinstance(value, str) and SERIAL_RE.fullmatch(value.strip().lower())):
+        raise ConfigError(f"{source}: place.{kind}_serial must be the monitor's 12 hex characters, like 84fce612345a")
+    return value.strip().lower()
+
+
+def split_host(host: str) -> tuple[str, int | None]:
+    """("192.168.1.5", None) from "192.168.1.5", ("127.0.0.1", 8081) from "127.0.0.1:8081"."""
+    address, _, port = host.partition(":")
+    return address, int(port) if port else None
+
+
+def is_own_network(ip: ipaddress.IPv4Address) -> bool:
+    """Whether an address is on the home's own network: private, link-local or loopback. The one check for a configured
+    host and for an address a monitor announced by mDNS."""
+    return ip.is_private or ip.is_link_local or ip.is_loopback
+
+
+def _host(place, kind, serial, source):
+    """A monitor's address, only in the home-server copy: the server fetches it, so it must be a private, link-local or
+    loopback IPv4 address (optional :port), with no scheme or path, and its serial must be set."""
+    value = place.get(kind + "_host")
+    if value is None:
+        return None
+    where = f"place.{kind}_host"
+    if not isinstance(value, str):
+        raise ConfigError(f"{source}: {where} must be text, like \"192.168.1.20\"")
+    value = value.strip()
+    address, _, port = value.partition(":")
+    try:
+        ip = ipaddress.IPv4Address(address)
+    except ValueError as e:
+        raise ConfigError(f"{source}: {where} must be an IPv4 address on your network, like 192.168.1.20") from e
+    if not is_own_network(ip):
+        raise ConfigError(f"{source}: {where} must be an address on your own network (private, link-local or loopback)")
+    if ":" in value and not (port.isdigit() and 0 < int(port) < 65536):
+        raise ConfigError(f"{source}: {where} has a port that is not a number from 1 to 65535")
+    if serial is None:
+        raise ConfigError(f"{source}: {where} needs place.{kind}_serial")
+    return value
+
+
 def _flag(v, where: str, source: str) -> bool:
     if not isinstance(v, bool):
         raise ConfigError(f"{source}: {where} must be true or false")
@@ -259,11 +476,19 @@ def _temp_unit(home: dict, source: str) -> str:
     return v.strip().upper()
 
 
+def located(cfg) -> bool:
+    """True when the config knows where the home is. A home without a place is valid: it reads its monitors, and every
+    source that needs a place (weather, pollen, smoke, the neighbors, the outdoor source) waits for one."""
+    return cfg is not None and cfg.place is not None and cfg.place.lat is not None and cfg.place.lon is not None
+
+
 def _outdoor_from(sources_t: dict, place: Place, source: str) -> int | str | None:
     """sources.outdoor_from: needed without an outdoor monitor, ignored with one."""
     if place.outdoor is not None:
         return None
     if "outdoor_from" not in sources_t:
+        if place.indoor is None or place.lat is None:   # no monitor yet, or no place yet: nothing to pair an outdoor source with
+            return None
         raise ConfigError(f"{source}: no outdoor monitor, so sources.outdoor_from is needed: a public monitor's id, \"area\" or \"model\"")
     v = sources_t["outdoor_from"]
     if (isinstance(v, int) and not isinstance(v, bool) and v > 0) or v in OUTDOOR_FROM_KINDS:
@@ -285,11 +510,15 @@ def _parse(text: str, source: str, root: Path, demo: bool) -> Config:
     p = raw.get("place")
     if not isinstance(p, dict):
         raise ConfigError(f"{source}: missing [place]")
+    # name, lat and lon come together or not at all: a home found on the Wi-Fi has only its timezone until it is given a place
+    given = [k for k in ("name", "lat", "lon") if k in p]
+    if given and len(given) < 3:
+        raise ConfigError(f"{source}: place.name, place.lat and place.lon go together; missing place.{next(k for k in ('name', 'lat', 'lon') if k not in p)}")
     place = Place(
-        name=str(_need(p, "name", "place", source)),
+        name=str(p["name"]) if given else None,
         # rounded to about 1 km whatever the file says: the place leaves the server (weather, pollen) and shows on the page
-        lat=round(_num(_need(p, "lat", "place", source), "place.lat", source), PLACE_DECIMALS),
-        lon=round(_num(_need(p, "lon", "place", source), "place.lon", source), PLACE_DECIMALS),
+        lat=round(_num(p["lat"], "place.lat", source), PLACE_DECIMALS) if given else None,
+        lon=round(_num(p["lon"], "place.lon", source), PLACE_DECIMALS) if given else None,
         timezone=str(_need(p, "timezone", "place", source)),
         indoor=_monitor_name(p, "indoor"),
         outdoor=_monitor_name(p, "outdoor"),
@@ -298,8 +527,13 @@ def _parse(text: str, source: str, root: Path, demo: bool) -> Config:
         indoor_id=_monitor_id(p, "indoor", source),
         outdoor_id=_monitor_id(p, "outdoor", source),
     )
-    if place.indoor is None and place.outdoor is None:
-        raise ConfigError(f"{source}: [place] needs indoor, outdoor or both (the names of your monitors)")
+    serials = {k: _serial(p, k, source) for k in MONITOR_KINDS}
+    hosts = {k: _host(p, k, serials[k], source) for k in MONITOR_KINDS}
+    for k in MONITOR_KINDS:
+        if serials[k] and getattr(place, k) is None:
+            raise ConfigError(f"{source}: place.{k}_serial needs place.{k}, the monitor's name")
+    place = replace(place, indoor_serial=serials["indoor"], outdoor_serial=serials["outdoor"],
+                    indoor_host=hosts["indoor"], outdoor_host=hosts["outdoor"])
     try:
         ZoneInfo(place.timezone)
     except (ValueError, ZoneInfoNotFoundError) as e:
@@ -337,6 +571,8 @@ def _parse(text: str, source: str, root: Path, demo: bool) -> Config:
                 points = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as e:
                 raise ConfigError(f"{source}: cannot read road.route {route}: {e}") from e
+            if place.lat is None:
+                raise ConfigError(f"{source}: road.toward is needed until the home has a place (place.lat and place.lon)")
             try:
                 toward = toward_range(place.lat, place.lon, points)
             except ConfigError as e:
@@ -380,6 +616,22 @@ def load_config(env: Mapping[str, str] = os.environ, root: Path = ROOT) -> Confi
     return None
 
 
+def monitors(cfg: Config) -> list:
+    """The home's monitors that have a serial, as localnet.Monitor (indoor first). The id is the cloud id when the config
+    has one, else the fixed local id. localnet is imported here so the config loads without zeroconf."""
+    from localnet import LOCAL_IDS, Monitor
+    p, out = cfg.place, []
+    for kind in MONITOR_KINDS:
+        serial = getattr(p, kind + "_serial")
+        if serial is None:
+            continue
+        host = getattr(p, kind + "_host")
+        address, port = split_host(host) if host else (None, None)
+        out.append(Monitor(kind=kind, serial=serial, name=getattr(p, kind),
+                           location_id=getattr(p, kind + "_id") or LOCAL_IDS[kind], host=address, **({"port": port} if port else {})))
+    return out
+
+
 def route_path(route: str, root: Path = ROOT) -> Path:
     """road.route is relative to the app's folder unless absolute."""
     return Path(route) if Path(route).is_absolute() else root / route
@@ -402,7 +654,10 @@ def airgradient_map(lat, lon, zoom=15) -> str:
 
 
 def place_links(p: Place) -> dict:
-    """Outside pages about a place (anything with lat, lon and pollen_zip), the home's by default. NWS and pollen.com are US only."""
+    """Outside pages about a place (anything with lat, lon and pollen_zip), the home's by default. NWS and pollen.com are US only.
+    A home without a place has none."""
+    if p.lat is None or p.lon is None:
+        return {}
     lat, lon = round(p.lat, 2), round(p.lon, 2)
     links = {
         "forecast": f"https://forecast.weather.gov/MapClick.php?lat={lat}&lon={lon}",
@@ -419,7 +674,8 @@ def public_view(cfg: Config, root: Path = ROOT) -> dict:
     p = cfg.place
     view = {
         "place": {
-            "name": p.name, "lat": round(p.lat, 2), "lon": round(p.lon, 2), "timezone": p.timezone,
+            "name": p.name, "lat": None if p.lat is None else round(p.lat, 2), "lon": None if p.lon is None else round(p.lon, 2),
+            "timezone": p.timezone,
             "indoor": p.indoor, "outdoor": p.outdoor, "pollen_zip": p.pollen_zip, "region": p.region,
         },
         "links": place_links(p),
@@ -430,10 +686,10 @@ def public_view(cfg: Config, root: Path = ROOT) -> dict:
         "sources": dict(cfg.sources),
         "temp_unit": cfg.temp_unit,   # the unit the page starts in; a viewer's own pick wins
     }
-    if cfg.outdoor_from is not None:
+    if cfg.outdoor_from is not None and located(cfg):
         of = cfg.outdoor_from
         view["outdoor_from"] = {"kind": of if isinstance(of, str) else "monitor", "id": None if isinstance(of, str) else of}
     if cfg.road:
         view["road"] = {"name": cfg.road.name, "kind": cfg.road.kind, "toward": list(cfg.road.toward), "rush": [list(r) for r in cfg.road.rush],
-                        "distance_km": road_distance_km(p.lat, p.lon, cfg.road, root)}
+                        "distance_km": None if p.lat is None else road_distance_km(p.lat, p.lon, cfg.road, root)}
     return view
