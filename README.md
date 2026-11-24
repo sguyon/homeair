@@ -37,6 +37,12 @@ The agent finds your monitors on the Wi-Fi, writes your settings and runs the pa
 
 **Just trying it?** Without settings or a token, Home Air opens the demo: `uv run --with-requirements requirements.txt server.py`, then http://localhost:5555.
 
+### On your phone
+
+On the same Wi-Fi: in Home Air's folder, run `HOST=0.0.0.0 ./homeair start-at-login on` (Home Air then starts at each login, and anyone on that Wi-Fi can open the page), then open `http://<the computer's name>.local:5555` on the phone. After `./homeair home-server`, the address is `http://<the server>:8000`. Away from home, use Home Air online ([DEPLOYMENT.md](DEPLOYMENT.md)).
+
+To add the page to the home screen: Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); the page then opens like an app. It works offline only on https, which Home Air online (on Railway) has.
+
 ## Features
 
 - **Actions.** For CO₂ and humidity inside, PM2.5 and pollen outside: "Open a window for 10 min", "Keep windows shut", each with one line on why.
@@ -46,7 +52,7 @@ The agent finds your monitors on the Wi-Fi, writes your settings and runs the pa
 - Weather, pollen, wildfire smoke, and a nearby highway's exhaust when the wind blows it your way
 - Public AirGradient monitors nearby, to see whether bad air is regional or just around your home
 - A live sky behind the page, with the real sun, clouds, rain and haze. Useless, but my toddler's favorite feature :)
-- Installs on your phone's home screen like an app (a PWA): [how](SETUP.md#open-the-page-on-a-phone)
+- Installs on your phone's home screen like an app (a PWA): [how](#on-your-phone)
 
 ## Why I built it
 

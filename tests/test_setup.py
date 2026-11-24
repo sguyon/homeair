@@ -638,8 +638,8 @@ def test_setup_md_ends_the_turn_on_the_token_and_waits_after_done():
 def test_setup_md_says_where_the_link_is_and_how_to_stop_it():
     # review, Important 4, then --start (14 Nov): the start command prints the setup link and restarts the copy it started
     text = doc("SETUP.md")
-    assert "`./homeair connect` prints the token form's address" in text and "?code=" not in text
-    assert "Run the start command again to restart the app" in text
+    assert "run `./homeair connect` and open the address it prints" in text and "?code=" not in text
+    assert "`./homeair start` starts or restarts Home Air" in text
 
 
 def test_status_suggests_starting_in_the_background():

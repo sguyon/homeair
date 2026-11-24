@@ -182,16 +182,4 @@ Afterwards: "Home Air online is at <the address>. Home Air on this computer stil
 
 ## Commands for later
 
-`./homeair help` lists them all.
-
-- `./homeair start`: starts the app in the background (`PORT=` first for a port other than 5555; the log is `app.log`). Without a saved token, `./homeair connect` prints the token form's address (`http://localhost:5555/connect`). Run the start command again to restart the app.
-- `./homeair stop` stops what `./homeair start` started; Home Air started at login runs until `./homeair start-at-login off`. `./homeair start-at-login on` (or `off`) works on a Mac, or Linux with systemd; elsewhere the command says why not.
-- `./homeair check [address]`: read-only checks of `config.toml` and the page (this computer's, or a home server's or Railway's address); `Live OK` means each monitor has a recent reading.
-- `./homeair skill add` (or `remove`, `status`): never replaces another skill, and says so; `--url <address>` makes the skill read Home Air on a home server or online, `--url local` this computer's again. Other AI assistants: [docs/agents.md](docs/agents.md).
-- `./homeair status` (each part of setup and the next step) and `./homeair monitors` (the monitors found and which are read) change nothing.
-
-`config.toml` holds names, profiles, drying equipment (`[home] appliances`) and limits ([config.example.toml](config.example.toml)); after editing it or `.env` by hand, run `./homeair start`. Keep a private copy of `config.toml`: it isn't in git. Optional: [pollen, road tracing, new profiles, the Vercel demo](docs/optional.md). A missing reading: check the monitor is online and set as indoor or outdoor in AirGradient.
-
-## Open the page on a phone
-
-On the same Wi-Fi, run `HOST=0.0.0.0 ./homeair start-at-login on` (Home Air then starts at each login, and anyone on that Wi-Fi can open the page) and open `http://<the computer's name>.local:5555` on the phone. Away from home, use the Railway address ([DEPLOYMENT.md](DEPLOYMENT.md)). To add the page to the home screen: Share › Add to Home Screen (iPhone, Safari) or ⋮ › Install app (Android, Chrome); it then opens like an app. The page works offline only on https, which the Railway address has.
+`./homeair help` lists the commands: `./homeair start` starts or restarts Home Air, `./homeair start-at-login on` (or `off`) starts it at each login (on a Mac, or Linux with systemd), and `./homeair status` shows what's done and what's left. To change the settings by hand, edit `config.toml` ([config.example.toml](config.example.toml)), then run `./homeair start`; keep a private copy of it, since it isn't in git. A missing reading: check that the monitor is online and set as indoor or outdoor in AirGradient. Optional extras: [pollen, road tracing, new profiles, the Vercel demo](docs/optional.md). To open the page on a phone: [On your phone](README.md#on-your-phone).
