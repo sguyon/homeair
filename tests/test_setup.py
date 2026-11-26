@@ -380,6 +380,20 @@ def test_saved_monitor_ids_filter_the_page_readings(root, monkeypatch, capsys):
     assert len(rows) == 3
 
 
+def test_a_portable_go_is_never_taken_as_the_home_monitor(monkeypatch):
+    """An AirGradient Go (model P-…) moves with its owner: an account that has one, its place set to indoor, must not
+    give the home a second indoor monitor (an older config without ids picks by type), unless its id was chosen."""
+    import sources
+    from types import SimpleNamespace
+    go = {"locationId": 7009, "locationType": "indoor", "locationName": "Go", "model": "P-1PSG", "timestamp": NOW}
+    untyped_go = {**go, "locationId": 7010, "locationType": None}
+    assert sources.choose_monitors([INDOOR, go, OUTDOOR]) == {"indoor": INDOOR, "outdoor": OUTDOOR}
+    assert sources.choose_monitors([INDOOR, go, OUTDOOR], indoor_id=7009)["indoor"]["locationId"] == 7009
+    place = SimpleNamespace(indoor="Bedroom", outdoor="Porch", indoor_id=None, outdoor_id=None)
+    monkeypatch.setattr(sources, "runtime", SimpleNamespace(CFG=SimpleNamespace(demo=False, place=place)))
+    assert sources.place_rows([INDOOR, go, untyped_go, OUTDOOR]) == [INDOOR, OUTDOOR]
+
+
 def test_non_integer_monitor_ids_are_invalid(root):
     from config import ConfigError
     text = '[place]\nname="Home"\nlat=40\nlon=-74\ntimezone="America/New_York"\nindoor="Room"\nindoor_id="bad"\n[sources]\noutdoor_from="model"\n'

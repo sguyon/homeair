@@ -259,16 +259,27 @@ class MonitorChoice(ValueError):
     """Today's rule can't pick the account's monitor for a kind by itself; the message says what to choose."""
 
 
+# AirGradient model names starting "P-" are portable (the AirGradient Go, P-1PSG): a monitor that moves with its owner
+# is never the home's indoor or outdoor monitor unless its id was chosen.
+PORTABLE_PREFIX = "P-"
+
+
+def _portable(row):
+    return str(row.get("model") or "").startswith(PORTABLE_PREFIX)
+
+
 def _cloud_id(row):
     value = row.get("locationId")
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def choose_monitors(rows, indoor_id=None, outdoor_id=None, kinds=config.MONITOR_KINDS):
-    """Today's rule, one account monitor per kind: the one with the id given, else the only one of that kind. Monitors
+    """Today's rule, one account monitor per kind: the one with the id given, else the only one of that kind (a portable
+    Go counts only when given by id). Monitors
     whose kind isn't set in AirGradient count only when given by id, or as the only candidate for neither kind.
     {kind: row}; MonitorChoice when it can't choose by itself, or chooses nothing. The same rule as setup's."""
     wanted_ids = {"indoor": indoor_id, "outdoor": outdoor_id}
+    rows = [r for r in rows if not _portable(r) or str(r.get("locationId")) in {str(i) for i in wanted_ids.values() if i is not None}]
     chosen = {}
     unknown = [r for r in rows if r.get("locationType") not in ("indoor", "outdoor")]
     for kind in kinds:
@@ -673,7 +684,10 @@ def place_rows(rows):
         if not isinstance(row, dict):
             out.append(row)
             continue
-        kind = next((k for k, mid in selected.items() if mid is not None and mid == row.get("locationId")), row.get("locationType"))
+        kind = next((k for k, mid in selected.items() if mid is not None and mid == row.get("locationId")), None)
+        if kind is None and _portable(row):
+            continue
+        kind = kind or row.get("locationType")
         if kind in ("indoor", "outdoor"):
             if kind not in selected or (selected[kind] is not None and selected[kind] != row.get("locationId")):
                 continue
