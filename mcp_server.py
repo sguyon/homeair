@@ -39,6 +39,9 @@ INSTRUCTIONS = ("Home Air reads one home's air monitors and outdoor data, and li
                 "terminal, on a phone, in a messaging app or aloud. "
                 "If a reading is stale (stale: true), start by saying when it was taken: "
                 "'the last reading is from 9:10 PM'. "
+                "If an input the question depends on is missing (inputs), add one sentence after the answer saying so, "
+                "with its why ('Pollen isn't checked: this Home Air has no pollen key'), only when it could change the "
+                "answer; never for an input that is off. "
                 "This is information about the air, not medical advice.")
 
 # JSON-RPC error codes (https://www.jsonrpc.org/specification#error_object)

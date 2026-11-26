@@ -31,6 +31,8 @@ def test_reference_output_unchanged(monkeypatch):
     for o in out.values():
         assert o["context"].pop("road") == {"name": "BQE", "toward": True}
         assert o["context"].pop("status") == {"pollen": "ok", "smoke": "ok", "road": "ok", "nearby": "ok"}
+        # the inputs for an assistant (24 Nov): every source answers for the reference home
+        assert {k: v["status"] for k, v in o["read"].pop("inputs").items()} == {"weather": "ok", "pollen": "ok", "smoke": "ok", "road": "ok"}
     if os.environ.get("UPDATE_GOLDEN") == "1":
         GOLDEN.write_text(json.dumps(out, indent=1, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
         pytest.skip("golden written")

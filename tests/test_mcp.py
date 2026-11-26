@@ -84,3 +84,38 @@ def test_source_line_names_a_monitor_once():
     assert line == "Main monitor, 12:58 AM"
     line = agent_tools._source_line({"name": "Bedroom", "at": "2026-11-24T05:58:51Z"}, "indoor", settings)
     assert line == "Bedroom monitor, 12:58 AM"
+
+
+def test_inputs_say_what_is_missing_off_or_stale(client, monkeypatch):
+    """"Low pollen" and "no pollen key" must not read the same to an assistant (ChatGPT's review, 24 Nov)."""
+    monkeypatch.setattr(server, "MODE", "live")
+    row = {"locationId": 1, "locationName": "Bedroom", "locationType": "indoor", "rco2": 700, "pm02": 4, "rhum": 48, "atmp": 21,
+           "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat().replace("+00:00", "Z")}
+    monkeypatch.setattr(sources, "current_rows", lambda force=False: ([row], {"state": "fresh", "age": 0}))
+    monkeypatch.setattr(sources, "pollen_state", lambda: "not_set_up")
+    inputs = rpc(client, "tools/call", {"name": "home_air_now", "arguments": {}}).get_json()["result"]["structuredContent"]["inputs"]
+    assert set(inputs) == {"indoor", "outdoor", "weather", "pollen", "smoke", "road"}
+    assert inputs["pollen"] == {"status": "missing", "source": "Google Pollen", "why": "no pollen key"}
+    assert inputs["indoor"]["status"] == "stale" and inputs["indoor"]["at"] == row["timestamp"]
+    assert all(e["status"] in ("ok", "stale", "missing", "off") for e in inputs.values())
+    assert all(e.get("why") for e in inputs.values() if e["status"] == "missing")
+    monkeypatch.setattr(sources, "pollen_state", lambda: "off")
+    inputs = rpc(client, "tools/call", {"name": "home_air_now", "arguments": {}}).get_json()["result"]["structuredContent"]["inputs"]
+    assert inputs["pollen"]["status"] == "off"
+    text = json.dumps(inputs)
+    for secret in ("serial", "latitude", "lat", "lon"):
+        assert f'"{secret}"' not in text, secret
+
+
+def test_inputs_word_a_stale_monitor_and_a_fallen_back_source():
+    """A stale reading kept from the Wi-Fi isn't "on the Wi-Fi" now; an indoor-only home's outdoor source that fell
+    back says so, and a stale public monitor reading is stale (the code review, 24 Nov)."""
+    reading = {"at": "2026-11-24T10:00:00Z", "stale": True}
+    entry = agent_tools._monitor_input(reading, {"via": "local", "stale": True}, "indoor", {"place": {"indoor": "Bedroom"}})
+    assert entry == {"status": "stale", "source": "the monitor's last stored reading", "at": reading["at"]}
+    import air_read
+    words = air_read.source_inputs({}, [], {"kind": "model", "fallback": "monitor"})["outdoor"]
+    assert words["status"] == "ok" and "isn't reporting" in words["source"]
+    merged = agent_tools._merge_inputs({"outdoor": {"status": "ok", "source": "a public monitor nearby"}},
+                                       {"outdoor": {"status": "stale", "at": reading["at"]}})
+    assert merged["outdoor"] == {"status": "stale", "source": "a public monitor nearby", "at": reading["at"]}

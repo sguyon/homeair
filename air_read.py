@@ -67,6 +67,40 @@ def home_name():
     return runtime.CFG.place.name or "your home"
 
 
+# What speaks for outside in an indoor-only home (sources.outdoor_source's kind), in the words an assistant repeats.
+OUTDOOR_SOURCE_WORDS = {"monitor": "a public monitor nearby", "area": "the area's public monitors",
+                        "model": "the air-quality forecast model"}
+# Why an input is missing, from sources' states ("needs_place", "not_set_up", or on but no answer).
+MISSING_WHY = {"needs_place": "no place set yet", "not_set_up": "no pollen key", "error": "no answer"}
+
+
+def source_inputs(weather, pollen, source):
+    """Each outside input the read uses, for an assistant: {"status": ok | missing | off, "source", "why" when
+    missing}. "off" is the household's choice (turned off in config.toml, no road), not something to mention."""
+    def entry(state, name):
+        if state == "off":
+            return {"status": "off", "source": name}
+        if state in MISSING_WHY:
+            return {"status": "missing", "source": name, "why": MISSING_WHY[state]}
+        return {"status": "ok", "source": name}
+    answered = any(weather.get(k) is not None for k in ("temperature_2m", "wind_direction_10m", "relative_humidity_2m"))
+    pollen_state = sources.pollen_state()
+    smoke_state = sources.source_state("smoke") or ("ok" if sources.smoke_status().get("checked") else "error")
+    road = active_road()
+    out = {"weather": entry("ok" if answered else "error" if sources.place_known() else "needs_place", "Open-Meteo"),
+           "pollen": entry(("ok" if pollen else "error") if pollen_state == "ok" else pollen_state, "Google Pollen"),
+           "smoke": entry(smoke_state, "NOAA's smoke map"),
+           "road": entry("ok", road.name) if road else entry("off", "no road set")}
+    if source is not None:   # an indoor-only home: what speaks for outside (the home's own outdoor monitor is the agent's)
+        words = OUTDOOR_SOURCE_WORDS.get(source.get("kind"), "an outdoor estimate")
+        if source.get("fallback") == "monitor":
+            words += " (the public monitor nearby isn't reporting)"
+        elif source.get("fallback") == "list":
+            words += " (AirGradient's map didn't answer)"
+        out["outdoor"] = entry("ok", words)
+    return out
+
+
 def active_road():
     """The road /api/context reports: the home's, or None. demo/data.py turns it off for a public monitor."""
     return runtime.ROAD
@@ -435,6 +469,7 @@ def build_air_read(payload):
     # the new card: items, profiles and the day chart, all from the rules (summary.py)
     summary_in = summary_inputs(payload, co2, rh, rh_out, t_in, t_out, pm_out, pts_in, pts_out, now, source)
     result["summary"] = safe_summary(summary_in)
+    result["inputs"] = source_inputs(weather, pollen, source)
     if source is not None:   # the facts the explanations name the source with (phrases.py and the page word them)
         result["outdoor_source"] = {k: source[k] for k in SUMMARY_SOURCE_FACTS}
 
