@@ -50,6 +50,8 @@ In `read`:
 - `read.status`: `good`, `warn` or `bad`, the worst of the actions.
 - Units: PM2.5 in ug/m3, CO2 in ppm, humidity %, temperature in Celsius (convert if the user thinks in Fahrenheit; `home.temp_unit` is what the page shows).
 
+`inputs`: what the answer is built from (`indoor`, `outdoor`, `weather`, `pollen`, `smoke`, `road`), each with `status` (`ok`, `stale`, `missing`, or `off` when the household doesn't use it), `source`, and `why` when it is missing ("no pollen key", "no answer").
+
 `history` returns per metric `latest`, `min`, `max`, `max_at` and `hourly_mean`, times in the home's local time with its UTC offset, up to `until`. Compare with `limits` (CO2 `co2`, PM2.5 `pm`, humidity `rh_damp` and `rh_dry`).
 
 ## How to answer
@@ -63,7 +65,8 @@ In `read`:
    - Two to four sentences, about 60 words, unless asked for more. No list, even for several numbers.
 6. A "should I" about one room: the monitors are per home, not per room. Say which monitor the number comes from.
 7. If a reading is stale (`stale: true`), start by saying when it was taken: "the last reading is from 9:10 PM".
-8. This is information about the air, not medical advice. For symptoms, point to a clinician.
+8. If an input the question depends on is `missing` (`inputs`), add one sentence after the answer saying so, with its `why`: "Pollen isn't checked: this Home Air has no pollen key." Only when that input could change the answer; never for `off`.
+9. This is information about the air, not medical advice. For symptoms, point to a clinician.
 
 ## Changing the home
 

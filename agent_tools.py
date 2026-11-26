@@ -33,7 +33,7 @@ TOOLS = [
             "temperature) and what to do, each action with when and why (open or close a window, air a room, run the "
             "purifier or dehumidifier), plus whether the air suits each person type the home chose (toddler, sinus and "
             "allergy, runner). Use it for: is my air OK, is there enough fresh air, should I open the window, is it OK "
-            "to run, cook or sleep with the window open. Each reading has the time it was measured (UTC). Not for "
+            "to run, cook or sleep with the window open. Each reading has the time it was measured (UTC), and `inputs` says which sources answered (missing ones say why). Not for "
             "other places, weather forecasts or medical advice."),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "annotations": {"title": "Home air now", **READ_ONLY},
@@ -128,9 +128,37 @@ def _rows(fetch):
     return rows
 
 
+# Where a monitor's reading came from (sources.home_rows' "via"), in the words an assistant repeats.
+MONITOR_WORDS = {"local": "the monitor, on the Wi-Fi", "cloud": "the monitor, from AirGradient's cloud",
+                 "stale": "the monitor's last stored reading"}
+
+
+def _monitor_input(reading, row, kind, settings):
+    """A monitor as an input: ok or stale with its time, missing when the home has one and it gave nothing, off when
+    the home has none of that kind."""
+    if reading is None:
+        if (settings.get("place") or {}).get(kind) is None:
+            return {"status": "off", "source": f"no {kind} monitor"}
+        return {"status": "missing", "source": f"the {kind} monitor", "why": "no reading"}
+    stale = reading.get("stale") or (row or {}).get("stale") is True
+    via = "stale" if (row or {}).get("stale") is True else (row or {}).get("via")   # a kept reading, wherever it came from
+    return {"status": "stale" if stale else "ok", "source": MONITOR_WORDS.get(via, f"the {kind} monitor"),
+            "at": reading.get("at")}
+
+
+def _merge_inputs(read_inputs, monitors):
+    """The read's outside inputs over the monitors' entries; an indoor-only home's outdoor source keeps its words but
+    takes the reading's stale status and time (a public monitor's reading two hours old is stale, not ok)."""
+    out = {**monitors, **(read_inputs or {})}
+    if "outdoor" in (read_inputs or {}) and (monitors.get("outdoor") or {}).get("status") == "stale":
+        out["outdoor"] = {**out["outdoor"], "status": "stale", "at": monitors["outdoor"].get("at")}
+    return out
+
+
 def now(fetch, settings):
     """Current readings plus the air read (the page's actions with a why), in one answer."""
-    i, o = (_reading(r, k) for r, k in zip(_entries(_rows(fetch)), (READING_KEYS, OUTDOOR_KEYS)))
+    rows = _entries(_rows(fetch))
+    i, o = (_reading(r, k) for r, k in zip(rows, (READING_KEYS, OUTDOOR_KEYS)))
     payload = {"format": "read",
                "indoor_pm25": (i or {}).get("pm25"), "indoor_co2": (i or {}).get("co2"),
                "indoor_humidity": (i or {}).get("humidity"), "indoor_temp_c": (i or {}).get("temp_c"),
@@ -153,13 +181,16 @@ def now(fetch, settings):
                 r["stale"] = r["minutes_ago"] > STALE_READING_MINUTES
             except ValueError:
                 pass
+    inputs = _merge_inputs(read.get("inputs"), {"indoor": _monitor_input(i, rows[0], "indoor", settings),
+                                                "outdoor": _monitor_input(o, rows[1], "outdoor", settings)})
     for r in (i, o):   # the cloud id (or a placeholder for a monitor read on the Wi-Fi) only feeds the read above:
         if r:          # an assistant took the placeholders 1 and 2 for the demo's (23 Nov)
             r.pop("id", None)
     return {"home": _home(settings), "units": UNITS, "readings": {"indoor": i, "outdoor": o},
             "read": {"status": read.get("status"), "written_at": read.get("clock"), "all_clear": summary.get("all_clear"),
                      "source_line": _source_line(i, "indoor", settings) or _source_line(o, "outdoor", settings),
-                     "actions": items, "profiles": profiles}}
+                     "actions": items, "profiles": profiles},
+            "inputs": inputs}
 
 
 def _hours(value):

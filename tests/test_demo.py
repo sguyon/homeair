@@ -350,3 +350,15 @@ def test_outdoor_only_story(c):
     assert profiles["toddler"]["state"] == "Needs an indoor monitor"
     assert profiles["sinus"]["state"] == "Pollen high" and "pollen only" in profiles["sinus"]["why"]
     assert profiles["runner"]["state"] == "Run after 11 AM"
+
+
+@pytest.mark.parametrize("moment", ["rush", "clear", "humid", "indoor-near", "indoor-model", "outdoor-only"])
+def test_the_agent_gives_the_page_actions_and_misses_no_input(c, moment):
+    """An assistant and the page say the same thing for the same moment: the agent builds its own request to the rules
+    (agent_tools.now), so a field read differently there would change its actions silently."""
+    page = [(i["label"], (i.get("action") or {}).get("text"), (i.get("action") or {}).get("when"))
+            for i in read(c, moment)["summary"]["items"]]
+    agent = c.get(f"/api/agent/now?moment={moment}").get_json()
+    assert [(a["what"], a["action"], a["when"]) for a in agent["read"]["actions"]] == page
+    assert set(agent["inputs"]) == {"indoor", "outdoor", "weather", "pollen", "smoke", "road"}
+    assert not [k for k, e in agent["inputs"].items() if e["status"] == "missing"], agent["inputs"]
