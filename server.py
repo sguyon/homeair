@@ -14,6 +14,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, g, jsonify, request, send_file, make_response, redirect, render_template
@@ -210,19 +211,24 @@ def version_assets(html):
     return re.sub(r'"(/static/[\w./-]+\.(?:css|js|png|svg)|/manifest\.json)"', lambda m: f'"{m.group(1)}?v={asset_version(m.group(1))}"', html)
 
 
-# Names a copy on a home network answers besides LOCAL_HOST's: the ones home routers hand out (.lan, .home.arpa,
-# .internal). None of them can be registered by an outside site.
-HOME_NETWORK_SUFFIXES = (".lan", ".home.arpa", ".internal")
+# Names a copy on a home network answers besides LOCAL_HOST's: the ones home routers hand out (.lan, .home, .home.arpa,
+# .internal, .localdomain, a FRITZ!Box's .fritz.box). None of them can be registered by an outside site.
+HOME_NETWORK_SUFFIXES = (".lan", ".home", ".home.arpa", ".internal", ".localdomain", ".fritz.box")
+# Hosting markers that also appear at home: a NAS's apps (TrueNAS SCALE) run on Kubernetes, so that marker alone
+# doesn't make a copy public.
+HOME_TOO_MARKERS = ("KUBERNETES_SERVICE_HOST",)
 FOREIGN_HOST_MESSAGE = ("Home Air answers only its own addresses on this network. To reach it at {host}, add that name "
                         "to HOME_AIR_HOSTS (a comma-separated list) in .env, then start Home Air again.\n")
 
 
 def _host_name():
-    """The Host header without its port, lowercased: "[::1]:5555" -> "::1", "Mac.local:5555" -> "mac.local"."""
-    host = (request.host or "").strip().lower()
+    """The Host header without its port or a final dot, lowercased: "[::1]:5555" -> "::1", "Mac.local.:5555" ->
+    "mac.local". Read from the raw header: Werkzeug's request.host drops an IPv6 address with a zone ("[fe80::1%25en0]")."""
+    host = (request.environ.get("HTTP_HOST") or request.host or "").strip().lower()
     if host.startswith("["):
-        return host[1:].split("]", 1)[0]
-    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+        return unquote(host[1:].split("]", 1)[0])
+    host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return host[:-1] if host.endswith(".") else host
 
 
 def _own_host(name):
@@ -245,7 +251,7 @@ def _own_host(name):
 def refuse_foreign_host():
     """A copy on a home network refuses a name from another site (421, "sent to the wrong server"). A hosted copy
     (Railway, Vercel) is on the internet already: its public name is the way in, so it answers any name."""
-    if token_setup.hosted():
+    if token_setup.hosted({k: v for k, v in os.environ.items() if k not in HOME_TOO_MARKERS}):
         return None
     name = _host_name()
     if _own_host(name):
