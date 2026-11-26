@@ -15,7 +15,7 @@ var SkyGlass = (() => {
   // [light, dark] (app.css --glass-edge, --glass-sheen), so no white line rings tinted glass (Sacha, 26 Nov: "the border/bevel
   // around the cards should also have the tint").
   const EDGE_AIR_SHARE = .85, EDGE_ALPHA = [.55, .10], SHEEN_ALPHA = [.55, .07];
-  const VEIL_DARK_MAX = 225; // sRGB channel: a dark theme's air tint is scaled so its brightest channel is this, for the drawings' veil.
+  const VEIL_DARK_MAX = 225, VEIL_DARK_GREY = .6; // sRGB channel, share: a dark theme's air tint is scaled so its brightest channel is this, then moved this far toward its grey, for the drawings' veil (scaled alone, pollen's dark tint turned the drawings yellow).
   const FILM_ROLES = ['row', 'open', 'highlight', 'meter', 'past']; // CSS token suffixes; bound inner films drawn behind card text, including SVG past-area fill.
   // Outdoor air (smoke, exhaust, pollen): all animation tuning is in CSS px, milliseconds or unitless shares.
   // The pass follows the picked prototype's timeline (mock 109 round 3, glass3.js): over the words for about a second, then a slow fade.
@@ -1169,7 +1169,9 @@ var SkyGlass = (() => {
       // whites turn the glass's tan, lines stay dark, and nothing around them changes. A dark theme's tint is scaled up
       // first, so the drawings warm without blackening.
       const air = outdoor.airTint(), lift = theme ? VEIL_DARK_MAX / Math.max(1, ...air) : 1;
-      const veil = over([255, 255, 255], air.map(v => Math.min(255, v * lift)), cast);
+      let lifted = air.map(v => Math.min(255, v * lift));
+      if (theme) { const grey = lifted[0] * .2126 + lifted[1] * .7152 + lifted[2] * .0722; lifted = over(lifted, [grey, grey, grey], VEIL_DARK_GREY); }
+      const veil = over([255, 255, 255], lifted, cast);
       veilFilter(veil);
       root.classList.add('sky-air-cast');
     }

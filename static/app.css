@@ -32,6 +32,10 @@
   --glass-series-out: #1a4f7e; --glass-series-in: #23489a;
   --glass-line-rgb: 70 82 100; --glass-edge: rgb(255 255 255 / .55);
   --glass-sheen: rgb(255 255 255 / .55); --glass-shadow: 0 1px 2px rgb(0 0 0 / .06), 0 12px 32px rgb(20 30 50 / .10);
+  /* The sky line's chips, the weather button and the Alerts bell: frosted glass like the cards, so the air drifting behind
+     shows through them faintly. Opacity keeps their ink at 4.5:1 or more over the darkest sky (night, storm). */
+  --glass-control-alpha: .8; --glass-control-blur: 8px;
+  --wet-milk: 242 246 250; --wet-milk-alpha: .55;   /* damp's fog over the top row while the cards are wet (sky-wet.js FRONT_RGB) */
 }
 :root[data-theme="dark"] {
   --glass-rgb: 18 20 26; --glass-safe-rgb: 0 0 0; --glass-brightness: .75;
@@ -41,6 +45,7 @@
   --glass-series-out: #4fc8e0; --glass-series-in: #9ab6f7;
   --glass-line-rgb: 210 220 235; --glass-edge: rgb(255 255 255 / .10);
   --glass-sheen: rgb(255 255 255 / .07); --glass-shadow: 0 12px 32px rgb(0 0 0 / .35);
+  --glass-control-alpha: .74; --wet-milk: 148 160 176; --wet-milk-alpha: .3;
 }
 /* wet glass (damp): condensation colours, shared by the shader and its Canvas fallback. */
 :root {

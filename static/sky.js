@@ -11,6 +11,12 @@ var SKY = (() => {
   const HALO_ON_LIGHT = [255, 255, 255], HALO_ON_DARK = [8, 14, 26];    // rgb: the soft halo around that ink, the opposite tone
   const INK_CONTRAST = 4.5;     // WCAG AA for normal text, used for the weather line and its soft shadow
   const HEADING_CONTRAST = 5.4; // ratio for bare heading ink, with margin for nearby card shadows and weather between samples
+  // ms a heading keeps its outline after its bare ink reads again: moving air or clouds behind it would otherwise switch the
+  // outline on and off many times a second (Sacha, 26 Nov: "keeps changing between black font and black with white border").
+  const HEADING_OUTLINE_HOLD_MS = 6000;
+  const HEADING_KEEP_SHARE = .85; // share: a held heading ink, outlined, stays when it reads at least this well against the other ink outlined (dense smoke leaves neither at the full floor)
+  const outlineSeen = new WeakMap();   // heading element → when its outline was last needed
+  const flipWanted = new WeakMap();   // heading element → since when the other ink has read better
   const HALO_MIN = .35, HALO_MAX = .9, HALO_STEP = .05;   // halo opacity: always a little, at most nearly solid, searched in these steps
   const INK_FLIP = 1.15;        // the other ink must do 15% better at the worst spot before the text switches (no flicker as a cloud passes)
   const INK_EVERY = 1500;       // ms between two looks at the sky behind the text: clouds drift slowly
@@ -858,11 +864,29 @@ var SKY = (() => {
         const bg = !backing ? c : alpha === 1 ? backing : over(c, backing, alpha);
         return front ? ratio(relLum(front(ink)), relLum(front(bg))) : ratio(relLum(ink), relLum(bg));
       }));
-      const { light, ink, bare } = pickInk(worst, darkInk, lightInk, target.light, heading ? HEADING_CONTRAST : INK_CONTRAST);
+      let { light, ink, bare } = pickInk(worst, darkInk, lightInk, target.light, heading ? HEADING_CONTRAST : INK_CONTRAST);
+      // A heading keeps its ink through a passing haze, fog or flash: the other ink takes over only once it has read better
+      // for HEADING_OUTLINE_HOLD_MS, and meanwhile the kept ink gets its outline (which always reads).
+      let held = false;
+      const airShown = heading && airEnabled() && conditions.length > 0;   // an air effect is shown: the heading's look holds while it lasts
+      if (heading && target.light != null && light !== target.light) {
+        const now = performance.now(), since = flipWanted.get(el) ?? now;
+        flipWanted.set(el, since);
+        const keepInk = target.light ? lightInk : darkInk, keepOutline = target.light ? darkInk : lightInk;
+        const kept = worst(keepInk, keepOutline), other = worst(ink, target.light ? lightInk : darkInk);
+        if ((airShown || now - since < HEADING_OUTLINE_HOLD_MS) && (kept >= HEADING_CONTRAST || kept >= other * HEADING_KEEP_SHARE)) {
+          light = target.light; ink = keepInk; bare = worst(keepInk); held = true;
+        }
+      } else if (heading) flipWanted.delete(el);
       target.light = light;
       if (heading) {
         // Only the opaque glyph stroke is a contrast partner. It never changes the sky behind a word.
-        const outline = bare < HEADING_CONTRAST ? (light ? darkInk : lightInk) : null;
+        const now = performance.now();
+        // While an air effect is shown, the outline stays on the whole time: the air moving behind a heading would otherwise
+        // switch its look as the opening ends or the drift passes (Sacha, 26 Nov: "On particles the home monitors still changes style").
+        let outline = airShown || held || bare < HEADING_CONTRAST ? (light ? darkInk : lightInk) : null;
+        if (outline) outlineSeen.set(el, now);
+        else if (now - (outlineSeen.get(el) ?? -Infinity) < HEADING_OUTLINE_HOLD_MS) outline = light ? darkInk : lightInk;
         const assisted = outline ? worst(ink, outline) : bare;
         updates.push({ el, heading, light, ink, outline, contrast: `${bare.toFixed(1)}/${assisted.toFixed(1)}` });
         continue;

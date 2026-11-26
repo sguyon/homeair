@@ -2400,3 +2400,68 @@ test('the map\'s road words: headline, one line per road, the key (mock 114)', (
   assert.equal(h.roadKeyNames([{ short: 'McGuinness Boulevard' }, bqe, { short: 'FDR Drive' }]), 'McGuinness Blvd, BQE +1');
   assert.equal(h.windKey(se), 'Wind from the south-east · 9 km/h');
 });
+
+// A heading's ink and outline hold through a passing haze, fog or flash (Sacha, 26 Nov: "keeps changing between black
+// font and black with white border"), and stay the whole time an air effect is shown ("On particles the home monitors
+// still changes style").
+function headingInk() {
+  const noop = () => {}, observer = class { observe() {} };
+  const rect = { left: 24, top: 24, right: 64, bottom: 38, width: 40, height: 14 };
+  const frames = new Map(), nodes = new Map();
+  let nextFrame = 0, time = 0, air, rear = [240, 240, 240];
+  const $ = id => {
+    if (!nodes.has(id)) {
+      const el = { style: { setProperty(k, v) { this[k] = v; } }, dataset: { theme: 'light' }, querySelectorAll: () => [], children: [],
+        classList: { add: noop, remove: noop, toggle: noop, contains: () => true }, addEventListener: noop, appendChild: noop, insertBefore: noop,
+        setAttribute: noop, getAttribute: () => null, removeAttribute: noop, getBoundingClientRect: () => rect, hasAttribute: () => true };
+      const ctx = new Proxy({ canvas: el, getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        createRadialGradient: () => ({ addColorStop: noop }), createLinearGradient: () => ({ addColorStop: noop }) }, { get: (o, k) => k in o ? o[k] : noop });
+      el.getContext = () => ctx; nodes.set(id, el);
+    }
+    return nodes.get(id);
+  };
+  const renderer = extra => new Proxy({ redraw: noop, ...extra }, { get: (o, k) => k in o ? o[k] : noop });
+  const requestAnimationFrame = cb => (frames.set(++nextFrame, cb), nextFrame);
+  const advance = now => { time = now; const pending = [...frames.values()]; frames.clear(); for (const cb of pending) cb(now); };
+  const document = { documentElement: $('html'), body: $('body'), querySelector: () => null,
+    querySelectorAll: selector => selector.includes('[data-sky-heading]') ? [$('heading')] : [],
+    createElement: () => $(Symbol()), createRange: () => ({ selectNodeContents: noop, getClientRects: () => [rect] }), addEventListener: noop };
+  const env = {
+    window: { matchMedia: () => ({ matches: false }), addEventListener: noop }, document, $, location: { search: '' },
+    APP: { place: { lat: 0, lon: 0 }, limits: { pm: 15, pm_high: 35, rh_damp: 60 } }, state: {}, TZ: 'UTC', appNow: () => new Date('2026-11-24T17:00:00Z'),
+    has: v => v != null, pmOver: home.pmOver, pollenHigh: home.pollenHigh, skyConditions: home.skyConditions, skyLeader: home.skyLeader, previewConditions: home.previewConditions,
+    innerWidth: 120, innerHeight: 100, scrollX: 0, scrollY: 0, performance: { now: () => time },
+    setInterval: noop, setTimeout: noop, clearTimeout: noop, addEventListener: noop, requestAnimationFrame, cancelAnimationFrame: id => frames.delete(id),
+    IntersectionObserver: observer, MutationObserver: observer,
+    getComputedStyle: el => ({ backgroundColor: 'rgb(14, 15, 18)', filter: 'none', opacity: el.style.opacity, getPropertyValue: k => k.endsWith('on-light') ? '8 14 26' : '253 254 255' }),
+    SkyGlass: { create(api) { air = api; return renderer({ sampleRear: () => rear, sampleFront: rgb => rgb }); } },
+    SkyWet: { create: () => renderer({ sampleBackground: rgb => rgb }) },
+  };
+  runInNewContext(readFileSync(new URL('static/sky.js', root), 'utf8'), env);
+  const heading = $('heading'), states = [];
+  const step = (now, rgb) => { rear = rgb; air.invalidateInk(); advance(now); states.push(`${heading.dataset.skyInkLight}:${heading.style['--sky-heading-outline']}`); };
+  return { step, states, sky: env.SKY };
+}
+
+test('a section heading keeps its ink and outline while the sky behind it flickers, and lets go once the sky settles', () => {
+  const { step, states } = headingInk();
+  for (let t = 0; t <= 600; t += 16) step(t, [240, 240, 240]);   // a light sky: dark ink, no outline needed
+  const settled = states.at(-1);
+  const before = states.length;
+  for (let t = 616, i = 0; t <= 4000; t += 16, i++) step(t, i % 2 ? [20, 20, 24] : [240, 240, 240]);   // a flickering pass
+  const during = states.slice(before);
+  assert.equal(new Set(during.map(s => s.split(':')[0])).size, 1, 'the ink never flips during the flicker');
+  assert.ok(during.slice(4).every(s => s === during.at(-1)), 'the outline settles at once and stays: no blinking');
+  for (let t = 4016; t <= 12000; t += 16) step(t, [240, 240, 240]);   // the sky settles light again
+  assert.equal(states.at(-1), settled, 'a few seconds after the sky settles, the heading is back to its plain ink');
+});
+
+test('while an air effect is shown, a section heading keeps its outline the whole time', () => {
+  const { step, states, sky } = headingInk();
+  for (let t = 0; t <= 600; t += 16) step(t, [240, 240, 240]);
+  assert.match(states.at(-1), /:transparent$/, 'a plain light sky: no outline');
+  sky.air({ pm: 24, rh: 47, ctx: {}, summary: { items: [{ id: 'pm', action: { text: 'Keep windows shut' } }] } });   // fine particles
+  for (let t = 616; t <= 20000; t += 16) step(t, [240, 240, 240]);
+  const outlined = states.slice(states.findIndex(s => !s.endsWith(':transparent')));
+  assert.ok(outlined.length > 1000 && outlined.every(s => s === outlined[0]), 'outlined at once and unchanged for the next 19 s');
+});
