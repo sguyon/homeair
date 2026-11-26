@@ -17,6 +17,48 @@
   --soft: #a1a1aa; --muted: #8b8b94; --faint: #6b6b74; --line: #26272d; --line-strong: #3a3b42; --meter: #24252b; --track: #24252b; --grid: #26272d;
   --tile: #1f2025; --warn: #fbbf24; --warn-fill: #f59e0b; --ico-warn: #3a2c12; --brand-ink: #d6f1f7; --brand-dot: #7fd3e6;
   --brand-dot-ink: #9fe0ee; }
+/* Everyday frost, from the picked level-1 glass. Colours live here for both renderers. */
+:root {
+  /* Strong opaque ink for small headings on bright and dark parts of the same sky, in sRGB channels. */
+  --sky-heading-on-light: 8 14 26; --sky-heading-on-dark: 255 255 255;
+  /* Unitless film opacities: thin inner surfaces keep the card's sky tint and leave readable ink. */
+  --glass-film-row: .04; --glass-film-open: .06; --glass-film-highlight: .08;
+  --glass-film-meter: .12; --glass-film-edge: .16; --glass-film-divider: .18; --glass-film-past: .07;
+  --glass-blur: 24px; --glass-saturation: 1.7;
+  --glass-rgb: 250 252 255; --glass-safe-rgb: 255 255 255; --glass-brightness: 1.12;
+  --glass-ink: #18181b; --glass-soft: #3a3a41; --glass-muted: #414149; --glass-faint: #4a4a52;
+  --glass-warn: #80340a; --glass-good: #0f5624; --glass-bad: #8c1a10;
+  --glass-accent: #105263; --glass-accent-ink: #0f4a58; --glass-sky: #1a4f7e;
+  --glass-series-out: #1a4f7e; --glass-series-in: #23489a;
+  --glass-line-rgb: 70 82 100; --glass-edge: rgb(255 255 255 / .55);
+  --glass-sheen: rgb(255 255 255 / .55); --glass-shadow: 0 1px 2px rgb(0 0 0 / .06), 0 12px 32px rgb(20 30 50 / .10);
+}
+:root[data-theme="dark"] {
+  --glass-rgb: 18 20 26; --glass-safe-rgb: 0 0 0; --glass-brightness: .75;
+  --glass-ink: #ececef; --glass-soft: #d2d2da; --glass-muted: #b6b6bf; --glass-faint: #b6b6bf;
+  --glass-warn: #fbbf24; --glass-good: #52c99d; --glass-bad: #f59a8f;
+  --glass-accent: #7fd3e6; --glass-accent-ink: #a9e4f1; --glass-sky: #8cc4ef;
+  --glass-series-out: #4fc8e0; --glass-series-in: #9ab6f7;
+  --glass-line-rgb: 210 220 235; --glass-edge: rgb(255 255 255 / .10);
+  --glass-sheen: rgb(255 255 255 / .07); --glass-shadow: 0 12px 32px rgb(0 0 0 / .35);
+}
+/* wet glass (damp): condensation colours, shared by the shader and its Canvas fallback. */
+:root {
+  --wet-fog-rgb: 232 238 246; --wet-card-shift-rgb: -32 -26 -14;
+  --wet-rim-rgb: 30 48 66; --wet-light-rgb: 255 255 255;
+  --wet-sky-alpha: .8; --wet-card-alpha: .82; --wet-trace-alpha: .64;
+  --wet-card-milk: .16;
+  /* the soft wet streak left under the humidity action */
+  --wet-band-rgb: 246 250 253; --wet-band-alpha: .85;
+}
+:root[data-theme="dark"] {
+  --wet-fog-rgb: 132 144 160; --wet-card-shift-rgb: 6 8 12;
+  --wet-rim-rgb: 0 0 0; --wet-light-rgb: 230 242 255;
+  --wet-sky-alpha: .64; --wet-card-alpha: .8; --wet-trace-alpha: .48;
+  --wet-card-milk: .16;
+  --wet-band-rgb: 200 220 240; --wet-band-alpha: .22;
+}
+/* end wet glass (damp) */
 * { box-sizing: border-box; }
 
 /* Page and shared controls */
@@ -187,6 +229,10 @@ h2 span { font: 400 13.5px/1.2 Inter, sans-serif !important; color: var(--muted)
   margin-bottom: 16px !important; }
 .sechead h2 { margin: 0; font: 500 12.5px/1 Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
   margin-top: 0 !important; }
+html.sky-ink .now-bar .now-h {
+  color: var(--sky-ink) !important;
+  text-shadow: 0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo), 0 0 12px var(--sky-halo);
+}
 .seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--meter); border-radius: 10px; }
 .seg button { border: 0; background: transparent; color: var(--soft); font: 550 12.5px/1 Inter, sans-serif; padding: 7px 11px; border-radius: 7px;
   cursor: pointer; transition: background-color .15s ease, color .15s ease; font-feature-settings: 'tnum' 1; }
@@ -478,8 +524,6 @@ svg.ts .ts-legend text { fill: var(--soft); font: 500 11.5px Inter, sans-serif; 
 .sky { overflow: hidden; pointer-events: none; position: fixed; inset: 0; height: auto; -webkit-mask-image: none; mask-image: none; z-index: 0; }
 .sky.off { display: none; }
 .sky-grad { position: absolute; inset: 0; transition: background 1.4s cubic-bezier(.2, .7, .2, 1), opacity .4s ease; }
-.sky-haze { position: absolute; inset: 0; opacity: 0; transition: opacity 1.2s ease;
-  background: linear-gradient(180deg, rgba(186, 166, 132, .55), rgba(176, 158, 128, .85)); }
 .sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .fx-s input { accent-color: var(--accent); grid-column: 1 / -1; width: 100%; }
 .fx-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -513,9 +557,10 @@ html.sky-dark .hist-est { color: #f2f6fb; }   /* the History notes sit on the sk
 html.sky-dark .hist-est a:focus-visible { outline-color: #a9e4f1; }
 html.sky-on:not(.sky-dark) .hist-est { color: #23384d; }         /* a bright day sky in either theme: the dark ink .sky-cap uses */
 html.sky-on:not(.sky-dark) .hist-est a:focus-visible { outline-color: #155a6b; }
-html.sky-dark .seg:not(.theme-seg):not(.temp-seg) { background: rgba(255, 255, 255, .14); }
-html.sky-dark .seg:not(.theme-seg):not(.temp-seg) button { color: rgba(240, 245, 252, .85); }
-html.sky-dark .seg:not(.theme-seg):not(.temp-seg) button.on { color: var(--ink); }
+/* History uses the theme's opaque segmented control regardless of the sky behind it. */
+html.sky-dark .seg:not(.theme-seg):not(.temp-seg):not(:where(#ranges)) { background: rgba(255, 255, 255, .14); }
+html.sky-dark .seg:not(.theme-seg):not(.temp-seg):not(:where(#ranges)) button { color: rgba(240, 245, 252, .85); }
+html.sky-dark .seg:not(.theme-seg):not(.temp-seg):not(:where(#ranges)) button.on { color: var(--ink); }
 html.sky-on .card, html.sky-on .custom-top { box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 10px 30px rgba(0, 0, 0, .10); }
 .theme-seg { margin-top: 2px; }
 .theme-seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(16, 24, 40, .12); }
@@ -720,7 +765,6 @@ svg.ts .ts-guide { stroke: var(--muted); stroke-dasharray: 3 3; }
 .s-by b { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .s-by #s-by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
 .s-bar .s-tools { position: static; }
-@keyframes skel { 50% { opacity: .45; } }
 .icon-btn.pill[aria-busy="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
 .s-src:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .s-src-card { display: none; position: absolute; left: 0; top: calc(100% + 8px); z-index: 6; width: 300px; padding: 10px 12px; border-radius: 12px;
@@ -744,24 +788,24 @@ svg.ts .ts-hd.out { fill: var(--series-out); }
 .now-bar .dsp { flex: none; }
 .now-bar .dsp-pop { top: calc(100% + 10px); right: 0; left: auto; background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .blocks section.pg { border-radius: 10px; }
-.chart-bar.loading #ranges button.on { animation: skel 1s ease-in-out infinite; }
 .grid2 .card.loading svg.ts { opacity: .45; transition: opacity .2s ease; }
 .grid2 .card svg.ts { transition: opacity .2s ease; }
-@media (prefers-reduced-motion: reduce) {
-  .chart-bar.loading #ranges button.on { animation: none; opacity: .6; }
-}
 
-/* Summary refresh. The gradient angle animates; reduced motion keeps a still edge. */
-.sum-card[aria-busy="true"] { background: linear-gradient(var(--card), var(--card)) padding-box,
-    conic-gradient(from var(--ai-a), #a5b4fc, #67e8f9, #c4b5fd, #f0abfc, #a5b4fc) border-box !important;
-  animation: ai-orbit 2.8s linear infinite;
-  background: linear-gradient(var(--card), var(--card)) padding-box,
-    conic-gradient(from var(--ai-a), color-mix(in srgb, #7fd3e6 45%, var(--card)) 0deg, color-mix(in srgb, #7fd3e6 45%, var(--card)) 250deg,
-      #7fd3e6 305deg, #1f7d93 345deg, color-mix(in srgb, #7fd3e6 45%, var(--card)) 360deg) border-box !important;
+/* Summary refresh. Only the edge is painted so the card's own surface stays visible. */
+.sum-card[aria-busy="true"] { background: var(--card) !important;
   border-width: 1px; box-shadow: 0 1px 2px var(--shadow); }
+.sum-card[aria-busy="true"]::after {
+  content: ""; pointer-events: none; position: absolute; inset: -1px; padding: 1px; border-radius: inherit;
+  background: conic-gradient(from var(--ai-a), color-mix(in srgb, #7fd3e6 45%, var(--card)) 0deg,
+    color-mix(in srgb, #7fd3e6 45%, var(--card)) 250deg, #7fd3e6 305deg, #1f7d93 345deg,
+    color-mix(in srgb, #7fd3e6 45%, var(--card)) 360deg);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: ai-orbit 2.8s linear infinite;
+}
 .sum-card[aria-busy="true"]::before { opacity: 0 !important; animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  .sum-card[aria-busy="true"] { animation: none; }
+  .sum-card[aria-busy="true"]::after { animation: none; }
 }
 .now-line { display: flex; align-items: center; min-width: 0; margin-top: 4px; gap: 12px; }
 .now-line .sky-cap { margin: 0; flex: 0 1 auto; min-width: 0; }
@@ -1493,8 +1537,6 @@ svg.mark .lg-glow, svg.dt-mark .lg-glow { opacity: var(--logo-glow-a); }
   --sw: linear-gradient(160deg, #c9637a, #f2a76b); }
 .dsp-pop .fx-presets [data-fx="night"] { background: linear-gradient(170deg, #141d3d, #354576) !important; color: #eef2fb !important;
   --sw: linear-gradient(160deg, #141d3d, #354576); }
-.dsp-pop .fx-presets [data-fx="smoke"] { background: linear-gradient(170deg, #b9a07c, #e6d8bf) !important;
-  --sw: linear-gradient(160deg, #b9a07c, #e6d8bf); }
 .dsp-pop .fx-presets [data-fx="storm"] { background: linear-gradient(170deg, #3d4757, #75818f) !important; color: #f2f5f8 !important;
   --sw: linear-gradient(160deg, #3d4757, #75818f); }
 .dsp-pop .fx-sliders { display: grid; gap: 12px; padding: 6px 0 4px; }
@@ -1571,8 +1613,20 @@ svg.mark .lg-glow, svg.dt-mark .lg-glow { opacity: var(--logo-glow-a); }
 .dsp-pop .fx-play > summary .fx-back { order: 0; margin: 0 !important; }
 .dsp-pop .fx-play-body { padding: 8px 0 2px; }
 .dsp-pop .fx-play .fx-presets { display: flex !important; flex-wrap: wrap; gap: 6px; margin: 0 0 14px !important; }
+.dsp-pop .fx-play .fx-presets:last-child { margin-bottom: 0 !important; }   /* no sliders below (they show on dev and previews only) */
 .dsp-pop .fx-play .fx-presets button[data-fx] { height: 30px !important; flex: none; }
 .dsp-pop .fx-play .fx-sliders { padding: 0; }
+/* The two rows: the weather (a swatch of its sky) and the air (its drawn mark, as Random's) */
+.dsp-pop .fx-play .fx-group { margin: 0 0 7px; font: 500 12px/1.2 Inter, sans-serif; color: var(--muted); }
+.dsp-pop .fx-play .fx-presets:has(+ .fx-group) { margin-bottom: 12px !important; }
+.dsp-pop .fx-presets [data-fx-air] { height: 30px !important; flex: none; gap: 6px !important; padding: 0 9px 0 8px !important; font-size: 12px !important;
+  background: var(--card) !important; color: var(--ink) !important; cursor: pointer; }
+.dsp-pop .fx-presets [data-fx-air]::before { content: none; }
+.dsp-pop .fx-presets [data-fx-air] svg.i { display: block !important; width: 14px !important; height: 14px !important; color: var(--soft); opacity: 1; }
+.dsp-pop .fx-presets [data-fx-air][aria-pressed="true"] { background: var(--accent-soft) !important; color: var(--accent-ink) !important;
+  box-shadow: inset 0 0 0 1px var(--accent-line) !important; }
+.dsp-pop .fx-presets [data-fx-air][aria-pressed="true"] svg.i { color: currentColor; }
+.dsp-pop .fx-presets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 :root .sum-card > .s-bar .s-src { display: inline-flex !important; align-items: center; position: static !important; padding: 0;
   margin: 0 !important; height: auto; transform: none !important; vertical-align: middle; }
 :root .sum-card > .s-bar #s-tag-t { line-height: 20px !important; display: inline-block; margin: 0 !important; padding: 0 !important; }
@@ -1770,7 +1824,7 @@ html.outside-dark .mc-out .mc-status.warn { color: var(--warn); }
 /* sky.js measures the background and supplies readable ink and halo colors for either theme. */
 html.sky-ink .bar .site { color: var(--sky-ink) !important;
   text-shadow: 0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo), 0 0 12px var(--sky-halo); }
-html.sky-ink .now-bar .sky-cap { color: var(--sky-ink) !important;
+html.sky-ink .now-bar .sky-cap { color: var(--sky-ink) !important; transition: none;
   text-shadow: 0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo), 0 0 12px var(--sky-halo) !important; }
 html.sky-ink .now-bar .cap-i.air { color: var(--sky-ink) !important; }
 html.sky-ink .now-line .dsp-top { color: var(--sky-ink) !important; background: rgba(var(--sky-halo-rgb), .32) !important;
@@ -1873,3 +1927,40 @@ html.sky-ink:not(.sky-dark) .now-bar .cap-i.air.bad svg.i { color: #b42318; }
 /* A hover tip left over from the tap that opened the Home panel would sit on top of the panel. */
 .bar .custom[open] > summary [data-tip]::after, .bar .custom[open] > summary[data-tip]::after { content: none; }
 
+/* Outdoor air (smoke, exhaust, fine particles, pollen). Theme materials and daylight/night atmospheric palettes, in sRGB channels. */
+:root {
+  --air-smoke-tint: 240 198 146;
+  --air-smoke-top: 178 126 86 72 44 30; --air-smoke-horizon: 224 128 58 142 68 24;
+  --air-smoke-volume: 128 104 86 36 24 18; --air-smoke-front: 196 140 92 124 74 40;
+  --air-smoke-foot: 168 108 64 96 52 24; --air-smoke-sun: 222 120 84 210 104 66;
+  --air-smoke-glow: 250 168 112 236 138 84;
+  --air-smoke-ash0: 132 127 122 190 183 175; --air-smoke-ash1: 86 81 77 140 134 127;
+  --air-smoke-ash2: 52 48 46 98 92 87; --air-smoke-rim: 196 188 178 196 188 178;
+  --air-exhaust-tint: 206 200 192;   /* warm grey glass in the opening (the picked prototype); the plume's own colours follow the sky (sky-glass.js EXHAUST_PAL) */
+  --air-pollen-tint: 248 240 216;   /* cream glass: the sunbeam the dust shows in, seen through the cards */
+  --air-pollen-wash: 246 246 244 94 96 100;
+  /* White dust and warm off-white cottonwood by day; at night they catch the streetlights. */
+  --air-pollen-dust: 255 252 242 255 230 196; --air-pollen-fluff: 250 244 230 251 233 205;
+  --air-pollen-shade: 112 112 108 52 54 58; --air-pollen-glint: 255 255 254 246 248 250;
+  /* The sun's glare and the cream sunbeam the dust shows in. */
+  --air-pollen-glare: 255 255 250; --air-pollen-beam: 255 240 204;
+  /* Fine particles: smoke's volumes and the exhaust's soot in a neutral grey-beige, even over the sky (day, night). */
+  --air-particles-tint: 220 214 204;   /* a grey-beige cast through the glass, between the exhaust's grey and pollen's cream */
+  --air-particles-top: 200 192 178 78 74 70; --air-particles-horizon: 184 172 154 92 84 74;
+  --air-particles-volume: 168 160 148 58 55 52; --air-particles-front: 204 196 182 104 98 90;
+  --air-particles-foot: 182 170 152 84 78 70; --air-particles-soot: 62 56 50 168 160 148;
+}
+:root[data-theme="dark"] {
+  --air-smoke-tint: 76 43 20;
+  --air-exhaust-tint: 46 45 44;
+  --air-pollen-tint: 48 43 33;   /* a warm cast: the cream sunbeam through dark glass */
+  --air-pollen-wash: 208 210 212 94 96 100;
+  --air-pollen-dust: 246 240 226 255 230 196; --air-pollen-fluff: 250 244 230 251 233 205;
+  --air-pollen-shade: 112 112 108 52 54 58; --air-pollen-glint: 255 255 254 246 248 250;
+  --air-pollen-glare: 150 148 140; --air-pollen-beam: 255 238 200;
+  --air-particles-tint: 44 42 39;   /* a grey-beige cast through dark glass */
+  --air-particles-top: 124 118 108 70 66 62; --air-particles-horizon: 118 108 96 84 76 68;
+  --air-particles-volume: 92 88 82 52 49 46; --air-particles-front: 110 104 96 92 86 80;
+  --air-particles-foot: 96 90 82 76 70 64; --air-particles-soot: 176 168 156 176 168 156;
+}
+/* End outdoor air (smoke, exhaust, fine particles, pollen). */

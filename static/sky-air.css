@@ -1,0 +1,168 @@
+/* Everyday glass. Only the production factory opts in; shot/token pages keep their own surfaces. */
+html.sky-glass :is(.sum-card, .card:not(.off, .mc-ghost, .hist-off, .no-token-card), .bar .custom-top, .now-line .dsp-top) {
+  --ink: var(--glass-ink); --soft: var(--glass-soft); --muted: var(--glass-muted); --faint: var(--glass-faint);
+  --warn: var(--glass-warn); --good: var(--glass-good); --bad: var(--glass-bad);
+  --accent: var(--glass-accent); --accent-ink: var(--glass-accent-ink); --sky: var(--glass-sky);
+  --series-in: var(--glass-series-in); --series-out: var(--glass-series-out);
+  --glass-surface: rgb(var(--glass-rgb));
+  background: rgb(var(--glass-tint, var(--glass-rgb)) / var(--glass-alpha, 1)) !important;
+  -webkit-backdrop-filter: var(--glass-backdrop, none);
+  backdrop-filter: var(--glass-backdrop, none);
+  border-color: var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-sheen), var(--glass-shadow);
+  color: var(--ink);
+  isolation: isolate;
+  transition: none;
+}
+html.sky-glass :is(.sum-card, .card:not(.off, .mc-ghost, .hist-off, .no-token-card)) {
+  --card: var(--glass-surface); --tile: rgb(var(--glass-line-rgb) / var(--glass-film-open));
+  --meter: rgb(var(--glass-line-rgb) / var(--glass-film-meter)); --track: var(--meter);
+  --glass-row-surface: rgb(var(--glass-line-rgb) / var(--glass-film-row));
+  --glass-open-surface: rgb(var(--glass-line-rgb) / var(--glass-film-open));
+  --glass-highlight-surface: rgb(var(--glass-line-rgb) / var(--glass-film-highlight));
+  --q-bg: var(--glass-open-surface);
+}
+/* Bands transmit the same sky as the body of the card. Keep the existing dimensions. */
+html.sky-glass[data-theme] .sum-card > .s-bar,
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) .mc-head {
+  background: transparent !important;
+  border-bottom-color: rgb(var(--glass-line-rgb) / var(--glass-film-edge)) !important;
+}
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) .mc-head::before,
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) .mc-head::after { background: none; }
+html.sky-glass .sum-card > .s-bar .s-tag #s-tag-t {
+  background-image: none !important; color: var(--accent-ink) !important;
+  -webkit-text-fill-color: currentColor;
+}
+html.sky-glass .sum-card :is(.sx, hr, .sx-row, .sx-tl) { border-color: rgb(var(--glass-line-rgb) / var(--glass-film-divider)); }
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) :is(.mc-bar, .t-scale, .ps-track, .meter, .track) {
+  background: var(--meter);
+}
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) :is(td, th) { background: transparent; }
+html.sky-glass .nb-card:not(.off, .mc-ghost, .hist-off, .no-token-card) .nbt tbody tr:nth-child(even of [data-id]) td { background: var(--glass-row-surface); }
+html.sky-glass .nb-card:not(.off, .mc-ghost, .hist-off, .no-token-card) .nbt tbody :is(tr.me, tr.you, tr.is-me, tr.hl) td,
+html.sky-glass .nb-card:not(.off, .mc-ghost, .hist-off, .no-token-card) .nbt tbody tr:hover td { background: var(--glass-highlight-surface) !important; }
+html.sky-glass .nb-card:not(.off, .mc-ghost, .hist-off, .no-token-card) .nbt tbody :is(tr.nb-open, tr.nb-detail) td { background: var(--glass-open-surface) !important; }
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) .nb-more { background: var(--glass-open-surface); }
+/* The road's ⓘ at its everyday .8 opacity failed 4.5:1 on the pass's full tint, so the whole map card fell back to opaque white. */
+html.sky-glass .nb-legend .lg-info { opacity: 1; }
+
+/* Chart hooks name a surface or a text role, independent of the SVG's generated fill values. */
+html.sky-glass .sum-card .sx-chart-past { fill: rgb(var(--glass-line-rgb) / var(--glass-film-past)); }
+html.sky-glass .sum-card :is(.sx-chart-halo, .sx-chart-point) { stroke: var(--glass-surface); }
+html.sky-glass .sum-card :is(.sx-chart-knockout, .sx-hvc, .sx-hvp) { fill: var(--glass-surface); }
+html.sky-glass .sum-card .sx-chart-label { fill: var(--soft); }
+html.sky-glass .sum-card .sx-chart-label.is-warn { fill: var(--warn); }
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) svg.ts .ts-hd { stroke: var(--glass-surface); }
+html.sky-glass [data-chart-scrub="readout"] { color: var(--soft); }
+html.sky-glass [data-chart-scrub="readout"].over { color: var(--warn); }
+
+/* Readout length must not reflow the chart on each pointer frame. Wrap inside space reserved for it. */
+html.sky-glass #hist-charts > .card { container-type: inline-size; }
+html.sky-glass #hist-charts .chart-head { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+html.sky-glass #hist-charts .chart-head .who { display: block; text-align: right; }
+@container (width < 30rem) {
+  html.sky-glass #hist-charts .chart-head { grid-template-columns: minmax(0, 1fr); }
+  html.sky-glass #hist-charts .chart-head .who { text-align: left; }
+}
+@container (width < 24rem) {
+  html.sky-glass #hist-charts .chart-head .who { min-block-size: 2lh; }
+}
+
+/* The sky's adaptive ink belongs to the open sky; these controls have their own measured glass. */
+html.sky-glass .now-bar .now-line .dsp-top,
+html.sky-glass .now-bar .now-line .dsp-top :is(.theme-quick, .dsp-open, .chev, .sky-quick) { color: var(--ink) !important; text-shadow: none; }
+
+/* A heading over mixed light gets an opaque outer glyph stroke, never a backing behind the word. */
+html.sky-glass [data-sky-heading] { color: var(--ink); }
+html.sky-ink [data-sky-heading][data-sky-ink-light] {
+  color: var(--sky-ink) !important;
+  -webkit-text-stroke: 2px var(--sky-heading-outline, transparent);
+  paint-order: stroke fill;
+  text-shadow: none;
+  transition: none;
+}
+html.sky-ink .now-bar .cap-i {
+  color: var(--sky-ink) !important;
+  text-shadow: -1px 0 var(--sky-halo), 1px 0 var(--sky-halo), 0 -1px var(--sky-halo), 0 1px var(--sky-halo),
+    0 0 2px var(--sky-halo), 0 0 6px var(--sky-halo);
+  transition: none;
+}
+
+/* Only a failed, verified opaque fallback opts text into these repairs; disabled cards never enter the solver. */
+html.sky-glass[data-theme="light"] [data-glass-readable="light"],
+html.sky-glass[data-theme="dark"] [data-glass-readable="dark"] { color: var(--glass-readable-ink) !important; fill: var(--glass-readable-ink) !important; fill-opacity: 1 !important; }
+html.sky-glass[data-theme="light"] [data-glass-readable-opacity="light"],
+html.sky-glass[data-theme="dark"] [data-glass-readable-opacity="dark"] { opacity: 1 !important; }
+
+/* wet glass (damp): separate condensation panes inside the existing glass, below every word.
+   The viewport pane follows outdoor matter in #sky; the existing front lightning stays above it.
+   Base cards remain unchanged; only an active pointer gesture suppresses text selection. */
+#sky > .sky-wet-viewport {
+  position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+}
+.sky-wet-pane {
+  position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
+  z-index: -1; pointer-events: none;
+}
+.sky-wet-pane > canvas { position: absolute; pointer-events: none; }
+.sum-card:has(> .sky-wet-pane) .sx-row[data-item-id="rh"] > .sx-do { inline-size: fit-content; }
+html.sky-glass :is(.bar .custom-top, .now-line .dsp-top) { position: relative; }
+/* Every glass card holds its own wet pane (inset: 0): a static card let the pane anchor to .page, a hard-edged box in the sky. */
+html.sky-glass .card:not(.off, .mc-ghost, .hist-off, .no-token-card) { position: relative; }
+/* Reserve horizontal touch gestures for wiping while preserving vertical scroll and pinch zoom.
+   The controller delegates events; condensation canvases never intercept links or controls. */
+html.sky-wet-active, html.sky-wet-active body { touch-action: pan-y pinch-zoom; }
+html.sky-wet-dragging body { -webkit-user-select: none; user-select: none; }
+/* end wet glass (damp) */
+
+/* Outdoor air (smoke, exhaust, fine particles, pollen). The weather's rain/flash/bolt stay above these noninteractive layers. */
+.sky-air-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Rear sky: clouds/wind → air → haze → rain → wet → flash. Front: air → flash/bolt. */
+/* Wet glass fogs over the rain (its streaks soften behind condensation); the flash stays on top. */
+.sky-glass #sky-rain { z-index: 1; }
+.sky-glass #sky > .sky-wet-viewport { z-index: 2; }
+.sky-glass #sky-flash { z-index: 3; }
+.sky-glass #front-flash, .sky-glass #sky-bolt { z-index: 1; }
+/* The smoke wash drives native sun opacity on the same frame as its own smaller sun. */
+.sky-smoke-air #sky-sun { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .sky-air-front-soft, .sky-air-front-fine { display: none; }
+}
+/* End outdoor air (smoke, exhaust, fine particles, pollen). */
+
+/* Let the header escape the page's stacking context, above foreground air and lightning (20).
+   Cards retain their own contexts below those effects; opaque controls keep their token contrast. */
+html.sky-glass .page { z-index: auto; }
+html.sky-glass .now-bar { z-index: 21; }
+
+/* Controller and sky-line controls. These are opaque controls with their own material,
+   above the effects; no glyph masks or rectangles removed from a renderer. */
+html.sky-glass .now-bar .now-line .sky-cap {
+  height: auto !important; min-height: 26px; overflow: visible; white-space: normal;
+  flex-wrap: wrap; gap: 4px 8px; padding: 0 !important; margin: 0 !important;
+}
+#sky-weather, #sky-conditions { display: contents; }
+html.sky-glass[data-theme] .now-bar #sky-cap :is(.cap-i, .cap-tag) {
+  box-sizing: border-box; max-inline-size: 100%; padding: 1px 7px; border-radius: 12px;
+  background: rgb(var(--glass-rgb)) !important; color: var(--glass-ink) !important;
+  text-shadow: none !important; -webkit-text-stroke: 0; transition: none;
+}
+.now-bar #sky-cap .cap-air {
+  font: inherit; line-height: inherit; text-align: start; white-space: normal;
+  border: 1px solid var(--glass-edge); cursor: pointer; min-block-size: 28px;
+}
+.now-bar #sky-cap .cap-air:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.now-bar #sky-cap .cap-air:disabled { cursor: default; opacity: 1; }
+.cap-air-icon { display: inline-grid; place-items: center; flex: 0 0 1em; inline-size: 1em; font-size: .85em; }
+.cap-air-label { min-inline-size: 0; overflow-wrap: anywhere; }
+/* The exhaust's wind beside its word: arrow, "from SE · 9 km/h", and a map icon when the page has a map. */
+.now-bar #sky-cap .cap-ex-wind { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; }
+.cap-ex-wind :is(.ex-arrow, .ex-mapicon) { display: inline-grid; flex: none; }
+.cap-ex-wind svg { display: block; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.cap-ex-wind .ex-arrow { transition: transform .6s ease; }
+.cap-ex-wind .ex-mapicon { margin-left: 2px; opacity: .75; }
+.cap-ex-wind .ex-mapicon svg { stroke-width: 1.8; }
+.cap-ex-wind .ex-wind { white-space: nowrap; }
+html.has-ex-wind #sky-cap .cap-i.wind { display: none; }
+@media (prefers-reduced-motion: reduce) { .cap-ex-wind .ex-arrow { transition: none; } }

@@ -32,6 +32,7 @@ WEEK = timedelta(days=7)
 INDOOR_ID, OUTDOOR_ID = 4201, 4202
 POLLEN_TYPES = ("Tree", "Grass", "Weed")
 LEVELS = ("None", "Very Low", "Low", "Moderate", "High", "Very High")
+SMOKE_NEARBY_SPREAD = 3.0   # µg/m³ either side of the smoke curve, for modest differences across the neighborhood
 
 # Public monitors around the home: made up, placed in real neighborhoods so the map reads.
 NEARBY = (
@@ -131,7 +132,7 @@ def _usual(m):
 @lru_cache(maxsize=8)
 def world(key):
     """Every curve of one moment, its story laid over the usual days, ending exactly on the story's readings."""
-    m = MOMENTS[key]
+    m = moment_for(key)
     knots = _usual(m)
     now_h = _hours_of(m, m.at)
     story = {s: list(m.story.get(s, ())) for s in knots}
@@ -339,7 +340,8 @@ def pollen_days(key):
 
 def smoke(key):
     m = moment_for(key)
-    return {"checked": True, "detected": False, "density": None, "date": m.at.strftime("%Y-%m-%d")}
+    return {"checked": True, "detected": m.smoke_detected, "density": "Medium" if m.smoke_detected else None,
+            "date": m.at.strftime("%Y-%m-%d")}
 
 
 @lru_cache(maxsize=1)
@@ -357,16 +359,20 @@ def _km(lat1, lon1, lat2, lon2):
 @lru_cache(maxsize=8)
 def nearby(key):
     """The public monitors around home, nearest first, the balcony monitor among them. In the rush the ones beside
-    the BQE read highest."""
-    m, _ = world(key)
+    the BQE read highest. Regional smoke raises readings across the neighborhood, regardless of the road."""
+    m, c = world(key)
     r = random.Random(f"{key}:nearby")
     lat, lon = _HOME["lat"], _HOME["lon"]
     far = m.pm_base * .95
+    smoke_pm = c["pm_out"](m.at) if m.smoke_detected else None
     out = [{"locationId": OUTDOOR_ID, "locationName": _HOME["outdoor"], "latitude": lat, "longitude": lon,
             "pm02": m.pm_out, "atmp": m.t_out, "rhum": m.rh_out, "timestamp": _z(m.at), "distance_km": 0.0}]
     for lid, name, a, b in NEARBY:
-        to_road = min((_km(a, b, y, x) for x, y in _route()), default=5)
-        pm = far + m.nearby_road * math.exp(-to_road / .45) + r.uniform(-.7, .7)
+        if smoke_pm is not None:
+            pm = smoke_pm + r.uniform(-SMOKE_NEARBY_SPREAD, SMOKE_NEARBY_SPREAD)
+        else:
+            to_road = min((_km(a, b, y, x) for x, y in _route()), default=5)
+            pm = far + m.nearby_road * math.exp(-to_road / .45) + r.uniform(-.7, .7)
         out.append({"locationId": lid, "locationName": f"Demo monitor · {name}", "latitude": a, "longitude": b,
                     "pm02": round(max(.5, pm), 1), "atmp": round(m.t_out + r.uniform(-.6, .6), 1),
                     "rhum": round(min(99, m.rh_out + r.uniform(-3, 3))), "timestamp": _z(m.at - timedelta(minutes=r.randint(1, 9))),
@@ -571,8 +577,9 @@ def install(server, moment_for_request):
     sources.get_air_forecast = air_model
     sources.smoke_status = smoke_status
     sources.get_smoke_data = lambda *a, **k: smoke_status()["detected"]
-    sources.get_pollen_days = lambda *a, **k: pollen_days(moment_for_request().key) if which() == "sample" else {"today": [], "tomorrow": []}
-    sources.get_pollen_data = lambda *a, **k: pollen_days(moment_for_request().key)["today"] if which() == "sample" else []
+    pollen_key = lambda: moment_for_request().key   # pollen is the case's own (Moment.data covers the readings)
+    sources.get_pollen_days = lambda *a, **k: pollen_days(pollen_key()) if which() == "sample" else {"today": [], "tomorrow": []}
+    sources.get_pollen_data = lambda *a, **k: pollen_days(pollen_key())["today"] if which() == "sample" else []
     sources.source_on = source_on
     sources.pollen_state = lambda: "ok" if sources.source_on("pollen") else "off"   # made up, so no key to miss
     sources.history_points = points

@@ -46,7 +46,15 @@ function putInCache(key, response) {
 function networkFirst(request, key, offlineResponse) {
   return fetch(request)
     .then((response) => { putInCache(key, response); return response; })
-    .catch(() => caches.match(key).then((cached) => cached || offlineResponse()));
+    .catch(() => caches.match(key).then((cached) => {
+      if (!cached) return offlineResponse();
+      // Opaque cross-origin copies cannot be reconstructed. API/page fallbacks carry
+      // their provenance so the page never treats old observations as a new response.
+      if (cached.type === 'opaque') return cached;
+      const headers = new Headers(cached.headers);
+      headers.set('X-Home-Air-Cache', 'fallback');
+      return new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers });
+    }));
 }
 
 self.addEventListener('fetch', (event) => {

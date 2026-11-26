@@ -54,16 +54,18 @@ class Moment:
     # balcony monitor
     indoor: bool = True
     outdoor_from: int | str | None = None
-    data: str | None = None   # the moment whose made-up readings this one shows (None: its own)
+    data: str | None = None   # the moment whose made-up readings this one shows (None: its own); pollen is always its own
+    smoke_detected: bool = False   # NOAA's made-up smoke detection for this story
 
 
 MOMENTS = {
     # A bad weekday morning: a stale night in the bedroom, and outside the BQE rush on a southeast wind.
-    # Airing has to wait until the rush fumes clear, at 11.
+    # Airing has to wait until the rush fumes clear, at 11. Tree pollen is low and the bedroom's humidity comfortable,
+    # so the exhaust is the one thing outside the limits (the first sample people see stays simple).
     "rush": Moment(
         key="rush", label="Morning rush", at=datetime(2026, 4, 21, 7, 45, tzinfo=TZ),
         co2=1250, co2_night=1400, co2_day=640,
-        rh_in=63, rh_in_day=54, rh_in_night=64, t_in=21.0, pm_in=4.2, voc=128,
+        rh_in=47, rh_in_day=45, rh_in_night=49, t_in=21.0, pm_in=4.2, voc=128,
         t_out=15.0, t_range=(14, 21), rh_out=93, rh_out_range=(66, 95),
         pm_out=22, pm_base=7, pm_rush_max=19,
         wind_dir=135, wind_speed=9, cloud=55, weather_code=2, visibility=9000, uv_max=6.5,
@@ -122,6 +124,41 @@ HIDDEN = {
                             outdoor_from="model", data="rush"),
     "outdoor-only": replace(MOMENTS["rush"], pollen_today=RUSH_POLLEN, pollen_tomorrow=RUSH_POLLEN_TOMORROW, key="outdoor-only", label="Outdoor monitor only", indoor=False, data="rush"),
 }
+
+# Effect stories use the same sources and rules as a home, with their own readings and curves. The west wind carries
+# road exhaust away; smoke is regional PM2.5, while the spring pollen story keeps the measured air otherwise clear.
+HIDDEN["sky-smoke"] = replace(
+    MOMENTS["clear"], key="sky-smoke", label="Smoke outside", data=None,
+    at=datetime(2026, 11, 12, 14, 0, tzinfo=TZ),
+    sun=(("06:40", "16:41"), ("06:41", "16:40")),
+    pm_out=48, pm_base=8, pm_rush_max=12, smoke_detected=True, nearby_road=0,
+    cloud=55, weather_code=2, visibility=6000,
+    # Smoke peaks at 6 PM, clears below 15 at 9 PM, then stays clear through tomorrow's forecast.
+    story={"pm_out": ((0, 42), (6, 44), (11, 46), (14, 48), (18, 52), (20, 22), (21, 10), (24, 8), (36, 8))},
+)
+HIDDEN["sky-pollen"] = replace(
+    MOMENTS["clear"], key="sky-pollen", label="Pollen outside", data=None,
+    at=datetime(2026, 4, 21, 14, 0, tzinfo=TZ), t_out=18, t_range=(12, 21),
+    sun=MOMENTS["rush"].sun,
+    pollen_today=(4, 0, 0), pollen_tomorrow=(3, 0, 0), pollen_in_season=(True, False, False),
+)
+HIDDEN["sky-smoke-damp"] = replace(
+    HIDDEN["sky-smoke"], key="sky-smoke-damp", label="Smoke outside, damp inside", data=None,
+    rh_in=66, rh_in_day=66, rh_in_night=68,
+    story={**HIDDEN["sky-smoke"].story, "rh_in": ((6, 68), (11, 67), (14, 66), (24, 67), (36, 66))},
+)
+
+# Fine particles: a still, sunny November midday under an inversion. Regional PM2.5 is over the limit without smoke on
+# NOAA's map, and the west wind keeps the road's exhaust away, so no source is named.
+HIDDEN["sky-particles"] = replace(
+    MOMENTS["clear"], key="sky-particles", label="Fine particles outside", data=None,
+    at=datetime(2026, 11, 18, 13, 0, tzinfo=TZ),
+    sun=(("06:47", "16:35"), ("06:48", "16:34")),
+    pm_out=24, pm_base=9, pm_rush_max=13, nearby_road=1,
+    wind_speed=6, visibility=9000,
+    # Haze builds through the still morning, peaks early afternoon, and clears under 15 by 10 PM as the wind picks up.
+    story={"pm_out": ((0, 13), (6, 17), (9, 21), (13, 24), (15, 25), (18, 22), (20, 18), (22, 12), (24, 10), (36, 9))},
+)
 
 
 def moment_for(key, sample=None):
