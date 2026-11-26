@@ -51,6 +51,7 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 history.sqlite*
+alerts.sqlite*
 # What setup.py --home-server prepares to copy to a server: a copy of the settings and keys
 home-server/
 local-addresses.json

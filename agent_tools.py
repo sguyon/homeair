@@ -155,10 +155,11 @@ def _merge_inputs(read_inputs, monitors):
     return out
 
 
-def now(fetch, settings):
-    """Current readings plus the air read (the page's actions with a why), in one answer."""
-    rows = _entries(_rows(fetch))
-    i, o = (_reading(r, k) for r, k in zip(rows, (READING_KEYS, OUTDOOR_KEYS)))
+def read_now(fetch):
+    """The raw read the page and the alerts share: the monitors' rows, the two readings and `/api/analyze`'s answer for them.
+    Raises ToolError when either can't be read."""
+    rows = _rows(fetch)
+    i, o = (_reading(r, k) for r, k in zip(_entries(rows), (READING_KEYS, OUTDOOR_KEYS)))
     payload = {"format": "read",
                "indoor_pm25": (i or {}).get("pm25"), "indoor_co2": (i or {}).get("co2"),
                "indoor_humidity": (i or {}).get("humidity"), "indoor_temp_c": (i or {}).get("temp_c"),
@@ -168,6 +169,14 @@ def now(fetch, settings):
     read = fetch("/api/analyze", payload)
     if not isinstance(read, dict) or read.get("error"):
         raise ToolError((read or {}).get("error") if isinstance(read, dict) else "The air read failed.")
+    return {"rows": rows, "indoor": i, "outdoor": o, "read": read}
+
+
+def now(fetch, settings):
+    """Current readings plus the air read (the page's actions with a why), in one answer."""
+    got = read_now(fetch)
+    rows = _entries(got["rows"])
+    i, o, read = got["indoor"], got["outdoor"], got["read"]
     summary = read.get("summary") or {}
     items = [{"what": it.get("label"), "value": f"{it.get('num')} {it.get('unit')}", "vs_limit": it.get("ctx"),
               "action": (it.get("action") or {}).get("text"), "when": (it.get("action") or {}).get("when"),

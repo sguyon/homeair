@@ -101,14 +101,18 @@
     return `Sources: ${mine}${names.length > 1 ? ', ' : ' and '}${list}. Open to see them.`;
   }
 
-  // How fresh a monitor's latest reading is at `now`: Online up to 10 min, Late up to an hour, then Offline.
+  // The minutes without a reading after which a monitor is Offline: the server's (alert_rules.OFFLINE_AFTER, as APP.offline_after_min), so the dot and the Offline alert agree.
+  const OFFLINE_FALLBACK_MIN = 60;   // a page without APP (a test, the token card): the same hour
+  const offlineAfter = () => (typeof APP !== 'undefined' && APP && APP.offline_after_min) || OFFLINE_FALLBACK_MIN;
+
+  // How fresh a monitor's latest reading is at `now`: Online up to 10 min, Late up to the Offline point (an hour), then Offline.
   // absent: the view has no such monitor (a public monitor's page has no indoor one): disabled, "Not set up", never red.
   function freshness(m, now, absent = false) {
     if (absent) return { tone: 'off', label: 'Not set up' };
     if (!m || !m.timestamp) return { tone: 'bad', label: 'Offline' };
     const mins = Math.round((now - new Date(m.timestamp)) / 60000);
     if (mins <= 10) return { tone: 'good', label: 'Online' };
-    if (mins <= 60) return { tone: 'warn', label: `Late · ${mins} min` };
+    if (mins <= offlineAfter()) return { tone: 'warn', label: `Late · ${mins} min` };
     return { tone: 'bad', label: 'Offline' };
   }
 

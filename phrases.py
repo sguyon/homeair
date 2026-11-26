@@ -64,7 +64,9 @@ LIBRARY = {
     "pollen": {
         "effect": ["{pollen_type_cap} pollen sets off sneezing and a stuffy nose for allergic sinuses."],
         "now": ["Today it’s {pollen_index} of 5."],
-        "timing": ["Keep the windows shut and shower after time outside."],
+        # the first that fills: with an airing in the actions (summary.with_airing), its one exception
+        "timing": ["Keep the windows shut, open one only briefly {airing_when}, and shower after time outside.",
+                   "Keep the windows shut and shower after time outside."],
     },
 }
 

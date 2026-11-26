@@ -19,7 +19,7 @@ from config import DEFAULT_LIMITS, parse_dotenv, OLD_PROFILES_TABLE, PROFILES, C
 import publicmap  # noqa: E402
 from publicmap import AREA_KM, AREA_MIN_MONITORS, NEARBY_SOURCE_KM, PINNED_OFFLINE_DAYS  # noqa: E402
 
-KEYS = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY")
+KEYS = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY", "VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY")
 OUTDOOR_FROM_NEEDED = "sources.outdoor_from is needed"   # config.py's words when an indoor-only home hasn't chosen yet
 SUGGEST_LIST = 5   # monitors --suggest lists before its choice: the nearest reporting within AREA_KM, enough to compare
 

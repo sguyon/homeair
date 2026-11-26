@@ -1,10 +1,11 @@
+// v7: the push and notificationclick handlers show alerts.
 // v6: discard pages cached before the token setup form's security fixes.
 // v5: the manifest and icons are network-first. v4 kept the manifest cache-first under a fixed cache name,
 // so installed phones never saw a new manifest (an old one with an SVG icon gave iOS a letter icon).
 // v4: the page's CSS and JS moved to /static/, with a ?v=<content hash> the server adds.
 // v3: pages are network-first (v2 served a cached page until the cache name changed),
 // only GET responses are cached, and history is cached once per monitor.
-const CACHE_NAME = 'aq-dashboard-v6';
+const CACHE_NAME = 'aq-dashboard-v7';
 const STATIC_ASSETS = [
   '/',
   'https://cdn.jsdelivr.net/npm/chart.js@4',
@@ -113,4 +114,40 @@ self.addEventListener('fetch', (event) => {
       return response;
     }))
   );
+});
+
+// Push: Safari revokes the subscription when a push shows nothing, so every path shows a notification at once.
+self.addEventListener('push', (event) => {
+  let message = {};
+  try { message = event.data ? event.data.json() || {} : {}; } catch (error) { message = {}; }
+  event.waitUntil(self.registration.showNotification(message.title || 'Home Air', {
+    body: message.body || '',
+    icon: '/static/icons/icon-192.png',
+    data: { url: typeof message.url === 'string' ? message.url : '/#summary' },
+  }));
+});
+
+// Click: focus a Home Air window at the Summary, or open one. Only this app's own address is followed.
+// Where WindowClient.navigate is missing or refuses (unchecked on iOS), the window gets {type: "open", url} and
+// static/alerts.js moves itself there.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  let target = new URL('/#summary', self.location.origin);
+  try {
+    const asked = new URL((event.notification.data || {}).url || '/#summary', self.location.origin);
+    if (asked.origin === self.location.origin) target = asked;
+  } catch (error) { /* keep the Summary */ }
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+    const client = windows.find((c) => new URL(c.url).origin === self.location.origin && 'focus' in c);
+    if (!client) return self.clients.openWindow(target.href);
+    const tell = () => {
+      client.postMessage({ type: 'open', url: target.href });
+      return Promise.resolve(client.focus()).catch(() => client);
+    };
+    return Promise.resolve(client.focus()).catch(() => client).then((focused) => {
+      const win = focused || client;
+      if (typeof win.navigate !== 'function') return tell();
+      return Promise.resolve(win.navigate(target.href)).then((moved) => moved || tell(), tell);
+    });
+  }));
 });

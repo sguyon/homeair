@@ -81,3 +81,90 @@ test('activation removes v5 pages and keeps the new worker cache', async () => {
   assert.equal(opened.length, 1);
   assert.equal(removed.includes(opened[0]), false);
 });
+
+
+// Safari revokes a subscription whose push shows nothing, so every push path shows a notification.
+function pushWorker() {
+  const listeners = {};
+  const shown = [];
+  const context = vm.createContext({
+    self: {
+      addEventListener: (name, callback) => { listeners[name] = callback; },
+      registration: { showNotification: (title, options) => { shown.push([title, options]); return Promise.resolve(); } },
+      location: { origin: 'https://home.example' },
+    },
+    URL, Request, Response,
+  });
+  vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), context);
+  return { listeners, shown };
+}
+
+test('push shows a notification in every path', async () => {
+  for (const data of [
+    { json: () => ({ title: 'CO2 high', body: 'Open a window', url: '/#summary' }) },
+    { json: () => { throw new SyntaxError('bad JSON'); } },
+    null,
+  ]) {
+    const { listeners, shown } = pushWorker();
+    let done;
+    listeners.push({ data, waitUntil: promise => { done = promise; } });
+    await done;
+    assert.equal(shown.length, 1);
+  }
+  const { listeners, shown } = pushWorker();
+  listeners.push({ data: { json: () => { throw new Error('bad'); } }, waitUntil: () => {} });
+  assert.equal(shown[0][0], 'Home Air');
+  assert.equal(shown[0][1].body, '');
+});
+
+
+// A tapped notification brings the Summary up: by navigate where it works, else by a message the page acts on (alerts.js).
+function clickWorker(windows) {
+  const listeners = {};
+  const opened = [];
+  const context = vm.createContext({
+    self: {
+      addEventListener: (name, callback) => { listeners[name] = callback; },
+      location: { origin: 'https://home.example' },
+      clients: { matchAll: async () => windows, openWindow: async url => { opened.push(url); } },
+    },
+    URL, Request, Response,
+  });
+  vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), context);
+  const click = async url => {
+    let done;
+    listeners.notificationclick({ notification: { close() {}, data: { url } }, waitUntil: promise => { done = promise; } });
+    await done;
+  };
+  return { click, opened };
+}
+function fakeWindow(navigate) {
+  const w = { url: 'https://home.example/', posted: [], focused: 0, focus: async () => { w.focused++; return w; },
+    postMessage: m => w.posted.push(m) };
+  if (navigate) w.navigate = navigate;
+  return w;
+}
+
+test('a click moves an open window by navigate when it works', async () => {
+  const w = fakeWindow(async url => { w.to = url; return w; });
+  await clickWorker([w]).click('/#summary');
+  assert.equal(w.to, 'https://home.example/#summary');
+  assert.deepEqual(w.posted, []);
+});
+
+test('a click posts the address when navigate is missing or refuses, and focuses the window', async () => {
+  for (const navigate of [undefined, async () => { throw new TypeError('not allowed'); }]) {
+    const w = fakeWindow(navigate);
+    await clickWorker([w]).click('/#summary');
+    assert.equal(w.posted.length, 1);
+    assert.equal(w.posted[0].type, 'open');
+    assert.equal(w.posted[0].url, 'https://home.example/#summary');
+    assert.ok(w.focused >= 1);
+  }
+});
+
+test('a click opens a window when none is open, and never follows another site', async () => {
+  const { click, opened } = clickWorker([]);
+  await click('https://evil.example/#x');
+  assert.deepEqual(opened, ['https://home.example/#summary']);
+});

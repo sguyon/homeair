@@ -1964,3 +1964,176 @@ html.sky-ink:not(.sky-dark) .now-bar .cap-i.air.bad svg.i { color: #b42318; }
   --air-particles-foot: 96 90 82 76 70 64; --air-particles-soot: 176 168 156 176 168 156;
 }
 /* End outdoor air (smoke, exhaust, fine particles, pollen). */
+
+
+
+/* Alerts (static/alerts.js; mock 112, round 5): the bell in the header's group, beside the account, and its panel. On a
+   phone the panel is an iPhone sheet: grouped rows on grey, a grabber that drags, every row always in place. On a
+   computer it is a small panel under the group. Only the bell shows the state: filled (on), crossed (off), outline (a
+   computer, which never gets alerts). */
+:root { --al-scrim: rgba(10, 16, 24, .4); --al-pop-shadow: rgba(0, 0, 0, .18); --al-sheet-shadow: rgba(0, 0, 0, .14);
+  --al-grp-bg: #f2f3f6; --al-fill: rgba(118, 118, 128, .12); --al-sep: rgba(60, 60, 67, .16); --al-sw-off: rgba(120, 120, 128, .2);
+  --al-knob: #fff; --al-qr-bg: #fff; --al-qr-ink: #111; --al-key: #1f6fd1;
+  --al-note: #65656f;     /* the notes under a group and the rows' values: 5.3:1 on --al-grp-bg (--muted is 4.4:1 there), as the design draws them */
+  --al-red: #d70015; }    /* a destructive action's text (Remove): the iPhone's red with more contrast, 5.4:1 on the card (dark: 6.3:1). Not --bad, which grades a reading */
+:root[data-theme="dark"] { --al-scrim: rgba(0, 0, 0, .55); --al-pop-shadow: rgba(0, 0, 0, .5); --al-sheet-shadow: rgba(0, 0, 0, .5);
+  --al-grp-bg: #101114; --al-fill: rgba(118, 118, 128, .24); --al-sep: rgba(84, 84, 88, .5); --al-sw-off: rgba(120, 120, 128, .36);
+  --al-key: #63adff; --al-note: #8b8b94; --al-red: #ff6961; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --al-scrim: rgba(0, 0, 0, .55); --al-pop-shadow: rgba(0, 0, 0, .5); --al-sheet-shadow: rgba(0, 0, 0, .5);
+    --al-grp-bg: #101114; --al-fill: rgba(118, 118, 128, .24); --al-sep: rgba(84, 84, 88, .5); --al-sw-off: rgba(120, 120, 128, .36);
+    --al-key: #63adff; --al-note: #8b8b94; --al-red: #ff6961; }
+}
+
+/* The bell: its own round button just left of the Home menu (round 6, "the bell apart"), drawn like the menu's pill (the
+   card's background, its outline and shadow) and as tall as it; the tap area reaches 44 px */
+.al-bell { position: relative; flex: none; width: var(--al-bell); height: var(--al-bell); border-radius: 99px; display: grid; place-items: center;
+  padding: 0; margin: 0; border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer;
+  -webkit-tap-highlight-color: transparent; transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+:root { --al-bell: 40px; }   /* px: the Home menu's pill on a phone (a 32 px avatar, 3 px padding, the outline) */
+@media (min-width: 701px) {
+  :root { --al-bell: 46px; }   /* px: the pill on a computer (a 34 px avatar, 5 px padding, the outline) */
+  .al-bell { box-shadow: 0 1px 2px var(--shadow); margin-right: -4px; }   /* 8 px from the pill, as drawn (the row's gap is 12) */
+}
+.al-bell::after { content: ""; position: absolute; inset: calc((var(--al-bell) - 44px) / 2); border-radius: 99px; }   /* a 44 px tap area */
+.al-bell[hidden] { display: none; }
+.al-bell svg.i { width: 21px; height: 21px; }
+.al-bell.on { color: var(--accent); }
+.al-bell.neutral { color: var(--soft); }
+/* Where alerts can't run: the plain bell, lightened as the panel's disabled rows are (the icon and the outline at 40%, the
+   solid card behind them, no shadow). Still a button: the panel says why. The icon is 1.7:1 on the card (dark: 1.9:1),
+   under 3:1, as a disabled control may be (WCAG 1.4.11); the reason is in the panel and the button's description. */
+.al-bell:active { background: var(--al-fill); }
+@media (hover: hover) { .al-bell:hover { border-color: var(--line-strong); } }
+.al-bell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+html.sky-on .al-bell { box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 10px 30px rgba(0, 0, 0, .10); }   /* as the pill over the live sky */
+
+/* The panel, both kinds */
+html.al-locked { overflow: hidden; }   /* the page behind the phone's panel stays put */
+.al-panel { padding: 0; border: 0; color: var(--ink); background: none; font: 400 16px/1.45 Inter, system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1; max-width: none; max-height: none; }   /* the page's figures, as the body sets them (the font shorthand resets them) */
+.al-panel button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit;
+  -webkit-tap-highlight-color: transparent; }
+.al-panel button:focus-visible, .al-panel select:focus-visible, .al-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.al-panel .al-row:focus-visible { outline-offset: -2px; }
+/* On a touch screen the time menu is the phone's own: no focus frame around the time (it drew two stray lines) */
+@media (hover: none) and (pointer: coarse) { .al-panel select:focus, .al-panel select:focus-visible { outline: none; } }
+.al-panel svg.i { width: 18px; height: 18px; }
+/* over the page's section headings (h2, h3: small capitals, a top margin, the sky's ink) */
+.al-panel h2.al-t { display: block; margin: 0 !important; font: 600 17px/1.3 Inter, sans-serif; letter-spacing: 0; color: var(--ink); text-transform: none; }
+
+/* The phone's sheet: the dialog fills the screen (it holds the dimming), the sheet sits at the bottom */
+.al-panel.sheet { position: fixed; inset: 0; width: 100%; height: 100%; margin: 0; overflow: hidden; overflow: clip; background: transparent; }   /* clip: the filler under the sheet never scrolls the dialog */
+.al-panel.sheet::backdrop { background: transparent; }
+.al-dim { position: absolute; inset: 0; background: var(--al-scrim); opacity: 0; touch-action: none; }
+.al-sh { position: absolute; left: 0; right: 0; bottom: 0; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column;
+  max-height: calc(100% - env(safe-area-inset-top) - 10px); background: var(--al-grp-bg); border-radius: 14px 14px 0 0;
+  box-shadow: 0 -2px 24px var(--al-sheet-shadow); transform: translateY(110%); will-change: transform; }
+.al-sh::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 60px; background: var(--al-grp-bg); }   /* no gap when the spring overshoots */
+.al-nav { flex: none; position: relative; height: 56px; display: grid; grid-template-columns: 88px 1fr 88px; align-items: center; padding: 0 6px;
+  touch-action: none; cursor: grab; }
+.al-grab { position: absolute; top: 6px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--line-strong); }
+.al-nav h2.al-t { grid-column: 2; text-align: center; }
+.al-panel .al-x { grid-column: 3; justify-self: end; width: 44px; height: 44px; margin-right: -2px; display: grid; place-items: center; }
+.al-x span { width: 30px; height: 30px; border-radius: 99px; background: var(--al-fill); display: grid; place-items: center; color: var(--soft); }
+.al-panel .al-x svg.i { width: 14px; height: 14px; stroke-width: 2.6; }
+.al-panel .al-back { grid-column: 1; grid-row: 1; justify-self: start; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px;
+  padding: 0 6px 0 2px; color: var(--accent-ink); font-size: 17px; }
+.al-panel .al-back svg.i { width: 22px; height: 22px; }
+.al-sc { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: 2px 16px calc(24px + env(safe-area-inset-bottom)); }
+@media (display-mode: standalone) {   /* a Home Screen app: the last line clears the home bar (34 px), whether or not the page reports it */
+  .al-sc { padding-bottom: max(40px, calc(24px + env(safe-area-inset-bottom))); }
+}
+.al-sc.in { animation: al-push .32s cubic-bezier(.32, .72, 0, 1); }
+.al-sc.out { animation: al-pop .32s cubic-bezier(.32, .72, 0, 1); }
+@keyframes al-push { from { transform: translateX(28%); opacity: 0; } }
+@keyframes al-pop { from { transform: translateX(-28%); opacity: 0; } }
+
+.al-panel h3.al-gh { margin: 22px 16px 7px !important; font: 400 13px/1.3 Inter, sans-serif; color: var(--al-note); letter-spacing: .02em;
+  text-transform: uppercase; }
+.al-panel h3.al-gh:first-child { margin-top: 6px !important; }
+.al-grp { margin: 0; padding: 0; list-style: none; background: var(--card); border-radius: 12px; overflow: hidden; transition: opacity .2s ease; }
+.al-grp.al-sep, .al-grp.al-first { margin-top: 20px; }
+.al-grp.al-first { margin-top: 6px; }
+.al-grp.off { opacity: .42; }
+.al-gap { height: 20px; }
+.al-ft { margin: 7px 16px 0; font-size: 13px; line-height: 1.38; color: var(--al-note); min-height: 18px; }
+.al-ft b { color: var(--soft); font-weight: 600; }
+.al-panel .al-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 14px; font-size: 17px; color: var(--ink);
+  text-align: left; position: relative; }
+.al-row + .al-row::before, .al-steps li + li .al-row::before { content: ""; position: absolute; top: 0; right: 0; left: 55px; height: 1px;
+  background: var(--al-sep); transform: scaleY(.5); transform-origin: top; }
+.al-row.noic + .al-row::before { left: 14px; }
+.al-ic { width: 29px; height: 29px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
+.al-ic.num { font: 600 15px Inter, sans-serif; background: var(--al-fill); color: var(--ink); border-radius: 99px; }
+.al-lb { flex: 1; min-width: 0; line-height: 1.3; padding: 11px 0; }
+.al-lb small { display: block; font-size: 13px; font-weight: 400; color: var(--al-note); }
+.al-val { color: var(--al-note); display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 17px; }
+.al-val svg.i { color: var(--line-strong); }
+.al-row.main .al-lb { font-weight: 600; }
+.al-row.act .al-lb { color: var(--accent-ink); }
+.al-panel button.al-row:active:not(:disabled), .al-panel label.al-row:active { background: var(--al-fill); }   /* steps and phones are text: no press look */
+.al-panel .al-row:disabled { cursor: default; }
+.al-panel .al-row:disabled .al-sw { opacity: .35; }
+.al-panel .al-row:disabled .al-lb, .al-panel .al-row:disabled .al-ic { opacity: .5; }   /* a switch that can't be used reads as disabled */
+.al-panel .al-row[aria-busy="true"] .al-sw { opacity: .7; }
+.al-kbd { display: inline-grid; place-items: center; vertical-align: -4px; width: 24px; height: 24px; color: var(--al-key); }
+.al-panel .al-kbd svg.i { width: 20px; height: 20px; }
+.al-sw { width: 51px; height: 31px; border-radius: 99px; background: var(--al-sw-off); position: relative; flex: none; transition: background-color .2s ease; }
+.al-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 99px; background: var(--al-knob);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .15), 0 1px 1px rgba(0, 0, 0, .16); transition: transform .25s cubic-bezier(.3, 1.3, .5, 1); }
+.al-sw.on { background: var(--accent); }
+.al-sw.on::after { transform: translateX(20px); }
+.al-panel .al-row select { flex: 0 1 auto; margin-left: auto; min-width: 0; min-height: 44px; appearance: none; -webkit-appearance: none; border: 0; background: none; padding: 0;
+  font: inherit; color: var(--muted); text-align: right; text-align-last: right; cursor: pointer; }
+.al-panel label.al-row { cursor: pointer; }
+.al-panel label.al-row .al-lb { flex: none; }
+/* Where alerts can't run (the demo, "local"): the same panel, greyed and lightened, with one line on why above it
+   (DESIGN.md, "A missing or disabled part"). The line: 7.0:1 on --al-grp-bg (dark: 7.4:1). */
+.al-why { margin: 4px 16px 14px; font-size: 15px; line-height: 1.4; color: var(--soft); }
+.al-dis .al-ic, .al-dis .al-row.act .al-lb { filter: grayscale(1); }   /* the icons and Send a test lose their colour; the
+   switches keep the disabled look of the working panel (accent at .35, as Allow Alerts has when it can't be used) */
+.al-dis .al-ft, .al-panel .al-dis h3.al-gh, .al-dis .al-row:disabled .al-val { opacity: .6; }
+.al-dis div.al-row .al-lb, .al-dis div.al-row .al-ic { opacity: .5; }   /* the phones: text rows, dimmed as the disabled ones */
+.al-panel.pop.dis { background: var(--al-grp-bg); }   /* no inner scroll, as the Home menu: it grows to its content and the page scrolls */
+.al-panel.pop.dis .al-why { margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .al-sc.in, .al-sc.out { animation: none; }
+  .al-grp, .al-sw, .al-sw::after, .al-bell { transition: none; }
+}
+
+/* The computer's panel: under the bell's group */
+.al-panel.pop { position: absolute; inset: auto; margin: 0; width: min(360px, calc(100vw - 32px)); background: var(--card); border-radius: 14px;
+  padding: 14px 16px 16px; box-shadow: 0 0 0 1px var(--line), 0 18px 48px var(--al-pop-shadow); }
+.al-panel.pop::backdrop { background: transparent; }
+.al-ph { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.al-panel .al-px { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); margin-right: -6px; flex: none; }
+.al-panel .al-px:hover { background: var(--tile); color: var(--ink); }
+.al-scan { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
+.al-scan p { margin: 0; color: var(--soft); font-size: 15px; }
+.al-qr { width: 120px; height: 120px; flex: none; border-radius: 8px; border: 1px solid var(--line); }
+.al-qr-bg { fill: var(--al-qr-bg); }
+.al-qr-ink { fill: var(--al-qr-ink); }
+.al-host { font-size: 13px; color: var(--muted); text-decoration: none; }
+.al-host:hover { color: var(--accent-ink); text-decoration: underline; }
+.al-ph-gh { margin: 14px 0 2px; font: 600 15px/1.3 Inter, sans-serif; color: var(--muted); }
+.al-ln { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; font-size: 15px; border-bottom: 1px solid var(--line); }
+.al-note { margin: 10px 0 0; font-size: 14px; color: var(--al-note); }
+.al-note.al-first { margin-top: 4px; }
+.al-who { display: flex; flex-direction: column; min-width: 0; padding: 7px 0; line-height: 1.3; }
+.al-who small { font-size: 13px; color: var(--al-note); }
+
+/* Remove, on each other phone's row: red text that asks once (Cancel or Remove) on the same row. Only these are buttons:
+   the rows keep no press look. The tap area is 44 px tall on the phone. */
+.al-panel .al-rm, .al-panel .al-cancel { flex: none; min-height: 44px; min-width: 44px; padding: 0; font-size: 17px; color: var(--al-red);
+  text-align: center; transition: opacity .15s ease; }
+.al-panel .al-cancel { color: var(--accent-ink); }
+.al-panel .al-rm.yes { font-weight: 600; }
+.al-panel .al-rm:active:not(:disabled), .al-panel .al-cancel:active:not(:disabled) { opacity: .45; }   /* an iPhone text button dims while pressed */
+.al-panel .al-rm:disabled, .al-panel .al-cancel:disabled { cursor: default; opacity: .45; }
+.al-cf { display: inline-flex; align-items: center; gap: 8px; flex: none; }   /* tight: the row keeps its date and time on one line at 390 px */
+.al-ln .al-rm, .al-ln .al-cancel { min-height: 32px; font-size: 15px; }
+.al-ln .al-cf { gap: 14px; }   /* the computer's panel has the room */
+@media (hover: hover) { .al-panel .al-rm:hover:not(:disabled), .al-panel .al-cancel:hover:not(:disabled) { text-decoration: underline; } }
+@media (prefers-reduced-motion: reduce) { .al-panel .al-rm, .al-panel .al-cancel { transition: none; } }

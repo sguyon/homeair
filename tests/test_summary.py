@@ -153,7 +153,7 @@ def test_airing_after_when_dirty_now():
 
 def test_airing_blocked_over_35():
     o = ol(over=[(at(15, 40), at(20))], now_v=40, high=True)
-    assert action(CO2_ITEM, {"co2": 1240}, o, RUSH, at(15, 40)) == {"text": "Air out", "when": "after 8 PM", "when_end": iso(at(20))}
+    assert action(CO2_ITEM, {"co2": 1240}, o, RUSH, at(15, 40)) == {"text": "Open a window for 10 min", "when": "after 8 PM", "when_end": iso(at(20))}
     assert action(PM_ITEM, {"pm_now": 40}, o, RUSH, at(15, 40))["text"] == "Keep windows shut"
 
 
@@ -175,7 +175,7 @@ def test_dry_has_no_humidifier():
 
 def test_pm_item_window():
     a = action(PM_ITEM, {"pm_now": 4}, ol(over=[(at(16), at(20))]), RUSH, at(15, 40))
-    assert a == {"text": "Windows shut", "when": "4–8 PM", "when_end": iso(at(20))}
+    assert a == {"text": "Keep windows shut", "when": "4–8 PM", "when_end": iso(at(20))}
 
 
 def test_pm_item_dirty_now():
@@ -475,7 +475,7 @@ def test_air_before_a_dirty_stretch_that_has_not_started():
     a = action(CO2_ITEM, {"co2": 900}, ol(over=[(at(23), at(0, day=1))], now_v=4, high=True), [], at(21, 30))
     assert (a["text"], a["when"]) == ("Open a window for 10 min", "before 11 PM")
     a = action(CO2_ITEM, {"co2": 900}, ol(over=[(at(21), at(23))], now_v=40, high=True), [], at(21, 30))
-    assert (a["text"], a["when"]) == ("Air out", "after 11 PM")
+    assert (a["text"], a["when"]) == ("Open a window for 10 min", "after 11 PM")
 
 
 def test_no_road_no_rush_in_the_text():
@@ -699,16 +699,16 @@ def test_two_monitor_summary_unchanged_by_the_new_arguments():
 
 def test_pollen_makes_room_for_an_airing():
     """Pollen says "keep windows shut" for the day; a CO₂ or humidity airing beside it would contradict it, so the pollen
-    action names the airing as its one exception. With nothing to air, it stays as it is."""
+    item's reason names the airing as its one exception, and its action stays short. With nothing to air, no exception."""
     from summary import with_airing
     shut = {"text": "Keep windows shut", "when": "today", "when_end": None}
-    items = [{"id": "co2", "action": {"text": "Open a window for 10 min", "when": "after 11 AM"}},
-             {"id": "pollen", "action": dict(shut)}]
+    pollen = lambda: {"id": "pollen", "action": dict(shut), "facts": {"pollen_index": 4, "pollen_type": "tree"}, "why": ""}
+    items = [{"id": "co2", "action": {"text": "Open a window for 10 min", "when": "after 11 AM"}}, pollen()]
     with_airing(items)
-    assert items[1]["action"]["text"] == "Keep windows shut except a short airing for CO₂"
-    items = [{"id": "rh", "action": {"text": "Air the room for 10 min", "when": "after 2 PM"}}, {"id": "pollen", "action": dict(shut)}]
+    assert items[1]["action"] == shut and items[1]["why"].endswith("Keep the windows shut, open one only briefly when CO₂ is high, and shower after time outside.")
+    items = [{"id": "rh", "action": {"text": "Air the room for 10 min", "when": "after 2 PM"}}, pollen()]
     with_airing(items)
-    assert items[1]["action"]["text"] == "Keep windows shut except a short airing to dry the room"
-    items = [{"id": "co2", "action": {"text": "Run the purifier", "when": "now"}}, {"id": "pollen", "action": dict(shut)}]
+    assert "open one only briefly to dry the room" in items[1]["why"]
+    items = [{"id": "co2", "action": {"text": "Run the purifier", "when": "now"}}, pollen()]
     with_airing(items)
-    assert items[1]["action"] == shut
+    assert items[1]["action"] == shut and "airing_when" not in items[1]["facts"]

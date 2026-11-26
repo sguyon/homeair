@@ -239,15 +239,13 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
     """What to do for one item, with its time: text, when, and when_end (ISO, the moment `when` goes stale).
     `estimate`: the outdoor PM2.5 has no reading now (an indoor-only home on the area or the model). Airing before the
     dirty stretch then reads "now, before 8 AM" ("now, before the 8 AM rush" when it starts in a rush with the wind
-    toward home), so it doesn't read as a clash with "Windows shut · 8–11 AM".
+    toward home), so it doesn't read as a clash with "Keep windows shut · 8–11 AM".
     `hourly`: weather rows with forecast dew points, to time airing a damp room with no drying appliance."""
     act = lambda text, when=None, end=None: {"text": text, "when": when, "when_end": end.isoformat() if end else None}
     stretch = _first_over(outlook, now)
     kind = item["id"]
     if kind == "co2":
-        if outlook.get("high") and stretch and stretch[0] <= now:   # dirty now: wait it out; dirty later: air before
-            return act("Air out", f"after {clock(stretch[1])}", stretch[1])
-        if stretch and stretch[0] <= now:
+        if stretch and stretch[0] <= now:   # dirty now: wait it out; dirty later: air before
             return act("Open a window for 10 min", f"after {clock(stretch[1])}", stretch[1])
         if stretch and stretch[0] - now <= timedelta(hours=2):
             if not estimate:
@@ -280,7 +278,7 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
             return act("Keep windows shut", "while it’s this dry outside")
         return act(None)
     if kind == "pm":
-        text = "Keep windows shut" if outlook.get("high") else "Windows shut"
+        text = "Keep windows shut"   # high or not: an instruction, not a state
         if not stretch:
             return act(text, "now")
         if stretch[0] <= now:
@@ -292,17 +290,20 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
 
 
 AIRING = ("Open a window", "Air the room")   # the action texts that open a window for a few minutes
-AIRING_FOR = {"co2": "for CO₂", "rh": "to dry the room"}   # what each airing is for, in the pollen action's exception
+AIRING_FOR = {"co2": "for CO₂", "rh": "to dry the room"}   # what each airing is for, in the sinus profile's exception
+AIRING_WHEN = {"co2": "when CO₂ is high", "rh": "to dry the room"}   # the same, in the pollen item's reason
 
 
 def with_airing(items):
     """A CO₂ or humidity airing wins over high pollen (a few minutes of pollen against hours of stale or damp air), so the
-    pollen action names it as its one exception instead of contradicting it. Pollen is a daily index: no better hour.
+    pollen item's reason names it as its one exception instead of contradicting it; the action stays "Keep windows shut ·
+    today", short enough for a phone's alert title. Pollen is a daily index: no better hour.
     Returns what the airing is for ("for CO₂"), or None: the sinus profile's sentence names the same exception."""
     airing = next((it for it in items if it["id"] in AIRING_FOR and (it["action"]["text"] or "").startswith(AIRING)), None)
     for it in items:
         if it["id"] == "pollen" and airing:
-            it["action"]["text"] = f"Keep windows shut except a short airing {AIRING_FOR[airing['id']]}"
+            it["facts"]["airing_when"] = AIRING_WHEN[airing["id"]]
+            it["why"] = phrases.why("pollen", it["facts"])   # pollen's reason has no home facts: rebuilt from its own
     return AIRING_FOR[airing["id"]] if airing else None
 
 

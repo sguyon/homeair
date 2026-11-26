@@ -23,6 +23,7 @@ import budgets
 import phrases
 import token_setup
 import upstream
+from alert_rules import OFFLINE_AFTER, QUIET_DEFAULT
 import summary as summary_rules
 from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, add_key, backup_config, config_path, env_key,
                     load_config, public_view, monitors as config_monitors, real_value, replace_text, route_path,
@@ -140,6 +141,8 @@ def server_mode(cfg, token):
 
 
 use_config(boot_config())
+
+OFFLINE_AFTER_MIN = int(OFFLINE_AFTER.total_seconds() // 60)   # the page's Online / Late / Offline dots use the alerts' Offline point
 
 
 MODE = server_mode(CFG, TOKEN)   # "demo", "live", "local" or "no_token"; local token entry switches to live
@@ -326,7 +329,7 @@ def api_headers(resp):
     """No browser HTTP caching of live data (the server cache does that); say how fresh the answer is."""
     if request.path.startswith("/api/"):
         # never kept: the token form, and the setup state the Connected card polls while setup restarts the app
-        resp.headers["Cache-Control"] = "no-store" if request.path in ("/api/token", "/api/setup") or request.path.startswith("/api/agent/") else "no-cache"
+        resp.headers["Cache-Control"] = "no-store" if request.path in ("/api/token", "/api/setup") or request.path.startswith(("/api/agent/", "/api/alerts")) else "no-cache"
         if getattr(g, "cache_state", None):
             resp.headers["X-Cache"] = g.cache_state
             resp.headers["X-Data-Age"] = str(g.cache_age)
@@ -573,6 +576,7 @@ def save_token():
         budgets.clear("ag_current")   # a refused token's pause ends with a new one
         budgets.clear("ag_history")
         take_account(accepted)
+        start_alerts()   # Home Air with nothing to read before the token reads the home now
         token_state.saved = {"monitors": sources.account_monitors(accepted)}   # their names and kinds, for the "connected" card
         token_state.nonces.clear()
         token_state.failures.clear()
@@ -658,7 +662,10 @@ def inject_app(html, setup_page=False):
     """The home's config for the page's scripts (config.public_view), as window.APP before the first of them.
     Every "<" is escaped (\\u003c, still the same JSON) so no config value can close the script or open a comment."""
     now = None if setup_page else page_clock()   # the token card never shows the demo's moments
-    data = json.dumps({**page_view(), "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {"state": "local"} if MODE == "local" else {})}, ensure_ascii=False).replace("<", "\\u003c")
+    import alerts   # here: server.py imports it at the end, after the routes
+    alerts_state = alerts.available(request, demo=MODE == "demo", reading=reads_home())   # where this request's page can turn alerts on
+    data = json.dumps({**page_view(), "offline_after_min": OFFLINE_AFTER_MIN, "alerts": alerts_state, "alerts_quiet": list(QUIET_DEFAULT),
+                       "env": icon_env(), **({"now": now} if now else {}), **({"state": "no_token"} if MODE == "no_token" or setup_page else {"state": "local"} if MODE == "local" else {})}, ensure_ascii=False).replace("<", "\\u003c")
     return html.replace("<script src=", f"<script>window.APP = {data};</script>\n<script src=", 1)
 
 
@@ -972,6 +979,45 @@ def monitors():
 
 import mcp_server   # /mcp for AI assistants and /api/agent/* for the skill (agent_tools.py: the tools and their answers)
 mcp_server.init(app, lambda: {**page_view(), "real_clock": page_clock() is None})   # a lambda: the demo replaces page_view below
+
+
+ALERTS = None   # the alert check on a timer (alerts.py); None unless Home Air reads the home and has push keys
+ALERT_STORE = None   # the phones' store, made on first use once the push keys are set (never in the demo)
+_alert_store_lock = threading.Lock()
+
+
+def alert_store_now():
+    """The phones' store (alert_store.py), or None until push keys are set and always in the demo."""
+    global ALERT_STORE
+    import alert_store
+    import alerts
+    with _alert_store_lock:
+        if ALERT_STORE is None and MODE != "demo" and alerts.push_keys_set():
+            ALERT_STORE = alert_store.AlertStore(alert_store.alerts_path())
+        return ALERT_STORE
+
+
+def reads_home():
+    """Whether Home Air has a reading source for the alerts: a token (live), or the monitors read on the Wi-Fi (the
+    poller runs, no token needed). Never the demo or a config with nothing to read."""
+    return MODE == "live" or (MODE == "local" and POLLER is not None)
+
+
+def start_alerts():
+    """Check for alerts every few minutes, from the same Summary as the page. Only where Home Air reads the home, with
+    both push keys (setup makes them); under gunicorn's one worker, so each alert is sent once. Again after a token is
+    saved: a copy that had nothing to read then starts."""
+    global ALERTS
+    import alerts
+    if ALERTS or not reads_home() or not alerts.push_keys_set():
+        return
+    ALERTS = alerts.Checker(app, alert_store_now(), tz=HOME_TZ or timezone.utc)
+    ALERTS.start()
+
+
+import alerts
+alerts.init(app, alert_store_now, demo=lambda: MODE == "demo", reading=reads_home, tz=HOME_TZ or timezone.utc)   # /api/alerts: turn alerts on, choose, test, turn off
+start_alerts()
 
 
 if MODE == "demo":   # every outside source becomes made-up data, generated per request (demo/data.py)

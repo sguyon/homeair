@@ -61,7 +61,7 @@ HIST_KEEP = ("timestamp", "pm02", "pm02_corrected", "rco2", "rco2_corrected", "r
 # ── How often AirGradient is asked (docs/api-usage.md) ──
 # The monitors' readings are fetched at most once per REFRESH_SECONDS, shared by every open tab and visitor: a page
 # reads the server's cache, so the calls grow with homes, not with people looking. Nothing is fetched while no one has
-# the app open. AirGradient's history comes in 5-minute buckets, so 5 minutes is as fresh as a chart can get; a Wi-Fi
+# the app open and no phone has alerts on (alerts.py checks every ALERT_CHECK_SECONDS, through these same caches). AirGradient's history comes in 5-minute buckets, so 5 minutes is as fresh as a chart can get; a Wi-Fi
 # monitor posts every minute, which is why REFRESH_FLOOR_SECONDS (and the Refresh button's floor) is one minute.
 REFRESH_FLOOR_SECONDS = 60
 

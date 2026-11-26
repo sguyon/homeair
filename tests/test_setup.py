@@ -106,10 +106,15 @@ def home(root):
     return load_config({}, root)
 
 
+def without_push_keys(path):
+    """The .env text minus the alert keys setup also makes (they are random)."""
+    return "".join(l + "\n" for l in path.read_text().splitlines() if not l.startswith("VAPID_"))
+
+
 def test_default_command_prepares_editor_file(root, capsys, calls):
     code, out = run(root, capsys, env={})
     assert code == 0 and "API token" in out   # with nothing found, the token is the way in (on the page)
-    assert (root / ".env").read_text() == "AIRGRADIENT_TOKEN=\n"
+    assert without_push_keys(root / ".env") == "AIRGRADIENT_TOKEN=\n"
     assert stat.S_IMODE((root / ".env").stat().st_mode) == 0o600
     assert "Connect AirGradient on the page instead." not in out   # the unclear old line; "Nothing is read yet" says it
 
@@ -121,7 +126,7 @@ def test_editor_preparation_keeps_existing_lines_and_values(root, capsys, calls,
     code, out = run(root, capsys, env={})
     assert code == 0 and TOKEN not in out
     expected = text if "AIRGRADIENT_TOKEN=" in text else text + "AIRGRADIENT_TOKEN=\n"
-    assert path.read_text() == expected
+    assert without_push_keys(path) == expected
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
@@ -1167,3 +1172,17 @@ def test_a_monitor_that_misses_one_read_is_still_read(root, monkeypatch, monitor
     monkeypatch.setattr(setup, "READ_RETRY_WAIT", 0)
     chosen, lines = setup.found_monitors(found, reader=flaky)
     assert set(chosen) == {"indoor", "outdoor"} and not any("didn't answer" in l for l in lines)
+
+
+def test_setup_writes_keys_once_without_printing(root, capsys, calls):
+    from config import parse_dotenv
+    run(root, capsys, env={})
+    first = parse_dotenv((root / ".env").read_text())
+    assert first["VAPID_PRIVATE_KEY"] and first["VAPID_PUBLIC_KEY"]
+    code, out = run(root, capsys, env={})
+    assert parse_dotenv((root / ".env").read_text()) == first
+    assert "Alert keys ready" not in out
+    assert first["VAPID_PRIVATE_KEY"] not in out and first["VAPID_PUBLIC_KEY"] not in out
+    root2 = root / "second"; root2.mkdir()
+    code, out = run(root2, capsys, env={})
+    assert "Alert keys ready" in out and parse_dotenv((root2 / ".env").read_text())["VAPID_PRIVATE_KEY"] not in out

@@ -297,7 +297,7 @@
     "items": [
      {
       "action": {
-       "text": "Windows shut",
+       "text": "Keep windows shut",
        "when": "5–10 PM",
        "when_end": "2026-04-21T22:00:00-04:00"
       },
@@ -344,12 +344,13 @@
      },
      {
       "action": {
-       "text": "Keep windows shut except a short airing for CO₂",
+       "text": "Keep windows shut",
        "when": "today",
        "when_end": null
       },
       "ctx": "Tree pollen, high today",
       "facts": {
+       "airing_when": "when CO₂ is high",
        "pollen_index": 4,
        "pollen_type": "tree"
       },
@@ -361,7 +362,7 @@
       "profile": "sinus",
       "score": 1.3333333333333333,
       "unit": "of 5",
-      "why": "Tree pollen sets off sneezing and a stuffy nose for allergic sinuses. Today it’s 4 of 5. Keep the windows shut and shower after time outside."
+      "why": "Tree pollen sets off sneezing and a stuffy nose for allergic sinuses. Today it’s 4 of 5. Keep the windows shut, open one only briefly when CO₂ is high, and shower after time outside."
      }
     ],
     "label": "Today",
@@ -1010,12 +1011,13 @@
      },
      {
       "action": {
-       "text": "Keep windows shut except a short airing for CO₂",
+       "text": "Keep windows shut",
        "when": "today",
        "when_end": null
       },
       "ctx": "Tree pollen, high today",
       "facts": {
+       "airing_when": "when CO₂ is high",
        "pollen_index": 4,
        "pollen_type": "tree"
       },
@@ -1027,7 +1029,7 @@
       "profile": "sinus",
       "score": 1.3333333333333333,
       "unit": "of 5",
-      "why": "Tree pollen sets off sneezing and a stuffy nose for allergic sinuses. Today it’s 4 of 5. Keep the windows shut and shower after time outside."
+      "why": "Tree pollen sets off sneezing and a stuffy nose for allergic sinuses. Today it’s 4 of 5. Keep the windows shut, open one only briefly when CO₂ is high, and shower after time outside."
      },
      {
       "action": {
