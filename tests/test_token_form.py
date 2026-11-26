@@ -125,7 +125,7 @@ def test_a_rebound_name_gets_no_box(local, host):
         assert 'type="password"' not in local.get(path, base_url="http://" + host, headers=headers, follow_redirects=True).get_data(as_text=True)
     response = local.post("/api/token", base_url="http://" + host, data={"setup_nonce": value, "token": TOKEN},
                           headers={"Origin": "http://" + host, "Host": host})
-    assert response.status_code == 403
+    assert response.status_code in (403, 421)   # 421: a name from another site, refused before the token check
     assert not server.env_path.exists()
 
 

@@ -33,7 +33,7 @@ def test_handshake_and_read_only_tools(client):
 
 def test_a_page_on_another_site_is_refused(client):
     assert rpc(client, "ping", Origin="http://evil.example").status_code == 403
-    assert rpc(client, "ping", Origin="http://evil.example:5555", Host="evil.example:5555").status_code == 403   # DNS rebinding
+    assert rpc(client, "ping", Origin="http://evil.example:5555", Host="evil.example:5555").status_code == 421   # DNS rebinding: refused by the host check first
     assert rpc(client, "ping", Origin="http://localhost:6274").status_code == 200   # the MCP Inspector on this computer
 
 

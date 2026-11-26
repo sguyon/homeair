@@ -87,3 +87,47 @@ def test_asset_version_follows_the_file(tmp_path, monkeypatch):
     assert server.asset_version("/static/x.js") == first
     f.write_text("bb")
     assert server.asset_version("/static/x.js") != first
+
+
+# A web page on another site can point its own name at a home's copy (DNS rebinding): the browser then sends that
+# name as the Host, and the page could read the readings. A copy on a home network answers only names that can't be
+# an outside site's.
+FOREIGN = "http://evil.example/"
+
+
+def test_a_name_from_another_site_is_refused(client, monkeypatch):
+    for marker in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "VERCEL"):
+        monkeypatch.delenv(marker, raising=False)
+    for path in ("/api/current", "/api/agent/now", "/"):
+        resp = client.get(path, base_url=FOREIGN)
+        assert resp.status_code == 421, path
+        assert "HOME_AIR_HOSTS" in resp.get_data(as_text=True)
+
+
+def test_home_network_names_are_answered(client, monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+    for host in ("localhost:5555", "127.0.0.1:5555", "[::1]:5555", "192.168.1.20:5555", "100.101.1.2",
+                 "203.0.113.5:8080", "homeserver:5555", "macbook.local", "laptop.tail2721b4.ts.net",
+                 "nas.lan", "pi.home.arpa", "nas.fritz.box", "nas.home", "pi.localdomain", "nas.local.", "localhost.",
+                 "[fe80::1%25en0]:5555"):
+        assert client.get("/health", base_url=f"http://{host}/").status_code == 200, host
+
+
+def test_a_name_the_owner_adds_is_answered(client, monkeypatch):
+    monkeypatch.setenv("HOME_AIR_HOSTS", "air.example.com, other.example.org")
+    assert client.get("/health", base_url="http://air.example.com/").status_code == 200
+    assert client.get("/health", base_url="http://AIR.example.com:443/").status_code == 200
+    assert client.get("/health", base_url=FOREIGN).status_code == 421
+
+
+def test_a_hosted_copy_answers_its_public_name(client, monkeypatch):
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    assert client.get("/health", base_url="http://homeair-production.up.railway.app/").status_code == 200
+
+
+def test_a_home_kubernetes_still_checks_names(client, monkeypatch):
+    """A NAS's apps (TrueNAS SCALE) run on Kubernetes at home: that marker alone doesn't make a copy public."""
+    for marker in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "VERCEL"):
+        monkeypatch.delenv(marker, raising=False)
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    assert client.get("/health", base_url=FOREIGN).status_code == 421
