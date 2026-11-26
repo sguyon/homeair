@@ -32,6 +32,12 @@ var NBMAP = (() => {
     return loading;
   }
 
+  // The plume takes the live sky's exhaust colour (--air-exhaust-map, set with the weather and the hour), else LA's tan:
+  // the same thing in the sky and on the map. The tan is paler than the old amber, so it is drawn a little stronger.
+  const PLUME_FALLBACK = 'rgb(179 159 129)', PLUME_OPACITY = 1.6;   // sky-glass.js EXHAUST_PAL's LA body, a little toward its edge; opacity multiple
+  const plumeColour = () => (getComputedStyle(document.documentElement).getPropertyValue('--air-exhaust-map') || '').trim() || PLUME_FALLBACK;
+  const plumeOpacity = () => ['*', ['get', 'op'], (toward() ? 1.15 : .75) * PLUME_OPACITY];
+  const recolourPlume = () => { if (map && map.getLayer && map.getLayer('plume')) map.setPaintProperty('plume', 'fill-color', plumeColour()); };
   function plume(deg) {
     if (deg == null || !bqe) return fc([]);
     // degrees per km: a degree of longitude shrinks with the home's latitude
@@ -46,7 +52,7 @@ var NBMAP = (() => {
     const dark = theme() === 'dark', ink = dark ? '#ececef' : '#18181b', halo = dark ? '#17181c' : '#ffffff';
     if (bqe) {   // the road and its plume, when the home has one
       map.addSource('plume', { type: 'geojson', data: plume(data.wind) });
-      map.addLayer({ id: 'plume', type: 'fill', source: 'plume', paint: { 'fill-color': '#f59e0b', 'fill-opacity': ['*', ['get', 'op'], toward() ? 1.15 : .75] } });
+      map.addLayer({ id: 'plume', type: 'fill', source: 'plume', paint: { 'fill-color': plumeColour(), 'fill-opacity': plumeOpacity() } });
       map.addSource('bqe', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: bqe } } });
       map.addLayer({ id: 'bqe-case', type: 'line', source: 'bqe', paint: { 'line-color': halo, 'line-width': 8 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
       map.addLayer({ id: 'bqe', type: 'line', source: 'bqe', paint: { 'line-color': dark ? '#a1a1aa' : '#71717a', 'line-width': 4 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
@@ -77,6 +83,7 @@ var NBMAP = (() => {
     const zoom = box.clientWidth < PHONE_PX ? ZOOM_PHONE : ZOOM_WIDE;
     try {
       map = new maplibregl.Map({ container: box, style: STYLE[theme()], center: home, zoom, attributionControl: false, dragRotate: false });
+      document.addEventListener('sky-exhaust-colour', recolourPlume);   // the sky's exhaust colour changes with the weather and the hour
     } catch (e) {
       box.innerHTML = '<p class="nb-map-msg">The map needs WebGL, which this browser has turned off. The table below has every monitor.</p>';
       document.body.dataset.mapReady = 'none'; map = null; return;
@@ -127,8 +134,8 @@ var NBMAP = (() => {
     if (!map || !map.getSource('mons')) return;
     if (map.getSource('plume')) {
       map.getSource('plume').setData(plume(data.wind));
-      map.setPaintProperty('plume', 'fill-color', '#f59e0b');
-      map.setPaintProperty('plume', 'fill-opacity', ['*', ['get', 'op'], toward() ? 1.15 : .75]);
+      map.setPaintProperty('plume', 'fill-color', plumeColour());
+      map.setPaintProperty('plume', 'fill-opacity', plumeOpacity());
     }
     map.getSource('mons').setData(monitors());
   }

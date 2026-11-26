@@ -5,11 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
 
 const root = new URL('../', import.meta.url);
 const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1')
   .replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g, "''");
-const files = ['static/app.js', 'static/sky.js', 'static/summary.js', 'static/home.js', 'static/picker.js'].map(f => strip(readFileSync(new URL(f, root), 'utf8')));
+const files = ['static/app.js', 'static/sky.js', 'static/sky-glass.js', 'static/sky-wet.js', 'static/summary.js', 'static/home.js', 'static/picker.js'].map(f => strip(readFileSync(new URL(f, root), 'utf8')));
 const all = files.join('\n');
 
 const declared = new Set();
@@ -39,6 +40,1048 @@ test('the page uses the new summary card, not the old headline and need cards', 
   assert.match(html, /id="summary"/);
   assert.doesNotMatch(html, /id="s-cards"/);
   assert.doesNotMatch(html, /id="lead"/);
+  // Production materials load in order; prototype URLs cannot install another controller or an inert Play control.
+  assert.match(html, /href="\/static\/sky-air\.css"/);
+  const scripts = [...html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)].map(m => m[1]);
+  for (const src of ['/static/sky-glass.js', '/static/sky-wet.js', '/static/sky.js']) {
+    assert.ok(scripts.includes(src), `${src} must be loaded`);
+  }
+  assert.ok(scripts.indexOf('/static/sky-glass.js') < scripts.indexOf('/static/sky-wet.js'));
+  assert.ok(scripts.indexOf('/static/sky-wet.js') < scripts.indexOf('/static/sky.js'));
+  const skyHeadings = [...html.matchAll(/<(h2|span)\b[^>]*\bdata-sky-heading(?=\s|>)[^>]*>([^<]+)<\/\1>/g)].map(m => m[2]);
+  assert.deepEqual(skyHeadings, ['Home monitors', 'Local conditions', 'History', 'Neighborhood']);
+  const sky = readFileSync(new URL('static/sky.js', root), 'utf8');
+  assert.doesNotMatch(sky, /CONCEPT|outsideIn|fxArm|\/static\/concepts\/|import\(/);
+  assert.doesNotMatch(html, /id="(?:fx-in(?:-play)?|sky-in(?:-back)?)"/);
+  assert.match(html, /id="sky-front"/);
+  assert.match(html, /id="fx-time"/);
+  assert.match(html, /id="fx-rand"/);
+});
+
+test('sky ink samples a painted frame once, without following every steady rain frame', () => {
+  const noop = () => {};
+  const observer = class { observe() {} };
+  const rect = { left: 24, top: 24, right: 64, bottom: 38, width: 40, height: 14 };
+  const reads = [], frames = new Map(), nodes = new Map();
+  let nextFrame = 0, time = 0, air, wetApi, outdoorFrame, wetFrame;
+  const composition = [];
+  let rearAir = () => [110, 110, 110];
+  const $ = id => {
+    if (!nodes.has(id)) {
+      const el = { style: { setProperty(k, v) { this[k] = v; } }, dataset: { theme: 'dark' }, querySelectorAll: () => [],
+        classList: { add: noop, remove: noop, toggle: noop, contains: () => true }, addEventListener: noop,
+        setAttribute: noop, getBoundingClientRect: () => rect, hasAttribute: () => true };
+      let layers = [], savedFilter;
+      const ctx = new Proxy({ canvas: el, filter: 'none', clearRect() { layers = []; },
+        save() { savedFilter = this.filter; }, restore() { this.filter = savedFilter; },
+        drawImage(layer) { layers.push([layer, this.filter]); },
+        getImageData(x, y, w, h) { composition.push([time, 'ink']); reads.push({ time, layers }); return { data: new Uint8ClampedArray(w * h * 4) }; },
+        createRadialGradient: () => ({ addColorStop: noop }), createLinearGradient: () => ({ addColorStop: noop }) },
+      { get: (obj, key) => key in obj ? obj[key] : noop });
+      el.getContext = () => ctx;
+      nodes.set(id, el);
+    }
+    return nodes.get(id);
+  };
+  const requestAnimationFrame = cb => (frames.set(++nextFrame, cb), nextFrame);
+  const advance = now => {
+    time = now;
+    const pending = [...frames.values()]; frames.clear();
+    for (const cb of pending) cb(now);
+  };
+  const document = { documentElement: $('html'), body: $('body'), querySelector: () => null,
+    querySelectorAll: selector => selector.includes('[data-sky-heading]') ? [$('heading')] : [],
+    createElement: () => $(Symbol()), createRange: () => ({ selectNodeContents: noop, getClientRects: () => [rect] }), addEventListener: noop };
+  const window = { matchMedia: () => ({ matches: false }), addEventListener: noop };
+  runInNewContext(readFileSync(new URL('static/sky.js', root), 'utf8'), {
+    window, document, $, location: { search: '' }, APP: { place: { lat: 0, lon: 0 }, limits: { pm_high: 35 } }, state: {},
+    TZ: 'UTC', appNow: () => new Date('2026-11-24T22:00:00Z'), has: v => v != null, pmOver: home.pmOver,
+    innerWidth: 120, innerHeight: 100, scrollX: 0, scrollY: 0, performance: { now: () => time },
+    setInterval: noop, clearTimeout: noop, addEventListener: noop, requestAnimationFrame,
+    cancelAnimationFrame: id => frames.delete(id), IntersectionObserver: observer, MutationObserver: observer,
+    getComputedStyle: el => ({ backgroundColor: 'rgb(14, 15, 18)', filter: el === $('sky-clouds') ? 'blur(2px)' : 'none',
+      opacity: el.style.opacity, getPropertyValue: k => k.endsWith('on-light') ? '8 14 26' : '253 254 255' }),
+    SkyGlass: { create(api) {
+      air = api;
+      return { redraw: noop, sampleRear: (rgb, x) => rearAir(x), sampleFront: rgb => rgb };
+    } },
+    SkyWet: { create: api => { wetApi = api; return { redraw: noop, refreshComposite: () => composition.push([time, 'composite']), sampleBackground: rgb => rgb }; } },
+  });
+  rearAir = () => [214, 194, 160];   // the exhaust plume's light edge behind the heading (the air effects draw the PM2.5 now)
+  window.skyPreview({ minutes: 120, cloud: 95, rain: .6, pm: 48, dir: 135, spd: 9 });
+  for (let t = 0; t <= 4800; t += 16) advance(t);
+  const steady = reads.filter(read => read.time > 4000);
+  assert.ok(steady.length > 0, 'steady rain is still sampled periodically');
+  assert.equal(new Set(steady.map(read => read.time)).size, 1, 'steady rain must not drive readbacks at frame rate');
+  const cloudRead = steady.flatMap(read => read.layers).find(([layer]) => layer === $('sky-clouds'));
+  assert.equal(cloudRead?.[1], 'blur(2px)', 'read the clouds with the same blur as the painted canvas');
+  assert.equal($('heading').dataset.skyInkLight, 'false', 'a light plume behind the heading makes dark ink safer');
+
+  const readCount = reads.length;
+  const drawOutdoor = now => {
+    outdoorFrame = now;
+    composition.push([now, 'outdoor']);
+    rearAir = x => x < 44 ? [72, 72, 72] : [240, 240, 240];
+    air.invalidateInk(); air.invalidateInk();
+  };
+  (air.requestOutdoorFrame || requestAnimationFrame)(drawOutdoor);
+  wetApi.requestWetFrame(now => { wetFrame = now; composition.push([now, 'wet']); });
+  advance(6400); // the bounded weather sample is also due
+  const outdoorReads = reads.slice(readCount);
+  assert.equal(outdoorFrame, 6400);
+  assert.equal(wetFrame, 6400);
+  assert.deepEqual([...new Set(composition.filter(([at]) => at === 6400).map(([, stage]) => stage))], ['outdoor', 'wet', 'composite', 'ink']);
+  assert.equal(composition.filter(([at, stage]) => at === 6400 && stage === 'composite').length, 1);
+  assert.ok(outdoorReads.length > 0, 'outdoor drawing triggers sampling on the same frame');
+  assert.equal(outdoorReads.length, steady.length, 'the two invalidations are serviced by a single ink pass');
+  assert.equal($('heading').style['--sky-heading-outline'], 'rgb(253,254,255)', 'mixed light uses an opaque stroke opposite the dark fill');
+});
+
+// Exercise the production controller with a clock and renderer contracts; no test-only production hooks.
+function airPage({ search = '', reduced = false, weather = null, savedWeather = null, road = null, prefs = null,
+  realGlass = false, realWet = false, appState = null, random = false, theme = 'light', width = 390, height = 800, panes = {},
+  hidden = false, randomValue = null, wallTime = Date.now(), weatherCache = savedWeather && { at: wallTime - 60000, v: savedWeather }, beforeSky } = {}) {
+  const noop = () => {}, nodes = new Map(), frames = new Map(), timers = new Map(), events = new Map(), calls = [];
+  const intervals = new Map(), writes = [], tokens = {}, paneResizes = new Map(), allocations = [], animations = [], starPaints = [];
+  const css = readFileSync(new URL('static/app.css', root), 'utf8');
+  for (const [, dark, rules] of css.matchAll(/:root(\[data-theme="dark"\])?\s*\{([^{}]+)\}/g)) {
+    if (!dark || theme === 'dark') for (const [, name, value] of rules.matchAll(/(--[\w-]+):\s*([^;]+)/g)) tokens[name] = value.trim();
+  }
+  let clock = 0, id = 0, mediaChange;
+  let gpuCard = false;
+  const gl = realWet === 'gpu' ? new Proxy({ MAX_VIEWPORT_DIMS: 0x0d3a, TEXTURE0: 0x84c0,
+    getParameter: key => key === 0x0d3a ? [4096, 4096] : 4096,
+    getShaderParameter: () => true, getProgramParameter: () => true, getUniformLocation: (_, name) => name,
+    uniform1f(name, value) { if (name === 'card') gpuCard = !!value; },
+    drawArrays() { calls.push(['gpu', 'draw', gpuCard ? 'pane' : 'viewport']); },
+  }, { get: (o, k) => o[k] ?? noop }) : null;
+  const rect = { left: 0, top: 0, width: 40, height: 20, right: 40, bottom: 20 };
+  const listen = (type, cb) => { if (!events.has(type)) events.set(type, []); events.get(type).push(cb); };
+  const node = key => {
+    if (nodes.has(key)) return nodes.get(key);
+    const attributes = {}, classes = new Set(), style = {};
+    const bounds = panes[key] || rect;
+    const el = { nodeType: 1, children: [], childNodes: [], dataset: {}, style: { opacity: '',
+      setProperty(k, v) { style[k] = v; }, getPropertyValue(k) { return style[k] || ''; }, removeProperty(k) { delete style[k]; } }, textContent: '',
+      classList: { add: k => classes.add(k), remove: k => classes.delete(k), contains: k => classes.has(k),
+        toggle(k, on) { if (on) classes.add(k); else classes.delete(k); } },
+      setAttribute(k, v) { attributes[k] = v; }, getAttribute: k => attributes[k], hasAttribute: () => false,
+      animate() { const a = { playState: 'running', effect: { getComputedTiming: () => ({ progress: .1 }) }, cancel() { this.playState = 'idle'; } }; animations.push(a); return a; },
+      addEventListener: (type, cb) => listen(`${String(key)}:${type}`, cb), querySelector: () => null, querySelectorAll: () => [],
+      getBoundingClientRect: () => bounds, getClientRects: () => [bounds],
+      matches: selector => selector === '.sum-card' && key === 'summary',
+      closest: selector => panes[key] && selector.includes(key === 'summary' ? '.sum-card' : '.card') ? el : null,
+      appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+      insertBefore(child, before) { const old = this.children.indexOf(child); if (old >= 0) this.children.splice(old, 1); this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, child); child.parentElement = this; },
+      remove() { this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1); },
+      getContext(type) { if (type === 'webgl') { calls.push(['gpu', 'context']); return gl; } return this.ctx ||= new Proxy({
+        clearRect() {
+          if (key === 'sky-stars') starPaints.push(clock);
+          if (key === 'sky-clouds') calls.push(['weather', 'draw', clock]);
+          if (el.parentElement?.className === 'sky-wet-pane') calls.push(['pane', 'paint', clock, el.parentElement.parentElement]);
+          if (el.className === 'sky-wet-viewport') calls.push(['2d', 'draw', 'viewport']);
+        },
+        fillRect(x, y, w, h) {
+          if (el.className?.includes('sky-air-back-soft') && x === 0 && y === 0 && w === width && h === height) {
+            calls.push(['wash', 'fill', clock, this.fillStyle?.stops?.at(-1)]);
+          }
+        },
+        stroke() { if (key === 'sky-rain') calls.push(['rain', 'drop', clock]); },
+        putImageData(im) { el.image = im; },
+        drawImage(source) {
+          if (el.parentElement?.className === 'sky-wet-pane' && source.image?.width >= width / 4 - 1) {
+            el.fog = Uint8ClampedArray.from(source.image.data);
+          }
+        },
+        getImageData(x, y, width, height) { calls.push(['canvas', 'read', clock, width, height]); return { width, height, data: new Uint8ClampedArray(width * height * 4) }; },
+        createImageData: (width, height) => ({ width, height, data: new Uint8ClampedArray(width * height * 4) }),
+        createRadialGradient: () => ({ addColorStop: noop }),
+        createLinearGradient: () => ({ stops: [], addColorStop(at, color) { this.stops.push(color); } }),
+      }, { get: (o, k) => o[k] || noop }); },
+    };
+    for (const axis of ['width', 'height']) Object.defineProperty(el, axis, {
+      get() { return this['_' + axis]; }, set(value) { allocations.push([key, axis, value]); this['_' + axis] = value; }
+    });
+    nodes.set(key, el); return el;
+  };
+  const document = { hidden, documentElement: node('html'), body: node('body'), addEventListener: listen,
+    getElementById: node,
+    querySelector: selector => selector === '.sum-card' && panes.summary ? node('summary') : null,
+    querySelectorAll: selector => selector.startsWith('.sum-card, .card') || selector.startsWith('.card, section.sum-card') ? Object.keys(panes).map(node)
+      : selector === '[data-fx-air]' ? ['smoke', 'exhaust', 'particles', 'pollen', 'damp'].map(kind => Object.assign(node('fx-air-' + kind), { dataset: { fxAir: kind } })) : [],
+    createElement: () => node(Symbol()),
+    createRange: () => ({ selectNodeContents: noop, getClientRects: () => [] }) };
+  document.documentElement.dataset.theme = theme;
+  const factory = name => ({ create(api) {
+    calls.push([name, 'create', api]);
+    return Object.fromEntries(['redraw', 'resize', 'clear', 'stop', 'settle', 'still', 'setPaused', 'setConditions', 'burst', 'play', 'refreshComposite', 'pointer', 'glassFor'].map(method => [method, (...args) => {
+      calls.push([name, method, ...args]);
+      if (method === 'play') api.onPlaying(args[0]);
+      if (method === 'settle' || method === 'still' || method === 'clear') api.onPlaying(null);
+      if (method === 'pointer') return args[0].gesture || null;
+    }]));
+  } });
+  const observer = class { observe() {} unobserve() {} disconnect() {} };
+  const resizeObserver = class extends observer {
+    constructor(cb) { super(); this.cb = cb; }
+    observe(el) { paneResizes.set(el, this.cb); }
+    unobserve(el) { paneResizes.delete(el); }
+  };
+  const env = { document, window: { matchMedia: () => ({ matches: reduced, addEventListener: (type, cb) => { mediaChange = cb; } }), addEventListener: listen },
+    $, APP: { place: { lat: 0, lon: 0 }, limits: { pm: 15, pm_high: 35, rh_damp: 55, pollen: 3 } }, state: {},
+    location: { search }, TZ: 'UTC', appNow: () => new Date('2026-11-24T12:00:00Z'),
+    has: v => v != null, fmtTemp: v => `${v}°`, bearingIn: home.bearingIn, esc: escHtml, pmOver: home.pmOver, skyConditions: home.skyConditions, skyLeader: home.skyLeader, previewConditions: home.previewConditions,
+    innerWidth: width, innerHeight: height, scrollX: 0, scrollY: 0, performance: { now: () => clock },
+    setTimeout: (cb, delay) => (timers.set(++id, { cb, at: clock + delay }), id), clearTimeout: id => timers.delete(id),
+    setInterval: (cb, delay) => (intervals.set(++id, { cb, delay }), id), clearInterval: id => intervals.delete(id),
+    requestAnimationFrame: cb => (frames.set(++id, cb), id), cancelAnimationFrame: id => frames.delete(id), addEventListener: listen,
+    Date: class extends Date { static now() { return wallTime + clock; } },
+    IntersectionObserver: observer, ResizeObserver: resizeObserver, MutationObserver: observer,
+    getComputedStyle: () => ({ backgroundColor: 'rgb(255,255,255)', filter: 'none', opacity: '0',
+      getPropertyValue: name => tokens[name] || '22 33 46' }),
+    SkyGlass: factory('glass'), SkyWet: factory('wet'),
+    localStorage: { getItem: key => key === 'aq-fx' && prefs ? JSON.stringify(prefs)
+      : key.startsWith('aq-sky-live') && weatherCache ? JSON.stringify(weatherCache) : null,
+      setItem: (key, value) => writes.push([key, JSON.parse(value)]) } };
+  env.APP.road = road; env.APP.state = appState;
+  if (randomValue !== null) env.Math = Object.assign(Object.create(Math), { random: () => randomValue });
+  if (weather) env.window.__wx = weather;
+  if (realGlass) {
+    env.CSS = { supports: () => false }; document.fonts = { ready: Promise.resolve() };
+    runInNewContext(readFileSync(new URL('static/sky-glass.js', root), 'utf8'), env);
+    const actual = env.SkyGlass;
+    env.SkyGlass = { create: api => actual.create({ ...api, requestOutdoorFrame: draw => { calls.push(['glass', 'frame']); return api.requestOutdoorFrame(draw); } }) };
+  }
+  if (realWet) {
+    runInNewContext(readFileSync(new URL('static/sky-wet.js', root), 'utf8'), env);
+    const actual = env.SkyWet;
+    env.SkyWet = { create: api => actual.create({ ...api, requestWetFrame: draw => api.requestWetFrame(now => { calls.push(['wet', 'tick', now]); draw(now); }) }, { force2D: realWet !== 'gpu' }) };
+  }
+  function $(key) { return node(key); }
+  beforeSky?.(env);
+  runInNewContext(readFileSync(new URL('static/sky.js', root), 'utf8'), env);
+  if (random) {
+    const app = readFileSync(new URL('static/app.js', root), 'utf8');
+    const body = app.slice(app.indexOf('// Preview menu: "Random"'), app.indexOf('\n})();', app.indexOf('// Preview menu: "Random"')) + '\n})();'.length);
+    runInNewContext(body, env);
+  }
+  return { sky: env.SKY, preview: env.window.skyPreview, calls, timers, intervals, frames, writes, allocations, animations, starPaints, document, node,
+    viewport(width, height) { env.innerWidth = width; env.innerHeight = height; },
+    advance(now, { runTimers = true } = {}) {
+      clock = now;
+      if (runTimers) for (const [id, t] of [...timers]) if (t.at <= now && timers.delete(id)) t.cb();
+      for (const [id, cb] of [...frames]) if (frames.delete(id)) cb(now);
+    },
+    resizePane(key, bounds) { Object.assign(panes[key], bounds); paneResizes.get(node(key))(); },
+    emit(type, props = {}) { const e = { type, target: node('body'), preventDefault: noop, stopPropagation: noop, ...props }; for (const cb of events.get(type) || []) cb(e); },
+    motion(matches) { mediaChange({ matches }); },
+  };
+}
+
+test('real wet glass schedules and composites once on the shared weather/outdoor frame', () => {
+  const p = airPage({ realWet: true });
+  p.sky.air({ rh: 66 });
+  assert.equal(p.frames.size, 1, 'wet scheduling does not allocate a second RAF');
+  const glassApi = p.calls.find(c => c[0] === 'glass' && c[1] === 'create')[2];
+  glassApi.requestOutdoorFrame(now => p.calls.push(['outdoor', 'draw', now]));
+  p.advance(16);
+  const reads = p.calls.filter(c => c[0] === 'canvas' && c[1] === 'read' && c[2] === 16 && c[3] === 195 && c[4] === 400);
+  assert.equal(reads.length, 1, 'one scene copy: wet tick must not composite privately as well');
+  const stages = p.calls.filter(c => c[2] === 16 && ['weather', 'outdoor', 'wet'].includes(c[0])).map(c => c[0]);
+  assert.deepEqual(stages, ['weather', 'outdoor', 'wet']);
+  p.document.hidden = true; p.emit('visibilitychange');
+  assert.equal(p.frames.size, 0, 'wet cancellation leaves no independent frame');
+});
+
+test('sky elects once from a fresh Summary and consumes skipped or cached loads', () => {
+  const snapshot = { pm: 48, rh: 66, ctx: null, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } };
+  for (const mode of ['fresh', 'cached', 'skip', 'early-input', 'late']) {
+    const p = airPage();
+    p.sky.air(snapshot); p.advance(700);
+    assert.equal(p.calls.filter(c => c[1] === 'play').length, 0, 'saved data never starts a pass');
+    if (mode === 'skip') p.emit('wheel');
+    if (mode === 'late') p.advance(4000);
+    p.sky.air(snapshot, { initial: true, freshSummary: mode === 'cached' ? null : snapshot.summary, skipped: mode === 'early-input' });
+    p.advance(mode === 'late' ? 4001 : 701);
+    const skipped = ['cached', 'skip', 'early-input'].includes(mode);
+    assert.deepEqual(p.calls.filter(c => c[1] === 'play').map(c => c.slice(0, 3)), skipped ? [] : [['glass', 'play', 'smoke']]);
+    p.sky.air(snapshot, { initial: true, freshSummary: snapshot.summary }); p.advance(8000);
+    assert.equal(p.calls.filter(c => c[1] === 'play').length, skipped ? 0 : 1);
+  }
+  const p = airPage();
+  p.sky.air(snapshot, { initial: true, freshSummary: snapshot.summary });
+  p.advance(599); assert.equal(p.calls.filter(c => c[1] === 'play').length, 0);
+  p.advance(600); assert.equal(p.calls.filter(c => c[1] === 'play').length, 1);
+});
+
+// The iPhone missed its first-load pass (25 Nov): these rules decide it and fail silently when they break.
+test('the load pass survives a load scroll, a hidden tab and slow data, timed from the content', () => {
+  const snapshot = { pm: 48, rh: 66, ctx: null, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } };
+  const plays = p => p.calls.filter(c => c[1] === 'play').length;
+  const elect = (p, at) => { p.advance(at); p.sky.air(snapshot, { initial: true, freshSummary: snapshot.summary }); };
+  // Due 600 ms after the Summary first appears, not after navigation; a scroll event alone never cancels it.
+  let p = airPage({ search: '?skydebug' });
+  p.advance(900); p.sky.air(snapshot); p.emit('scroll'); elect(p, 1000);
+  p.advance(1499); assert.equal(plays(p), 0, 'the clear page shows first');
+  p.advance(1500); assert.equal(plays(p), 1);
+  assert.match(p.document.body.children.at(-1).textContent, /^sky load: played smoke/);
+  // Held back until then: the renderer is told the load pass is still coming, and stops being told once it played.
+  const api = p.calls.find(c => c[0] === 'glass' && c[1] === 'create')[2];
+  assert.equal(api.loadPending(), false);
+  // Hidden when due: plays the first time it is shown within the window, from that moment; never after the window.
+  for (const [shown, played] of [[4000, 1], [12000, 0]]) {
+    p = airPage({ hidden: true });
+    elect(p, 300); p.advance(2000); assert.equal(plays(p), 0, 'nothing plays hidden');
+    p.advance(shown); p.document.hidden = false; p.emit('visibilitychange');
+    p.advance(shown + 599); assert.equal(plays(p), 0);
+    p.advance(shown + 600); assert.equal(plays(p), played, `shown at ${shown} ms`);
+  }
+  // Slow first data still plays when it arrives; a real input before it does not.
+  for (const [input, played] of [[null, 1], ['wheel', 0], ['touchmove', 0], ['pointerdown', 0]]) {
+    p = airPage();
+    assert.equal(p.calls.find(c => c[0] === 'glass' && c[1] === 'create')[2].loadPending(), true, 'held back while the pass may come');
+    p.sky.air(snapshot); p.advance(3000); if (input) p.emit(input, { target: { closest: () => null } });
+    elect(p, 8000); p.advance(9000);
+    assert.equal(plays(p), played, input || 'no input');
+  }
+});
+
+test('sky replay, skips, damp gestures and lifecycle preserve a single accessible playing word', () => {
+  const snapshot = { pm: 48, rh: 66, ctx: null, summary: null };
+  const p = airPage(); p.sky.air(snapshot);
+  const buttons = p.node('sky-conditions').children, [smoke, damp] = buttons;
+  const target = button => ({ closest: selector => selector === '[data-sky-play]' ? button : null });
+  p.emit('pointerdown', { target: target(smoke) }); p.emit('click', { target: target(smoke) });
+  assert.equal(smoke.getAttribute('aria-pressed'), 'true');
+  p.sky.weather({ wind_speed: 12 }); p.sky.theme(); p.sky.units();
+  assert.equal(p.node('sky-conditions').children[0], smoke, 'weather changes preserve focusable nodes');
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, 1);
+  p.emit('keydown', { key: 'Enter', target: target(damp) }); p.emit('click', { target: target(damp) });
+  assert.equal(damp.getAttribute('aria-label'), 'Stop Damp inside effect');
+  const wetStops = () => p.calls.filter(c => c[0] === 'wet' && c[1] === 'stop').length;
+  const beforeWipe = wetStops();
+  p.emit('pointerdown', { gesture: 'pending' }); p.emit('touchmove'); p.emit('pointermove', { gesture: 'wipe' });
+  p.emit('pointerup', { gesture: 'wipe' }); p.emit('click');
+  assert.equal(wetStops(), beforeWipe, 'horizontal wiping and its synthesized click do not skip');
+  p.emit('pointerdown', { gesture: 'pending' }); p.emit('pointermove', { gesture: 'skip' });
+  assert.equal(wetStops(), beforeWipe + 1, 'vertical movement skips while retaining normal scrolling');
+  assert.equal(damp.getAttribute('aria-pressed'), 'false');
+  for (const [type, props] of [['wheel', {}], ['keydown', { key: 'x' }], ['click', {}], ['pointerup', { gesture: 'skip' }]]) {
+    p.emit('keydown', { key: ' ', target: target(smoke) }); p.emit('click', { target: target(smoke) });
+    assert.equal(smoke.getAttribute('aria-pressed'), 'true');
+    p.emit(type, props); assert.equal(smoke.getAttribute('aria-pressed'), 'false', type);
+  }
+  p.emit('keydown', { key: ' ', target: target(smoke) }); p.emit('click', { target: target(smoke) });
+  p.emit('scroll'); assert.equal(smoke.getAttribute('aria-pressed'), 'true', 'a scroll event alone is not an input');
+  p.emit('click', { target: target(smoke) });
+  p.emit('click', { target: target(smoke) });
+  p.emit('sky-quick:click'); assert.equal(smoke.disabled, true);
+  const plays = () => p.calls.filter(c => c[1] === 'play').length;
+  let before = plays(); p.emit('sky-quick:click');
+  assert.equal(smoke.disabled, false); assert.equal(plays(), before, 'master-on only settles');
+  p.emit('click', { target: target(smoke) }); p.motion(true);
+  assert.equal(smoke.getAttribute('aria-pressed'), 'false'); assert.ok(p.calls.some(c => c[1] === 'still'));
+  before = plays(); p.motion(false); assert.equal(plays(), before, 'motion preference does not replay');
+  p.emit('click', { target: target(smoke) }); p.document.hidden = true; p.emit('visibilitychange');
+  assert.equal(p.frames.size, 0); assert.equal(p.timers.size, 0); assert.equal(smoke.getAttribute('aria-pressed'), 'false');
+  before = plays(); p.emit('click', { target: target(smoke) });
+  p.document.hidden = false; p.emit('visibilitychange'); assert.equal(plays(), before, 'hidden input and tab return never replay');
+  p.sky.air({ ...snapshot, ctx: { pollen: [{ index: 3 }] }, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } });
+  const pollen = p.node('sky-conditions').children[1];
+  assert.equal(pollen.children[1].textContent, 'Pollen high', 'new conditions retain stable order without replacing existing buttons');
+  p.emit('click', { target: target(pollen) });
+  assert.equal(p.calls.filter(c => c[0] === 'glass' && c[1] === 'setConditions').at(-1)[3], 'pollen');
+  p.emit('click', { target: target(pollen) });
+  assert.equal(p.calls.filter(c => c[0] === 'glass' && c[1] === 'setConditions').at(-1)[3], 'pollen', 'the tapped kind stays shown after its pass');
+  p.sky.air({ ...snapshot, pm: null, rh: null }); assert.equal(p.node('sky-conditions').children.length, 0);
+  assert.equal(p.timers.size, 0);
+  for (const search of ['?shot', '?shot=dark']) {
+    const q = airPage({ search }); q.sky.air(snapshot, { initial: true, freshSummary: snapshot.summary });
+    assert.equal(q.calls.length, 0); assert.equal(q.timers.size, 0); assert.equal(q.frames.size, 0);
+  }
+});
+
+test('a completed wipe survives lost capture and a release over a condition control', () => {
+  const p = airPage(); p.sky.air({ pm: 48, rh: 66 });
+  const damp = p.node('sky-conditions').children[1];
+  const target = { closest: selector => selector === '[data-sky-play]' ? damp : null };
+  p.emit('click', { target });
+  const stops = () => p.calls.filter(c => c[1] === 'stop').length;
+  const before = stops();
+  p.emit('pointerdown', { pointerId: 7, gesture: 'pending' });
+  p.emit('pointermove', { pointerId: 7, gesture: 'wipe' });
+  p.emit('pointerup', { pointerId: 7, target, gesture: 'wipe' });
+  assert.equal(p.calls.filter(c => c[1] === 'pointer').at(-1)[2].type, 'pointerup', 'owner gets release even over a control');
+  p.emit('lostpointercapture', { pointerId: 7 });
+  p.emit('click', { pointerId: 7, target });
+  assert.equal(stops(), before, 'completed pointer click does not stop or replay');
+  p.emit('click', { pointerId: 8 });
+  assert.equal(stops(), before + 1, 'another pointer click still skips');
+});
+
+test('wet tracks a null link down through up or cancel over a condition control', () => {
+  for (const ending of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    const p = airPage({ realWet: true }); p.sky.air({ rh: 66 }); p.sky.wet.play('damp');
+    const [damp] = p.node('sky-conditions').children;
+    const link = { closest: selector => selector.startsWith('a, button') ? link : null };
+    const control = { closest: selector => selector === '[data-sky-play]' ? damp : null };
+    p.emit('pointerdown', { pointerId: 1, button: 0, pointerType: 'mouse', target: link });
+    p.emit(ending, { pointerId: 1, target: control });
+    p.emit('pointerdown', { pointerId: 2, button: 0, pointerType: 'touch', isPrimary: true });
+    assert.ok(p.document.documentElement.classList.contains('sky-wet-dragging'), ending);
+    p.emit('lostpointercapture', { pointerId: 1 });
+    assert.ok(p.document.documentElement.classList.contains('sky-wet-dragging'), 'an unrelated end leaves the new gesture alone');
+  }
+});
+
+test('a desktop stroke clears the Summary fog while the cards are wet, and the dry cards keep no pane', () => {
+  const panes = { summary: { left: 200, top: 40, right: 500, bottom: 280, width: 300, height: 240 },
+    // Left of the stroke: the pass's drops run at x 720 and 1355 here, and one fog update damages the box around all its changes.
+    other: { left: 20, top: 40, right: 180, bottom: 280, width: 160, height: 240 } };
+  for (const theme of ['light', 'dark']) {
+    // Runners start at the right edge or between the panes (fixed random), so no trail crosses the stroke.
+    const p = airPage({ realWet: true, theme, width: 1440, height: 320, panes, randomValue: .99, prefs: { sky: true, wind: false, air: true } });
+    p.sky.air({ rh: 66 }); p.advance(16);
+    assert.equal(p.node('summary').children.length, 0, 'settled without a pass: dry cards, no pane');
+    p.sky.wet.play('damp'); for (let t = 500; t <= 3500; t += 500) p.advance(t);
+    for (let t = 3516; t <= 4000; t += 16) p.advance(t); // the beads finish forming
+    const [canvas] = p.node('summary').children[0].children;
+    const fog = (x, y) => canvas.fog[(Math.floor(y / 4) * 360 + Math.floor(x / 4)) * 4 + 3];
+    const x = 244, y = 150, initial = fog(x, y), outside = fog(x, 70);
+    assert.ok(initial > 90 && initial < 125, 'the settled pane has a veil without raising opacity');
+    const mouse = { pointerId: 1, pointerType: 'mouse', clientY: y, cancelable: true };
+    const paints = () => p.calls.filter(c => c[0] === 'pane' && c[3] === p.node('other')).length;
+    const untouched = paints();
+    p.emit('pointerdown', { ...mouse, button: 0, clientX: x, timeStamp: 4016 });
+    p.emit('pointermove', { ...mouse, clientX: 320, timeStamp: 4040 }); p.advance(4040);
+    assert.equal(fog(x, y), 0, 'inset desktop stroke clears the Summary fog texture');
+    assert.equal(fog(x, 70), outside, 'the off-stroke portion retains the veil');
+    p.advance(6000);
+    assert.equal(fog(x, y), 0, 'the beginning of a slow stroke does not regrow mid-drag');
+    p.emit('pointerup', { ...mouse, clientX: 450, timeStamp: 6000 }); p.advance(6016);
+    assert.equal(fog(450, y), 0, 'release clears its final position too');
+    p.advance(7399);
+    assert.equal(fog(x, y), 0, 'the entire stroke is clear for 1.4 seconds from release');
+    p.advance(8700);
+    assert.ok(fog(x, y) > 0 && fog(x, y) < initial, 'fog returns after the release hold');
+    p.advance(10000);
+    assert.equal(fog(x, y), initial, 'the settled veil returns');
+    assert.equal(paints(), untouched, 'localized wet damage does not repaint an untouched pane');
+    // 10 s after play the cards' condensation fades out over 2 s: then no card has a pane, and a drag is the page's own.
+    p.advance(11016); assert.ok(Number(p.node('summary').children[0].style.opacity) < 1, 'the cards dry slowly');
+    p.advance(12100);
+    assert.equal(p.node('summary').children.length, 0, 'dry cards keep no pane');
+    assert.equal(p.document.documentElement.classList.contains('sky-wet-active'), false, 'horizontal touch gestures are the page\'s again');
+    p.emit('pointerdown', { ...mouse, button: 0, clientX: x, timeStamp: 12116 });
+    assert.equal(p.document.documentElement.classList.contains('sky-wet-dragging'), false, 'nothing on the cards to wipe');
+  }
+});
+
+test('damp keeps its word playing while the cards are wet; a skip dries them at once and the word replays it', () => {
+  const p = airPage({ realWet: true, randomValue: .99, width: 120, height: 80,
+    panes: { summary: { left: 10, top: 10, right: 110, bottom: 70, width: 100, height: 60 } } });
+  p.sky.air({ rh: 66 }); p.advance(16);
+  const [damp] = p.node('sky-conditions').children, wet = () => p.node('summary').children.length;
+  p.sky.wet.play('damp'); for (let t = 500; t <= 5000; t += 500) p.advance(t);
+  assert.equal(wet(), 1, 'beads and drops stay on the cards after the pass');
+  assert.equal(damp.getAttribute('aria-pressed'), 'true', 'the word can still stop it');
+  p.emit('click', {}); p.advance(5016); p.advance(5300);
+  assert.equal(wet(), 0, 'a tap dries the cards in the skip fade');
+  assert.equal(damp.getAttribute('aria-pressed'), 'false');
+  p.emit('click', { target: { closest: selector => selector === '[data-sky-play]' ? damp : null } }); p.advance(5316);
+  assert.equal(wet(), 1, 'the word replays the whole thing');
+});
+
+test('rain-only frames do not copy the wet backdrop or repaint panes', () => {
+  const p = airPage({ realWet: true, width: 120, height: 40, weather: { weather_code: 95, cloud_cover: 0, wind_speed: 0 },
+    panes: { summary: { left: 10, top: 5, right: 110, bottom: 35, width: 100, height: 30 } } });
+  p.sky.air({ rh: 66 }); p.advance(16);
+  p.calls.length = 0;
+  for (const now of [32, 48, 64]) p.advance(now);
+  assert.ok(p.calls.some(c => c[0] === 'rain'), 'the front rain draws');
+  assert.equal(p.calls.filter(c => c[0] === 'canvas' && c[3] === 30 && c[4] === 10).length, 0, 'no rear scene copy');
+  assert.equal(p.calls.filter(c => c[0] === 'pane').length, 0);
+});
+
+test('a settled WebGL pane redraw restores the visible viewport', () => {
+  const p = airPage({ realWet: 'gpu', width: 120, height: 40, prefs: { sky: true, wind: false, air: true },
+    panes: { summary: { left: 10, top: 5, right: 110, bottom: 35, width: 100, height: 30 } } });
+  p.sky.air({ rh: 66 }); p.advance(16); p.sky.wet.play('damp');
+  for (let t = 32; t <= 5000; t += 16) p.advance(t);
+  const gpuDraws = () => p.calls.filter(c => c[0] === 'gpu').map(c => c[2]);
+  p.calls.length = 0;
+  p.advance(5016);
+  assert.deepEqual(gpuDraws(), [], 'the settled viewport needs no repaint');
+  p.resizePane('summary', { right: 100, width: 90 }); p.advance(5032);
+  assert.deepEqual(gpuDraws(), ['pane', 'viewport'], 'the final draw leaves no card shading on the viewport');
+});
+
+test('settled damp caches its composite across moving weather in both backends', () => {
+  for (const realWet of [true, 'gpu']) {
+    const p = airPage({ realWet, width: 120, height: 80, randomValue: .99,
+      weather: { cloud_cover: 100, wind_speed: 18, wind_direction: 135 },
+      panes: { summary: { left: 10, top: 10, right: 110, bottom: 70, width: 100, height: 60 } } });
+    p.sky.air({ rh: 66 });
+    for (const now of [16, 32, 1000, 5000]) p.advance(now);
+    p.calls.length = 0;
+    for (const now of [5016, 5032, 5048, 5064, 5080]) p.advance(now);
+    assert.equal(p.calls.filter(c => c[0] === 'wet' && c[1] === 'tick').length, 0);
+    assert.equal(p.calls.filter(c => c[0] === 'canvas' && c[3] === 30 && c[4] === 20).length, 0, 'settled scene has no readback');
+    assert.equal(p.calls.filter(c => c[0] === 'pane' || c[0] === 'gpu').length, 0, 'settled panes keep their pixels');
+    p.resizePane('summary', { width: 90, right: 100 }); p.advance(5096);
+    assert.ok(!p.calls.some(c => c[0] === 'pane') && !p.node('summary').children.length, 'settled cards are dry: no pane to repaint');
+    p.calls.length = 0; p.sky.wet.burst(['damp']); p.advance(5112);
+    assert.ok(p.calls.some(c => c[1] === 'draw' && c[2] === 'viewport'), 'a wet burst still repaints the viewport');
+    assert.ok(!p.calls.some(c => c[0] === 'pane'), 'drops outside the pane do not repaint it');
+  }
+});
+
+test('a tab opened hidden defers wet grain and WebGL setup until it is visible', () => {
+  for (const realWet of [true, 'gpu']) {
+    const p = airPage({ hidden: true, realGlass: true, realWet, width: 120, height: 80 });
+    p.sky.air({ rh: 66 }); p.advance(16);
+    assert.equal(p.calls.filter(c => c[1] === 'context').length, 0, 'no hidden WebGL context');
+    assert.equal(p.calls.filter(c => c[0] === 'canvas' && c[1] === 'read').length, 0, 'no hidden grain raster');
+    assert.equal(p.allocations.length, 0, 'no hidden pixel buffers');
+    p.document.hidden = false; p.emit('visibilitychange'); p.advance(32);
+    assert.equal(p.calls.filter(c => c[1] === 'context').length, realWet === 'gpu' ? 1 : 0);
+    assert.ok(p.calls.some(c => c[0] === (realWet === 'gpu' ? 'gpu' : '2d') && c[1] === 'draw' && c[2] === 'viewport'),
+      'the selected backend paints after resume');
+  }
+});
+
+test('quiet initialization and hidden resizes allocate no canvases or stars', () => {
+  for (const options of [{ search: '?shot' }, { search: '?shot=dark' }, { appState: 'no_token' }, { hidden: true }]) {
+    const p = airPage(options);
+    assert.equal(p.allocations.length, 0, 'initialization defers pixel buffers');
+    assert.equal(p.starPaints.length, 0);
+    p.emit('resize');
+    assert.equal(p.allocations.length, 0);
+    assert.equal(p.starPaints.length, 0);
+    if (options.hidden) {
+      p.document.hidden = false; p.emit('visibilitychange');
+      assert.ok(p.allocations.length > 0); assert.ok(p.starPaints.length > 0);
+    }
+  }
+  const p = airPage({ realGlass: true, realWet: true });
+  p.sky.air({ pm: 48, rh: 66 }); p.advance(16);
+  p.document.hidden = true; p.emit('visibilitychange');
+  p.allocations.length = 0; p.starPaints.length = 0;
+  p.viewport(800, 600);
+  p.emit('resize'); p.emit('resize');
+  assert.equal(p.allocations.length, 0, 'all renderer buffers wait while hidden');
+  assert.equal(p.starPaints.length, 0);
+  p.document.hidden = false; p.emit('visibilitychange'); p.advance(32);
+  assert.equal(p.allocations.filter(([key, axis]) => key === 'sky-stars' && axis === 'width').length, 1, 'resume applies one resize');
+  const outdoor = p.node('sky').children.find(c => c.className?.includes('sky-air-back-soft'));
+  assert.equal(outdoor.width, 200, 'outdoor buffers receive the resumed viewport');
+  p.allocations.length = 0; p.emit('resize');
+  const output = p.node('sky').children.find(c => c.className === 'sky-wet-viewport');
+  assert.equal(p.allocations.filter(([key, axis]) => p.node(key) === output && axis === 'width').length, 1, 'one owner resizes wet glass');
+});
+
+test('a second contact on a condition button ends wiping without consuming its native click', () => {
+  const p = airPage({ realWet: true }); p.sky.air({ pm: 48, rh: 66 }); p.advance(16); p.sky.wet.play('damp');
+  const [smoke] = p.node('sky-conditions').children;
+  const target = { closest: selector => selector === '[data-sky-play]' || selector.startsWith('a, button') ? smoke : null };
+  const touch = { pointerType: 'touch', button: 0, clientY: 200, cancelable: true };
+  p.emit('pointerdown', { ...touch, pointerId: 1, isPrimary: true, clientX: 50, timeStamp: 16 });
+  p.emit('pointermove', { ...touch, pointerId: 1, clientX: 90, timeStamp: 32 });
+  let consumed = 0;
+  p.emit('pointerdown', { ...touch, pointerId: 2, isPrimary: false, target, preventDefault() { consumed++; } });
+  assert.equal(p.document.documentElement.classList.contains('sky-wet-dragging'), false);
+  p.emit('pointermove', { ...touch, pointerId: 1, clientX: 140, timeStamp: 48, preventDefault() { consumed++; } });
+  assert.equal(consumed, 0, 'multi-touch moves and control presses retain native behavior');
+  p.emit('pointerup', { ...touch, pointerId: 2, target }); p.emit('click', { pointerId: 2, target });
+  assert.equal(smoke.getAttribute('aria-pressed'), 'true');
+  p.emit('pointerup', { ...touch, pointerId: 1 });
+  p.emit('pointerdown', { ...touch, pointerId: 3, isPrimary: true, clientX: 50, timeStamp: 64 });
+  assert.equal(p.document.documentElement.classList.contains('sky-wet-dragging'), true, 'all contact endings were tracked');
+});
+
+test('storm expiry prevents new strikes and storm exit cancels active flashes and card motion', () => {
+  const wallTime = Date.parse('2026-11-24T12:00:00Z');
+  const p = airPage({ wallTime, weatherCache: { at: { thunder: wallTime - 6 * 3600e3 + 1000, rain: wallTime, cloud: wallTime },
+    v: { thunder: true, rain: 1, cloud: 100 } } });
+  p.advance(16); p.advance(1100); p.sky.air({});
+  assert.match(p.node('sky-weather').innerHTML, /Heavy rain/);
+  p.advance(1300);
+  assert.equal(p.animations.length, 0, 'an expired thunder reading cannot schedule a strike');
+  const q = airPage({ randomValue: .5, panes: { summary: { left: 10, top: 100, right: 380, bottom: 400, width: 370, height: 300 } } });
+  q.preview({ minutes: 900, thunder: true, rain: 1, cloud: 100 });
+  q.advance(16); q.advance(1300);
+  assert.equal(q.animations.length, 4, 'front strike owns both flashes, card shadow and impact motion');
+  q.preview({ minutes: 900, thunder: false, rain: 1, cloud: 100 });
+  assert.ok(q.animations.every(a => a.playState !== 'running'), 'all storm-owned animations stop on exit');
+  const before = q.animations.length; q.advance(1400); q.advance(10000);
+  assert.equal(q.animations.length, before);
+});
+
+test('stopping a tapped pollen fades its card tint into its own settled sky, and smoke is no longer drawn', () => {
+  for (const theme of ['light', 'dark']) {
+    const p = airPage({ realGlass: true, theme, panes: { summary: { left: 10, top: 150, right: 380, bottom: 500, width: 370, height: 350 } } });
+    p.sky.air({ pm: 48, ctx: { pollen: [{ index: 3 }] }, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } }, { initial: true, freshSummary: null });
+    const [, pollen] = p.node('sky-conditions').children;
+    const target = { closest: () => pollen };
+    const tint = () => p.node('summary').style.getPropertyValue('--glass-tint');
+    const washes = () => p.calls.filter(c => c[0] === 'wash' && c[3]).map(c => c[3]);
+    p.advance(16); const settled = tint(); const [smokeRgb] = washes()[0].split(' / ');
+    p.emit('click', { target }); p.advance(32); p.advance(432);
+    const outgoing = tint();
+    assert.notEqual(outgoing, settled);
+    p.calls.length = 0;
+    p.emit('click', { target });
+    assert.equal(pollen.getAttribute('aria-pressed'), 'false', 'the button goes idle immediately');
+    assert.equal(tint(), outgoing, 'the current card tint does not snap');
+    p.calls.length = 0;
+    p.advance(557);
+    assert.notEqual(tint(), outgoing); assert.notEqual(tint(), settled);
+    p.calls.length = 0;
+    p.advance(682);
+    assert.equal(tint(), settled);
+    assert.ok(washes().length, 'pollen stays in the sky');
+    assert.ok(!washes().some(color => color.startsWith(smokeRgb)), 'smoke is back to its word only');
+    assert.equal(p.sky.glass.smokeCover, 0);
+  }
+});
+
+test('after a pass every card returns to the everyday glass, and the air stays in the sky', () => {
+  const panes = { summary: { left: 10, top: 150, right: 380, bottom: 500, width: 370, height: 350 } };
+  for (const theme of ['light', 'dark']) {
+    const glass = page => ['--glass-tint', '--glass-alpha'].map(k => page.node('summary').style.getPropertyValue(k)).join(' / ');
+    const clean = airPage({ realGlass: true, theme, panes });
+    clean.sky.air({ pm: 5 }, { initial: true, freshSummary: null }); clean.advance(16);
+    const p = airPage({ realGlass: true, theme, panes });
+    p.sky.air({ pm: 48, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } }, { initial: true, freshSummary: null });
+    const washes = () => p.calls.filter(c => c[0] === 'wash' && c[3]);
+    p.advance(16);
+    assert.equal(glass(p), glass(clean), 'settled smoke leaves the everyday glass');
+    assert.ok(washes().length, 'the smoke stays in the sky');
+    const [smoke] = p.node('sky-conditions').children;
+    p.emit('click', { target: { closest: () => smoke } });
+    let now = 16;
+    while (now < 1000) p.advance(now += 16);
+    assert.notEqual(glass(p), glass(clean), 'the pass lends the card the smoke');
+    while (now < 6000) p.advance(now += 16);
+    assert.equal(glass(p), glass(clean), 'the card is back to the everyday glass');
+    p.calls.length = 0; p.sky.glass.redraw(); p.advance(now += 16);
+    assert.ok(washes().length, 'the smoke is still in the sky');
+  }
+});
+
+test('hide and resume keep the tapped outdoor kind shown without replaying', () => {
+  const p = airPage();
+  p.sky.air({ pm: 48, ctx: { pollen: [{ index: 3 }] }, summary: { items: [{ id: 'pm', action: { text: 'Shut windows' } }] } });
+  const pollen = p.node('sky-conditions').children[1];
+  p.emit('click', { target: { closest: () => pollen } });
+  const primary = () => p.calls.filter(c => c[0] === 'glass' && c[1] === 'setConditions').at(-1)[3];
+  assert.equal(primary(), 'pollen');
+  const before = p.calls.filter(c => c[1] === 'play').length;
+  p.document.hidden = true; p.emit('visibilitychange');
+  assert.equal(primary(), 'pollen');
+  p.document.hidden = false; p.emit('visibilitychange');
+  assert.equal(primary(), 'pollen');
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, before);
+});
+
+// One effect per layer (Sacha, 25 Nov): one outdoor kind in the sky, damp on the glass; any other outdoor condition is its word only.
+test('only the shown outdoor kind and damp are drawn; a tap on another word plays it and makes it the one shown', () => {
+  const road = [{ name: 'BQE', short: 'BQE', side: 'W', reaching: true, strength: 'peak' }];
+  const ctx = { roads: road, pollen: [{ index: 3 }] };
+  const last = (p, renderer) => p.calls.filter(c => c[0] === renderer && c[1] === 'setConditions').at(-1);
+  const drawn = (p, renderer = 'glass') => last(p, renderer)[2].map(c => c.kind);
+  const words = p => [...p.node('sky-conditions').children].filter(b => b.dataset.skyPlay).map(b => b.dataset.skyPlay);   // the exhaust's wind pill isn't a word
+  const pm = { items: [{ id: 'pm', action: { text: 'Shut windows' } }] };
+  const damp = { items: [{ id: 'rh', facts: { dry: false }, action: { text: 'Run the dehumidifier' } }] };
+  // The Summary's leader is shown; damp is drawn beside it; the second outdoor kind is only its word.
+  let p = airPage({ randomValue: .5 });
+  p.sky.air({ pm: 48, rh: 66, ctx: { pollen: [{ index: 3 }] }, summary: pm });
+  assert.deepEqual(words(p), ['smoke', 'pollen', 'damp']);
+  assert.deepEqual(drawn(p), ['smoke', 'damp']); assert.equal(last(p, 'glass')[3], 'smoke');
+  assert.deepEqual(drawn(p, 'wet'), ['smoke', 'damp']);
+  // Damp leads: the strongest outdoor kind by priority (exhaust before pollen) is the one in the sky.
+  p = airPage({ randomValue: .5 });
+  p.sky.air({ pm: 20, rh: 66, ctx, summary: damp });
+  assert.deepEqual(words(p), ['exhaust', 'pollen', 'damp']);
+  assert.deepEqual(drawn(p), ['exhaust', 'damp']);
+  // A tap on pollen plays it and keeps it shown after its pass, through new data; exhaust goes back to its word.
+  const pollen = p.node('sky-conditions').children[1];
+  p.emit('click', { target: { closest: selector => selector === '[data-sky-play]' ? pollen : null } });
+  assert.deepEqual(p.calls.filter(c => c[1] === 'play').map(c => c.slice(0, 3)), [['glass', 'play', 'pollen']]);
+  assert.deepEqual(drawn(p), ['pollen', 'damp']);
+  p.sky.glass.settle(); p.sky.air({ pm: 20, rh: 66, ctx, summary: damp });
+  assert.deepEqual(drawn(p), ['pollen', 'damp']);
+  // Sparse events carry the shown kind only.
+  p.calls.length = 0; p.advance(40001);
+  assert.deepEqual(p.calls.filter(c => c[1] === 'burst').map(c => [c[0], ...c[2]]), [['glass', 'pollen']]);
+  // When the tapped kind ends, the sky falls back to the priority order.
+  p.sky.air({ pm: 20, rh: 66, ctx: { roads: road }, summary: damp });
+  assert.deepEqual(drawn(p), ['exhaust', 'damp']);
+  // Reduced motion: the still shows only the shown kinds, and a tap switches the still without a pass.
+  p = airPage({ reduced: true });
+  p.sky.air({ pm: 48, rh: 66, ctx: { pollen: [{ index: 3 }] }, summary: pm });
+  assert.ok(p.calls.some(c => c[0] === 'glass' && c[1] === 'still'));
+  assert.deepEqual(drawn(p), ['smoke', 'damp']);
+  const still = p.node('sky-conditions').children[1];
+  p.emit('click', { target: { closest: selector => selector === '[data-sky-play]' ? still : null } });
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, 0);
+  assert.deepEqual(drawn(p), ['pollen', 'damp']);
+});
+
+// The display menu's air buttons: a home previews the kind over its own readings; the demo opens the kind's story.
+test('an air preview shows its kind over the home, one per layer, and Back to live restores the home', () => {
+  const last = (p, renderer) => p.calls.filter(c => c[0] === renderer && c[1] === 'setConditions').at(-1);
+  const drawn = (p, renderer = 'glass') => last(p, renderer)[2].map(c => c.kind);
+  const words = p => [...p.node('sky-conditions').children].filter(b => b.dataset.skyPlay).map(b => b.dataset.skyPlay);   // the exhaust's wind pill isn't a word
+  const pressed = p => ['smoke', 'exhaust', 'particles', 'pollen', 'damp'].filter(k => p.node('fx-air-' + k).getAttribute('aria-pressed') === 'true');
+  const pm = { items: [{ id: 'pm', action: { text: 'Shut windows' } }] };
+  const home = { pm: 48, rh: 66, ctx: { pollen: [{ index: 3 }] }, summary: pm };
+  let p = airPage({ randomValue: .5 });
+  p.sky.air(home);
+  assert.deepEqual(drawn(p), ['smoke', 'damp']);
+  // Exhaust replaces the shown outdoor kind and plays; the home's smoke and pollen stay as words, damp stays on the glass.
+  p.node('dsp').open = true;
+  p.emit('fx-air-exhaust:click');
+  assert.equal(p.node('dsp').open, false, 'the menu closes so the pass shows');
+  assert.deepEqual(words(p), ['smoke', 'exhaust', 'pollen', 'damp']);
+  assert.deepEqual(drawn(p), ['exhaust', 'damp']); assert.equal(last(p, 'glass')[3], 'exhaust');
+  assert.deepEqual(p.calls.filter(c => c[1] === 'play').map(c => c.slice(0, 3)), [['glass', 'play', 'exhaust']]);
+  assert.match(p.node('sky-weather').innerHTML, /cap-tag">Preview/);
+  assert.equal(p.node('fx-mode').textContent, 'Preview');
+  assert.deepEqual(pressed(p), ['exhaust']);
+  // New readings keep the preview; the label names the road the page knows, else a plain one.
+  p.sky.glass.settle(); p.sky.air(home);
+  assert.deepEqual(drawn(p), ['exhaust', 'damp']);
+  assert.equal(last(p, 'glass')[2].find(c => c.kind === 'exhaust').label, 'Road exhaust');
+  // A weather preset keeps the air preview and its haze.
+  p.preview({ minutes: 1380, dir: 200, spd: 8, cloud: 5, pm: 1 });
+  assert.deepEqual(drawn(p), ['exhaust', 'damp']);
+  // Damp plays on the glass beside the previewed outdoor kind.
+  p.emit('fx-air-damp:click');
+  assert.deepEqual(p.calls.filter(c => c[1] === 'play').at(-1).slice(0, 3), ['wet', 'play', 'damp']);
+  assert.deepEqual(drawn(p, 'wet'), ['exhaust', 'damp']); assert.equal(last(p, 'glass')[3], 'exhaust', 'the previewed outdoor kind stays shown');
+  assert.deepEqual(pressed(p), ['exhaust', 'damp']);
+  // Back to live: the home's own conditions, no tag, nothing pressed.
+  p.emit('fx-live:click');
+  assert.deepEqual(words(p), ['smoke', 'pollen', 'damp']);
+  assert.deepEqual(drawn(p), ['smoke', 'damp']);
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /cap-tag/);
+  assert.equal(p.node('fx-mode').textContent, 'Live');
+  assert.deepEqual(pressed(p), []);
+  // Reduced motion: the still of the previewed kind, no pass.
+  p = airPage({ reduced: true });
+  p.sky.air({ pm: 5, rh: 40, ctx: null, summary: null });
+  p.emit('fx-air-pollen:click');
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, 0);
+  assert.ok(p.calls.some(c => c[0] === 'glass' && c[1] === 'still'));
+  assert.deepEqual(drawn(p), ['pollen']);
+  // The demo: each button opens its story and previews nothing.
+  const opened = [];
+  p = airPage({ beforeSky(env) { env.APP.now = { moment: 'clear' }; env.location.assign = url => opened.push(url); } });
+  p.sky.air({ pm: 5, rh: 40, ctx: null, summary: null });
+  for (const kind of ['smoke', 'exhaust', 'particles', 'pollen', 'damp']) p.emit(`fx-air-${kind}:click`);
+  assert.deepEqual(opened, ['?moment=sky-smoke', '?moment=rush', '?moment=sky-particles', '?moment=sky-pollen', '?moment=humid']);
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, 0);
+  assert.equal(p.node('fx-mode').textContent, 'Live');
+  assert.equal(p.node('fx-air-smoke').getAttribute('aria-pressed'), undefined, 'a link-like button, not a toggle');
+});
+
+test('ordinary outdoor settle clears the still latch for sparse events', () => {
+  const p = airPage({ realGlass: true });
+  p.sky.air({ pm: 48 });
+  p.sky.glass.still();
+  const count = () => p.calls.filter(c => c[1] === 'frame').length;
+  let before = count(); p.sky.glass.burst(['smoke']);
+  assert.equal(count(), before, 'still mode suppresses sparse events');
+  p.sky.glass.settle(); before = count(); p.sky.glass.burst(['smoke']);
+  assert.equal(count(), before + 1, 'ordinary settle restores sparse scheduling');
+});
+
+test('buffered weather hydrates rain, thunder and freshness through the live updater', () => {
+  for (const weather_code of [61, 95]) {
+    const weather = { temperature: 12, wind_speed: 9, wind_direction: 135, cloud_cover: 100, weather_code };
+    const buffered = airPage({ weather });
+    const live = airPage(); live.sky.weather(weather);
+    assert.equal(buffered.node('sky-weather').innerHTML, live.node('sky-weather').innerHTML);
+    assert.equal(buffered.node('sky-cap').title, '');
+  }
+});
+
+test('weather failure leaves saved wind and thunder stale without renewing the cache', () => {
+  const savedWeather = { dir: 135, spd: 9, cloud: 100, rain: 1, thunder: true, temp: 12 };
+  const unavailable = [{}, { temperature: null, wind_speed: null, wind_direction: null, cloud_cover: null, weather_code: null },
+    { weather_code: -1 }, { weather_code: 100 }, null];
+  for (const weather of unavailable) {
+    const p = airPage({ savedWeather, weather });
+    p.sky.air({ pm: 24 }); p.sky.weather(weather); p.sky.air({ pm: 25 });
+    assert.match(p.node('sky-cap').title, /Last known/);
+    assert.match(p.node('sky-weather').innerHTML, /Thunderstorm.*SE 9 km\/h/);
+    assert.equal(p.writes.length, 0, 'weather failure and PM cannot renew the cache');
+  }
+  const p = airPage({ savedWeather });
+  p.sky.weather({ wind_speed: 12, weather_code: null });
+  assert.match(p.node('sky-weather').innerHTML, /Thunderstorm.*SE 12 km\/h/, 'partial data updates wind but does not clear rain');
+  p.sky.weather({ weather_code: 0 });
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Thunderstorm/);
+  assert.equal(p.writes.at(-1)[1].v.rain, 0);
+  assert.match(p.node('sky-cap').title, /Last known/, 'a fresh weather code does not refresh retained wind and temperature');
+  p.sky.weather({ temperature: 12, wind_speed: 12, wind_direction: 135, cloud_cover: 0, weather_code: 0 });
+  assert.equal(p.node('sky-cap').title, '');
+  p.sky.weather({});
+  assert.match(p.node('sky-cap').title, /Last known/, 'an error after live weather marks it stale again');
+});
+
+test('offline weather and context cannot renew weather, select live conditions or elect a load pass', () => {
+  const wallTime = Date.parse('2026-11-24T12:00:00Z');
+  const p = airPage({ wallTime, weatherCache: { at: wallTime - 6 * 3600e3, v: { thunder: true, rain: 1 } },
+    road: { name: 'Legacy road', toward: [100, 180] } });
+  const weather = { temperature: 12, wind_speed: 9, wind_direction: 135, cloud_cover: 100, weather_code: 95 };
+  p.sky.weather(weather, { cached: true });
+  assert.equal(p.writes.length, 0);
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Thunderstorm/);
+  const summary = { items: [{ id: 'pollen', action: { text: 'Shut windows' } }] };
+  p.sky.air({ ctx: { _offline: true, weather, roads: [{ reaching: true, short: 'Old road', strength: 'high' }], pollen: [{ index: 4 }] }, summary },
+    { initial: true, freshSummary: summary }); p.advance(700);
+  assert.equal(p.node('sky-conditions').children.length, 0);
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Old road|Legacy road/);
+  assert.equal(p.calls.filter(c => c[1] === 'play').length, 0);
+});
+
+// Run the real reading, monitor rendering and refresh paths with only unrelated page work stubbed out.
+function skyPmPage({ outdoor = null, live = false, estimate = false, ...options } = {}) {
+  const src = readFileSync(new URL('static/app.js', root), 'utf8');
+  const part = (from, to) => src.slice(src.indexOf(from), src.indexOf(to, src.indexOf(from)));
+  let current, app;
+  const page = airPage({ ...options, beforeSky(env) {
+    const noop = () => {};
+    env.state.outdoor = outdoor;
+    Object.assign(env, { skyReadingsAvailable: live, shownSkySummary: null, skyInitialOutcome: null,
+      skyEarlySkip: null, skyLoadSkipped: false, NO_INDOOR: false, NO_OUTDOOR: estimate,
+      singleFlight: fn => fn, skyFirstRefresh: true, SRC_ON: { nearby: false },
+      getJSON: async url => url === '/api/current' ? current : {}, pickEntries: home.pickEntries,
+      sourceLine: home.sourceLine, estimateNow: home.estimateNow, readingsNow: env.appNow,
+      monitorsHTML: () => '<article>Monitor reading</article>',
+      updateStatus: noop, showUpdated: noop, showBootRead: noop, renderContext: noop, contextStatus: noop,
+      loadRead: async () => ({ freshSummary: null }), loadCharts: async () => {},
+      REFRESH_TIMEOUT_MS: 30000, forceNext: false, loadFailed: false, lastRefresh: 0, lastStamp: null });
+    const monitors = env.$('monitors');
+    Object.defineProperty(monitors, 'childElementCount', { get: () => monitors.innerHTML ? 1 : 0 });
+    app = runInNewContext([
+      part('const outSource =', '\nconst outEstimate ='), part('const pick = ', 'const clock ='), part('function reading(', '// ── Monitors'),
+      part('const estimateAt =', '// ghost:'), part('const estimateKey =', '// ── Local conditions'),
+      part('const refreshOnce = singleFlight(', '\nfunction refresh(opts)'),
+      '({ refresh: refreshOnce, redraw: (read, readAt) => { Object.assign(state, { read, readAt }); redrawEstimate(); } })',
+    ].join('\n'), env);
+  } });
+  return { ...page, redrawEstimate: app.redraw, refresh(outdoor, cached = false) {
+    current = Object.assign([{ locationType: 'outdoor', ...outdoor }], { _offline: cached });
+    return app.refresh();
+  } };
+}
+
+// The air effects are the sky's only PM2.5 picture (the old haze tint went on 26 Nov): only fresh outdoor PM2.5 shows them.
+const airWords = p => [...p.node('sky-conditions').children].filter(b => b.dataset.skyPlay).map(b => b.dataset.skyPlay);
+test('sky startup paints only outdoor PM from the fresh snapshot', () => {
+  const outdoor = { pm02_corrected: 55 };
+  const weather = { cloud_cover: 30 };
+  for (const live of [false, true]) {
+    const p = skyPmPage({ outdoor, live, weather, savedWeather: { cloud: 20, pm: 60 } });
+    assert.deepEqual(airWords(p), live ? ['smoke'] : []);
+  }
+  const reopened = skyPmPage({ savedWeather: { cloud: 20, pm: 60 } });
+  assert.deepEqual(airWords(reopened), [], 'legacy sky cache is not a live PM source');
+});
+
+test('cached current on refresh never paints the air or writes PM to the sky cache', async () => {
+  const p = skyPmPage({ weather: { cloud_cover: 30 } });
+  await p.refresh({ pm02_corrected: 55 }, true);
+  assert.deepEqual(airWords(p), []);
+  assert.match(p.node('monitors').innerHTML, /Monitor reading/, 'cached monitor cards still render');
+  await p.refresh({ pm02: 55 });
+  assert.deepEqual(airWords(p), ['smoke'], 'fresh monitor data still paints the air');
+  await p.refresh({ pm02_corrected: 44 }, true);
+  assert.deepEqual(airWords(p), [], 'cached refresh clears the live air');
+  p.sky.weather({ cloud_cover: 100 });
+  assert.ok(p.writes.every(([, payload]) => !('pm' in payload.v)), 'sky cache holds weather only');
+});
+
+test('a saved Summary estimate can fill its monitor card without painting live air', async () => {
+  const p = skyPmPage({ estimate: true });
+  const outdoor = { source: { kind: 'model' } };
+  const read = { summary: { timeline: { pm: { source: 'model', past: [['2026-11-24T12:00:00Z', 55]] } } } };
+  await p.refresh(outdoor);
+  p.redrawEstimate(read, 0);
+  assert.deepEqual(airWords(p), [], 'fresh current cannot make a saved estimate live');
+  p.redrawEstimate(read, Date.now());
+  assert.deepEqual(airWords(p), ['smoke'], 'a newly loaded model estimate can paint');
+  await p.refresh(outdoor, true);
+  p.redrawEstimate(read, Date.now());
+  assert.deepEqual(airWords(p), [], 'estimate redraw cannot bypass the offline current gate');
+});
+
+test('getJSON preserves the service worker fallback marker on objects and reading arrays', async () => {
+  const src = readFileSync(new URL('static/app.js', root), 'utf8');
+  const body = src.slice(src.indexOf('async function getJSON('), src.indexOf('\nfunction homeHour()'));
+  for (const data of [{ weather: { weather_code: 95 } }, [{ locationId: 1 }]]) {
+    const fn = new Function('fetch', 'forceNext', 'apiUrl', 'FETCH_TIMEOUT_MS', body + '\nreturn getJSON;')(
+      async () => new Response(JSON.stringify(data), { headers: { 'X-Home-Air-Cache': 'fallback' } }), false, url => url, 1000);
+    const result = await fn('/api/context');
+    assert.equal(result._offline, true);
+    assert.equal(JSON.stringify(result), JSON.stringify(data), 'metadata stays outside request payloads');
+  }
+});
+
+test('temperature-only weather cannot make retained wind and thunder fresh', () => {
+  const wallTime = Date.parse('2026-11-24T12:00:00Z');
+  const p = airPage({ wallTime, savedWeather: { dir: 135, spd: 9, cloud: 100, rain: 1, thunder: true, temp: 12 } });
+  p.sky.weather({ temperature: 16, weather_code: null });
+  assert.match(p.node('sky-weather').innerHTML, /Thunderstorm.*16°.*SE 9 km\/h/);
+  assert.match(p.node('sky-cap').title, /Last known/);
+  const weatherCache = p.writes.at(-1)[1];
+  const warm = airPage({ wallTime, weatherCache });
+  assert.match(warm.node('sky-weather').innerHTML, /Thunderstorm.*16°.*SE 9 km\/h/, 'unexpired readings still survive reload');
+  // The original observation (11:59) has expired, but the update (12:00) has not.
+  const later = Date.parse('2026-11-24T17:59:30Z');
+  const reopened = airPage({ wallTime: later, weatherCache });
+  p.advance(later - wallTime); p.sky.units();
+  for (const page of [reopened, p]) {
+    assert.match(page.node('sky-weather').innerHTML, /16°/);
+    assert.doesNotMatch(page.node('sky-weather').innerHTML, /Thunderstorm|9 km\/h|Clear sky|Calm/);
+  }
+});
+
+test('updating surviving temperature does not clear the stale marker for expired weather', () => {
+  const wallTime = Date.parse('2026-11-24T17:59:30Z');
+  const weatherCache = { at: { cloud: wallTime - 6 * 3600e3, spd: wallTime - 6 * 3600e3, temp: wallTime - 30000 },
+    v: { cloud: 100, spd: 9, temp: 16 } };
+  const p = airPage({ wallTime, weatherCache });
+  p.sky.weather({ temperature: 17 });
+  assert.match(p.node('sky-weather').innerHTML, /17°/);
+  assert.match(p.node('sky-cap').title, /Last known/);
+  const reloaded = airPage({ wallTime, weatherCache: p.writes.at(-1)[1] });
+  reloaded.sky.weather({ temperature: 18 });
+  assert.match(reloaded.node('sky-cap').title, /Last known/, 'another reload must not forget the expired fields');
+  reloaded.sky.weather({ temperature: 18, cloud_cover: 0, wind_speed: 0 });
+  assert.equal(reloaded.node('sky-cap').title, '');
+  assert.match(reloaded.node('sky-weather').innerHTML, /Clear sky.*18°.*Calm/, 'observed zeroes are real readings');
+});
+
+test('an open tab expires storm visuals with the weather line', () => {
+  const wallTime = Date.parse('2026-11-24T12:00:00Z');
+  const p = airPage({ wallTime, weatherCache: { at: wallTime - 6 * 3600e3 + 1000,
+    v: { dir: 135, spd: 9, cloud: 100, rain: 1, thunder: true, temp: 12 } } });
+  const api = p.calls.find(c => c[0] === 'glass' && c[1] === 'create')[2];
+  p.advance(16);
+  assert.match(p.node('sky-weather').innerHTML, /Thunderstorm/);
+  assert.equal(p.document.documentElement.classList.contains('wx-rain'), true);
+  assert.ok(p.calls.some(c => c[0] === 'rain'), 'unexpired storm rain is painted');
+
+  p.advance(1000, { runTimers: false }); // A weather frame may run before the expiry timeout.
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Thunderstorm/);
+  assert.equal(p.document.documentElement.classList.contains('wx-rain'), false);
+  assert.equal(p.document.documentElement.classList.contains('wx-cloud'), false);
+  assert.equal(api.sky().rain, 0);
+  assert.equal(api.sky().thunder, false, 'air renderers see the same expired weather');
+  p.calls.length = 0; p.advance(1016);
+  assert.equal(p.calls.filter(c => c[0] === 'rain').length, 0, 'expired rain stops drawing');
+
+  p.preview({ minutes: 900, dir: 135, spd: 9, cloud: 100, rain: 1, thunder: true });
+  assert.match(p.node('sky-weather').innerHTML, /Preview.*Thunderstorm/);
+  assert.equal(p.document.documentElement.classList.contains('wx-rain'), true, 'weather Preview stays independent of cache expiry');
+
+  const still = airPage({ reduced: true, wallTime, weatherCache: { at: wallTime - 6 * 3600e3 + 1000,
+    v: { cloud: 100, rain: 1, thunder: true } } });
+  still.advance(16);
+  assert.equal(still.frames.size, 0, 'reduced motion has no running weather loop');
+  assert.match(still.node('sky-weather').innerHTML, /Thunderstorm/);
+  still.advance(1000);
+  assert.doesNotMatch(still.node('sky-weather').innerHTML, /Thunderstorm/);
+});
+
+test('partial weather displays only segments supported by their own readings', () => {
+  const p = airPage({ weather: { temperature: 0, wind_speed: 9, weather_code: 0 } });
+  assert.match(p.node('sky-weather').innerHTML, /0°/);
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Clear sky|Calm|km\/h/);
+  p.sky.weather({ wind_direction: 135, weather_code: 61 });
+  assert.match(p.node('sky-weather').innerHTML, /Rain.*0°.*SE 9 km\/h/);
+});
+
+test('Random creates no interval or preview in quiet mode', () => {
+  for (const options of [{ search: '?shot' }, { search: '?shot=dark' }, { appState: 'no_token' }, {}]) {
+    const p = airPage({ ...options, random: true });
+    const quiet = Object.keys(options).length > 0;
+    const before = p.intervals.size;
+    p.emit('fx-rand:click');
+    assert.equal(p.intervals.size, before + (quiet ? 0 : 1));
+    p.preview({ minutes: 900, dir: 250, spd: 12, cloud: 5, pm: 5, rain: 0 });
+    assert.equal(p.node('fx-mode').textContent, quiet ? 'Live' : 'Preview');
+  }
+});
+
+test('quiet sky controls cannot enable effects', () => {
+  for (const options of [{ search: '?shot' }, { search: '?shot=dark' }, { appState: 'no_token' }]) {
+    const p = airPage(options);
+    for (const type of ['sky-quick:click', 'fx-on-sky:change', 'fx-time:input']) p.emit(type, { target: { checked: true, value: 900 } });
+    assert.equal(Number(p.node('sky-grad').style.opacity), 0);
+    assert.equal(p.frames.size, 0); assert.equal(p.calls.length, 0);
+  }
+});
+
+test('saved wind names a legacy road only after a successful legacy context', () => {
+  const p = airPage({ savedWeather: { dir: 135, spd: 12 }, road: { name: 'Legacy road', toward: [100, 180] } });
+  assert.doesNotMatch(p.node('sky-weather').innerHTML, /Legacy road/);
+  p.sky.air({ ctx: null }); assert.doesNotMatch(p.node('sky-weather').innerHTML, /Legacy road/);
+  p.sky.air({ ctx: {} }); assert.match(p.node('sky-weather').innerHTML, /Legacy road/);
+  p.sky.air({ ctx: { roads: [] } }); assert.doesNotMatch(p.node('sky-weather').innerHTML, /Legacy road/);
+});
+
+test('the first sky snapshot waits for context and analysis but not charts or Nearby', async () => {
+  const src = readFileSync(new URL('static/app.js', root), 'utf8');
+  const body = src.slice(src.indexOf('const refreshOnce = singleFlight('), src.indexOf('\nfunction refresh(opts)'));
+  for (const [chartFails, cachedCurrent, cachedContext] of [[false, false, false], [true, false, false], [false, true, false], [false, false, true]]) {
+    let resolveContext, resolveRead, resolveCharts, rejectCharts, resolveNeighbors;
+    const context = new Promise(r => { resolveContext = r; }), read = new Promise(r => { resolveRead = r; });
+    const charts = new Promise((r, j) => { resolveCharts = r; rejectCharts = j; }), nearby = new Promise(r => { resolveNeighbors = r; });
+    const elections = [], calls = [], summary = { items: [{ id: 'pm', action: { text: 'Shut windows' } }] };
+    const env = { singleFlight: fn => fn, skyFirstRefresh: true, state: {}, SRC_ON: {}, NO_INDOOR: false, NO_OUTDOOR: false,
+      getJSON: url => url === '/api/current' ? Promise.resolve(Object.assign([], { _offline: cachedCurrent })) : url === '/api/context' ? context : nearby,
+      pickEntries: home.pickEntries, renderMonitors() {}, showBootRead() {}, renderNeighborhood() {}, renderContext() {}, contextStatus() {},
+      loadRead: () => { calls.push('analysis'); return read; }, loadCharts: () => charts,
+      syncSkyAir: opts => { if (opts?.initial) elections.push(opts); }, setBusy() {}, setPhase() {}, showUpdated() {},
+      console: { error() {} }, REFRESH_TIMEOUT_MS: 30000, skyReadingsAvailable: false, forceNext: false, loadFailed: false, lastRefresh: 0 };
+    const { refresh, available } = new Function(...Object.keys(env), body + '\nreturn {refresh: refreshOnce, available: () => skyReadingsAvailable};')(...Object.values(env));
+    const pending = refresh();
+    await new Promise(r => setImmediate(r)); assert.equal(calls.length, 0, 'analysis waits for context');
+    resolveContext(cachedContext ? { _offline: true } : {}); await new Promise(r => setImmediate(r));
+    assert.equal(calls.length, 1); assert.equal(elections.length, 0);
+    assert.equal(available(), !cachedCurrent, 'cached readings cannot select live PM or damp');
+    if (chartFails) {
+      rejectCharts(new Error('chart unavailable')); await new Promise(r => setImmediate(r));
+      assert.equal(elections.length, 0, 'chart failure cannot consume the pending fresh Summary');
+      assert.deepEqual(env.state.ctx, {}, 'chart failure retains the valid context');
+    }
+    resolveRead({ freshSummary: summary }); await new Promise(r => setImmediate(r));
+    assert.deepEqual(elections, [{ initial: true, freshSummary: cachedCurrent || cachedContext ? null : summary }], 'cached observations cannot elect a load pass, even with fresh analysis');
+    resolveCharts(); resolveNeighbors([]); await pending;
+    await refresh(); assert.equal(elections.length, 1, 'later refreshes never rearm the opportunity');
+  }
+});
+
+test('loadRead explicitly distinguishes fresh, unchanged, cached, missing and failed Summary outcomes', async () => {
+  const src = readFileSync(new URL('static/app.js', root), 'utf8');
+  const body = src.slice(src.indexOf('async function loadRead('), src.indexOf('// ── Refresh'));
+  const summary = { items: [{ id: 'pm', action: { text: 'Windows shut' } }] };
+  for (const mode of ['fresh', 'unchanged', 'cached', 'missing', 'failed']) {
+    const state = { read: { summary }, readAt: mode === 'cached' ? Date.now() : 0, readKey: 'key' };
+    const env = { state, READ_MAX_AGE: 300000, readPayload: () => ({}), readKey: () => 'key',
+      setBusy() {}, setPhase() {}, busyCount: 0, getJSON: async () => { if (mode === 'failed') throw Error('failed'); return mode === 'missing' ? {} : { summary }; },
+      store: { set() {}, get: () => ({ read: { summary } }) }, revealNext: false, readSig: () => 'same', shownSig: mode === 'unchanged' ? 'same' : '',
+      summaryPopOpen: () => false, SummaryCard: { renderSummary() {} }, $: () => ({ innerHTML: '' }), appNow: () => new Date(), SUMMARY_OPTS: () => ({}),
+      redrawEstimate() {}, renderRead() {}, settle() {}, syncSkyAir() {}, navigator: { onLine: true }, console: { error() {} } };
+    const fn = new Function(...Object.keys(env), body + '\nreturn loadRead;')(...Object.values(env));
+    const outcome = await fn(false);
+    assert.deepEqual(outcome, { freshSummary: mode === 'fresh' || mode === 'unchanged' ? summary : null }, mode);
+  }
 });
 
 // Everything about the home comes from the server's config (window.APP), never from the page's own files.
@@ -57,6 +1100,154 @@ test('no home is hardcoded in the page', async () => {
 const require = createRequire(import.meta.url);
 const home = require('../static/home.js');
 const BQE = { name: 'BQE', kind: 'expressway', toward: [80, 200], rush: [[7, 10, 'morning'], [16, 20, 'evening']], distance_km: 1 };
+
+// Catch guessed conditions, lost simultaneous kinds and copied household thresholds at the real helper boundary.
+test('sky conditions use real readings and home limits', () => {
+  const limits = { pm: 15, pm_high: 35, pollen: 3, rh_damp: 55 };
+  const base = { pm: null, rh: null, ctx: null, limits, road: null };
+  const mapped = { smoke: { checked: true, detected: true } };
+  const cases = [
+    ['missing inputs', {}, []],
+    ['measured high PM without NOAA', { pm: 36 }, ['smoke']],
+    ['PM at high limit', { pm: 35 }, ['particles']],
+    ['rounded PM below high limit', { pm: 35.3 }, ['particles']],
+    ['rounded PM above high limit', { pm: 35.6 }, ['smoke']],
+    ['mapped smoke over PM limit', { pm: 16, ctx: mapped }, ['smoke']],
+    ['mapped smoke at PM limit', { pm: 15, ctx: mapped }, []],
+    ['mapped smoke with rounded PM at limit', { pm: 15.3, ctx: mapped }, []],
+    ['mapped smoke without PM', { ctx: mapped }, []],
+    ['no mapped smoke', { pm: 16, ctx: { smoke: { detected: false } } }, ['particles']],
+    ['fine particles over the PM limit', { pm: 16 }, ['particles']],
+    ['fine particles at the PM limit', { pm: 15 }, []],
+    ['fine particles with rounded PM at the limit', { pm: 15.4 }, []],
+    ['fine particles with rounded PM over the limit', { pm: 15.5 }, ['particles']],
+    ['fine particles up to the high limit', { pm: 35 }, ['particles']],
+    ['custom fine particles limit', { pm: 16, limits: { ...limits, pm: 20 } }, []],
+    ['pollen at limit', { ctx: { pollen: [{ index: 2 }, { index: 3 }] } }, ['pollen']],
+    ['pollen below limit', { ctx: { pollen: [{ index: 2 }] } }, []],
+    ['pollen missing', { ctx: { pollen: [] } }, []],
+    ['indoor damp', { rh: 56 }, ['damp']],
+    ['RH at limit', { rh: 55 }, []],
+    ['outdoor RH cannot substitute', { ctx: { weather: { humidity: 90 } } }, []],
+    ['custom high PM limit', { pm: 36, limits: { ...limits, pm_high: 40 } }, ['particles']],
+    ['custom smoke PM limit', { pm: 16, ctx: mapped, limits: { ...limits, pm: 20 } }, []],
+    ['custom smoke PM limit, fine particles over it', { pm: 21, ctx: mapped, limits: { ...limits, pm: 20, pm_high: 40 } }, ['smoke']],
+    ['custom pollen limit', { ctx: { pollen: [{ index: 3 }] }, limits: { ...limits, pollen: 4 } }, []],
+    ['custom damp limit', { rh: 56, limits: { ...limits, rh_damp: 60 } }, []],
+  ];
+  for (const status of ['off', 'error', 'not_set_up']) {
+    cases.push(
+      [`smoke source ${status}`, { pm: 16, ctx: { ...mapped, status: { smoke: status } } }, ['particles']],
+      [`high PM independent of NOAA ${status}`, { pm: 36, ctx: { ...mapped, status: { smoke: status } } }, ['smoke']],
+      [`pollen source ${status}`, { ctx: { pollen: [{ index: 4 }], status: { pollen: status } } }, []],
+    );
+  }
+  for (const value of [null, undefined, NaN, Infinity, -Infinity, '56']) {
+    cases.push(
+      [`invalid PM ${value}`, { pm: value, ctx: mapped }, []],
+      [`invalid RH ${value}`, { rh: value }, []],
+      [`invalid pollen ${value}`, { ctx: { pollen: [{ index: value }] } }, []],
+    );
+  }
+  const reaching = { name: 'Test Expressway', short: 'Test Rd', side: 'E', reaching: true, strength: 'low' };
+  cases.push(
+    ['a reaching road takes fine PM as exhaust', { pm: 20, ctx: { roads: [reaching] } }, ['exhaust']],
+    ['a road not reaching leaves fine particles', { pm: 20, ctx: { roads: [{ ...reaching, reaching: false }] } }, ['particles']],
+    ['road source off leaves fine particles', { pm: 20, ctx: { roads: [reaching], status: { road: 'off' } } }, ['particles']],
+    ['fine particles sit between exhaust and pollen', { pm: 20, rh: 56, ctx: { pollen: [{ index: 3 }] } }, ['particles', 'pollen', 'damp']],
+  );
+  for (const [name, input, want] of cases) {
+    assert.deepEqual(home.skyConditions({ ...base, ...input }).map(c => c.kind), want, name);
+  }
+  assert.deepEqual(home.skyConditions({ ...base, pm: 20 }), [{ kind: 'particles', label: 'Fine particles', road: null }]);
+  const road = { name: 'Test Expressway', short: 'Test Rd', side: 'E', reaching: true, strength: 'low' };
+  assert.deepEqual(home.skyConditions({ ...base, pm: 36, rh: 56, ctx: { roads: [road], pollen: [{ index: 3 }] } }), [
+    { kind: 'smoke', label: 'Smoke', road: null },
+    { kind: 'exhaust', label: 'Test Rd exhaust', road },
+    { kind: 'pollen', label: 'Pollen high', road: null },
+    { kind: 'damp', label: 'Damp inside', road: null },
+  ]);
+});
+
+test('an air preview adds its kind in the sky order, keeps one already there, and names the road the page knows', () => {
+  const smoke = { kind: 'smoke', label: 'Smoke', road: null }, damp = { kind: 'damp', label: 'Damp inside', road: null };
+  assert.deepEqual(home.previewConditions([smoke, damp], 'pollen').map(c => c.kind), ['smoke', 'pollen', 'damp']);
+  assert.deepEqual(home.previewConditions([damp], 'smoke').map(c => c.kind), ['smoke', 'damp']);
+  assert.equal(home.previewConditions([smoke], 'smoke')[0], smoke, 'a kind already there stays as the home has it');
+  assert.deepEqual(home.previewConditions([smoke], 'nothing'), [smoke]);
+  const roads = [{ name: 'Test Expressway', short: 'Test Rd', side: 'E', reaching: false, strength: 'low' }];
+  const viaContext = home.previewConditions([], 'exhaust', { ctx: { roads }, road: { name: 'Legacy' } })[0];
+  assert.equal(viaContext.label, 'Test Rd exhaust'); assert.equal(viaContext.road.side, 'E'); assert.equal(viaContext.road.reaching, true);
+  assert.equal(home.previewConditions([], 'exhaust', { ctx: null, road: { name: 'Legacy' } })[0].label, 'Legacy exhaust');
+  assert.equal(home.previewConditions([], 'exhaust')[0].label, 'Road exhaust');
+});
+
+// Catch legacy exhaust resurrecting when the authoritative roads list says none reaches the home.
+test('sky roads prefer the new contract', () => {
+  const limits = { pm: 15, pm_high: 35, pollen: 3, rh_damp: 55 };
+  const road = { name: 'Test Expressway', short: 'Test Rd', side: 'NW', reaching: true, strength: 'low' };
+  const legacy = { road: { toward: true }, bqe: { traffic: 'PEAK (morning rush)' }, weather: { wind_direction: 0 } };
+  const base = { pm: null, rh: null, ctx: legacy, limits, road: BQE };
+  const cases = [
+    ['new low road', { roads: [{ ...road, why: 'Wind reaches the home', until: null }] }, [{ kind: 'exhaust', label: 'Test Rd exhaust', road }]],
+    ['new road needs no hand-set road', { roads: [road] }, [{ kind: 'exhaust', label: 'Test Rd exhaust', road }], null],
+    ['empty new roads', { roads: [] }, []],
+    ['first road away', { roads: [{ ...road, reaching: false }, road] }, []],
+    ['reaching must be true', { roads: [{ ...road, reaching: 'true' }] }, []],
+    ['null new roads', { roads: null }, []],
+    ['undefined new roads is still present', { roads: undefined }, []],
+    ['legacy peak', {}, [{ kind: 'exhaust', label: 'BQE exhaust', road: { name: 'BQE', short: 'BQE', side: null, reaching: true, strength: 'peak' } }]],
+    ['legacy high', { bqe: { traffic: 'HIGH' } }, [{ kind: 'exhaust', label: 'BQE exhaust', road: { name: 'BQE', short: 'BQE', side: null, reaching: true, strength: 'high' } }]],
+    ['legacy low', { bqe: { traffic: 'LOW' } }, []],
+    ['legacy not toward', { road: { toward: false } }, []],
+    ['legacy missing road context', { road: null }, []],
+    ['legacy missing traffic', { bqe: null }, []],
+    ['legacy non-string traffic', { bqe: { traffic: 7 } }, []],
+    ['legacy missing hand-set road', {}, [], null],
+  ];
+  for (const status of ['off', 'error']) {
+    cases.push([`new road source ${status}`, { roads: [road], status: { road: status } }, []]);
+    cases.push([`legacy road source ${status}`, { status: { road: status } }, []]);
+  }
+  for (const [name, ctx, want, handSet = BQE] of cases) {
+    assert.deepEqual(home.skyConditions({ ...base, ctx: { ...legacy, ...ctx }, road: handSet }), want, name);
+  }
+});
+
+// Catch a later action or an arbitrary active kind stealing the Summary's first action's pass.
+test('sky leader follows the first Summary action', () => {
+  const conditions = home.skyConditions({ pm: 36, rh: 56, limits: { pm: 15, pm_high: 35, pollen: 3, rh_damp: 55 }, road: null,
+    ctx: { roads: [{ name: 'Test Road', short: 'Test', side: 'N', reaching: true, strength: 'low' }], pollen: [{ index: 3 }] } });
+  const action = { text: 'Take the current action' };
+  const pm = { id: 'pm', action }, pollen = { id: 'pollen', action };
+  const particles = home.skyConditions({ pm: 20, rh: null, limits: { pm: 15, pm_high: 35, pollen: 3, rh_damp: 55 }, road: null,
+    ctx: { roads: [], pollen: [{ index: 3 }] } });
+  const cases = [
+    ['pollen first', [pollen, pm], conditions, 'pollen'],
+    ['damp RH first', [{ id: 'rh', facts: { dry: false }, action }, pm], conditions, 'damp'],
+    ['dry RH first', [{ id: 'rh', facts: { dry: true }, action }, pm], conditions, null],
+    ['RH without damp facts', [{ id: 'rh', action }, pm], conditions, null],
+    ['PM first prefers smoke', [pm, pollen], conditions, 'smoke'],
+    ['PM first without smoke', [pm, pollen], conditions.filter(c => c.kind !== 'smoke'), 'exhaust'],
+    ['traffic first', [{ id: 'traffic', action }, pm], conditions, 'exhaust'],
+    ['CO2 first', [{ id: 'co2', action }, pm], conditions, null],
+    ['unmatched first kind', [pollen, pm], conditions.filter(c => c.kind !== 'pollen'), null],
+    ['PM without smoke or exhaust', [pm, pollen], conditions.filter(c => c.kind === 'pollen'), null],
+    ['PM first picks fine particles', [pm, pollen], particles, 'particles'],
+    ['pollen first over fine particles', [pollen, pm], particles, 'pollen'],
+    ['traffic first never picks fine particles', [{ id: 'traffic', action }, pm], particles, null],
+    ['PM first prefers exhaust over fine particles', [pm], [...conditions.filter(c => c.kind === 'exhaust'), ...particles], 'exhaust'],
+    ['PM first prefers smoke over fine particles', [pm], [...conditions.filter(c => c.kind === 'smoke'), ...particles], 'smoke'],
+    ['no active conditions', [pm], [], null],
+    ['first action missing', [{ id: 'pm' }, pollen], conditions, null],
+    ['first action null', [{ id: 'pm', action: null }, pollen], conditions, null],
+    ['first action without text', [{ id: 'pm', action: { text: null, when: null, when_end: null } }, pollen], conditions, null],
+    ['first action blank', [{ id: 'pollen', action: { text: '  ' } }, pm], conditions, null],
+    ['no Summary items', [], conditions, null],
+  ];
+  for (const [name, items, active, want] of cases) assert.equal(home.skyLeader(active, { items }), want, name);
+  for (const summary of [null, undefined, {}, { items: null }]) assert.equal(home.skyLeader(conditions, summary), null);
+});
 
 test('bearingIn: a plain arc and one that crosses north', () => {
   assert.equal(home.bearingIn(100, [80, 200]), true);
@@ -545,7 +1736,7 @@ test("at home, the You row reads the outdoor card's PM2.5 (the row, the lead and
 test('neighborhood: the header says only Neighborhood, the findings sit in the card, the count is in Show more', () => {
   const app = readFileSync(new URL('static/app.js', root), 'utf8');
   const html = readFileSync(new URL('index.html', root), 'utf8');
-  assert.match(html, /<h2>Neighborhood<\/h2>/);
+  assert.match(html, /<h2\b[^>]*>Neighborhood<\/h2>/);
   assert.doesNotMatch(html + app, /nb-sub|nb-foot|nb-why/);
   // map and legend, then the findings (neighbors line, wind line), then the table
   assert.ok(html.indexOf('id="nb-map"') < html.indexOf('id="nb-find"') && html.indexOf('id="nb-find"') < html.indexOf('class="nbt"'));
@@ -584,7 +1775,7 @@ function mapWith(others, width) {
   }
   const el = () => ({ set onload(f) { this._ok = f; }, get onload() { return this._ok; } });
   const box = { clientWidth: width, querySelectorAll: () => [], innerHTML: '' };
-  const document = { documentElement: { dataset: {} }, body: { dataset: {} }, createElement: el,
+  const document = { documentElement: { dataset: {} }, body: { dataset: {} }, createElement: el, addEventListener() {},
     head: { appendChild: x => x.onload && x.onload() }, querySelectorAll: () => [] };
   const ctx = { window: {}, document, maplibregl: { Map, LngLatBounds, NavigationControl: class {}, AttributionControl: class {} },
     $: id => (id === 'nb-map' ? box : null), APP: { place: { lat: 13.75, lon: 100.48 }, road: null },
@@ -1010,3 +2201,94 @@ test('coming back to the page refreshes only when what it shows is older than th
   assert.equal(home.refreshDue({ hidden: true, last: 0, now }), false);                      // a hidden tab never asks
 });
 
+
+// The exhaust (mock 109 round 4, Sacha 26 Nov): its colour follows the sky, it comes from the road's compass side (north up,
+// as on the map) and drifts with the wind, and its strength follows the pollution.
+const exhaustRules = (() => {
+  const env = { document: {}, window: {} };
+  runInNewContext(readFileSync(new URL('static/sky-glass.js', root), 'utf8'), env);
+  return env.SkyGlass;
+})();
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+test("the exhaust's colour: LA's brown on a clear day, a little dusk at sunrise and sunset, grey under cloud and in rain", () => {
+  const { exhaustPalette } = exhaustRules;
+  const clear = exhaustPalette({ el: 40, cloud: 5 });
+  assert.equal(clear.dusk, 0); assert.equal(clear.grey, 0);
+  assert.deepEqual([...clear.pal.body[0]], [164, 144, 116]);   // LA's lid, by day
+  const dusk = exhaustPalette({ el: 4, cloud: 5 });
+  assert.ok(near(dusk.dusk, .55) && dusk.grey === 0, 'at most a little of the 80s dusk');
+  assert.ok(dusk.pal.edge[0][0] > clear.pal.edge[0][0], 'warmer at dusk');
+  assert.equal(exhaustPalette({ el: 4 + 9, cloud: 5 }).dusk, 0, 'gone 9° from its peak');
+  assert.equal(exhaustPalette({ el: 40, cloud: 90 }).grey, 1);
+  assert.deepEqual([...exhaustPalette({ el: 40, cloud: 90 }).pal.body[0]], [134, 126, 116]);   // arrays from the script's own context
+  assert.ok(near(exhaustPalette({ el: 40, cloud: 0, rain: .5 }).grey, .3));
+  assert.equal(exhaustPalette({ el: 40, cloud: 0, thunder: true }).grey, .4);
+});
+
+test("the exhaust comes from the road's side, north up, and drifts the way the wind blows", () => {
+  const { roadBearing, plumeFrame } = exhaustRules;
+  assert.equal(roadBearing({ side: 'SE' }, [66, 207], 300), 135);
+  assert.equal(roadBearing({ side: null }, [66, 207], 300), 136.5, 'no side: the middle of the arc the wind must blow from');
+  assert.equal(roadBearing(null, [300, 60], 90), 0, 'an arc across north');
+  assert.equal(roadBearing(null, null, 200), 200);
+  assert.equal(roadBearing(null, null, null), 135);
+  // southeast on a phone: the bottom-right corner; a southeast wind carries it up and to the left
+  const se = plumeFrame({ bearing: 135, windDir: 135, windSpeed: 9, W: 390, H: 844 });
+  assert.ok(near(se.origin.x, 390) && near(se.origin.y, 844));
+  assert.ok(near(se.dx, -Math.SQRT1_2) && near(se.dy, -Math.SQRT1_2));
+  assert.equal(se.speed, 8 + 2 * 9);
+  const east = plumeFrame({ bearing: 90, windDir: 90, windSpeed: 9, W: 390, H: 844 });
+  assert.ok(near(east.origin.x, 390) && near(east.origin.y, 422));
+  const north = plumeFrame({ bearing: 0, windDir: 0, windSpeed: 9, W: 1440, H: 900 });
+  assert.ok(near(north.origin.x, 720) && near(north.origin.y, 0) && near(north.dy, 1));
+  // a calm: straight away from the road, whatever the vane says
+  const calm = plumeFrame({ bearing: 135, windDir: 300, windSpeed: 2, W: 390, H: 844 });
+  assert.ok(near(calm.dx, -Math.SQRT1_2) && near(calm.dy, -Math.SQRT1_2));
+});
+
+test("the exhaust's strength follows the traffic, the PM2.5 over the limit, the wind and the rain", () => {
+  const { exhaustStrength } = exhaustRules, limits = { pm: 15, pm_high: 35 };
+  assert.ok(near(exhaustStrength({ strength: 'peak', pm: 22, limits, windSpeed: 9 }), .55 + .45 * 7 / 20));
+  assert.equal(exhaustStrength({ strength: 'peak', pm: 35, limits }), 1);
+  assert.equal(exhaustStrength({ strength: 'high', pm: 15, limits }), .4, 'never weaker than its floor');
+  assert.ok(near(exhaustStrength({ strength: 'peak', pm: 35, limits, windSpeed: 37 }), .7), 'a strong wind spreads it thinner');
+  assert.ok(near(exhaustStrength({ strength: 'peak', pm: 35, limits, rain: 1 }), .55), 'rain washes it out');
+  assert.ok(near(exhaustStrength({ strength: 'peak', pm: 35, limits: { pm: 10, pm_high: 20 } }), 1), "the home's own limits");
+});
+
+test("beside the exhaust's word, the wind that carries it; it leaves with the exhaust", () => {
+  const road = [{ name: 'BQE', short: 'BQE', side: 'SE', reaching: true, strength: 'peak' }];
+  const p = airPage({ randomValue: .5 });
+  const kids = () => [...p.node('sky-conditions').children];
+  p.sky.air({ pm: 22, rh: 47, ctx: { roads: road }, summary: { items: [{ id: 'pm', action: { text: 'Windows shut' } }] } });
+  const pill = kids().find(el => el.className?.includes('cap-ex-wind'));
+  assert.ok(pill, 'the wind pill is shown');
+  assert.equal(kids().indexOf(pill), kids().findIndex(el => el.dataset.skyPlay === 'exhaust') + 1, 'right after the exhaust');
+  const words = pill.children.find(el => el.className === 'ex-wind').textContent;
+  assert.match(words, /^from (N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW) · \d+ km\/h$/);
+  assert.match(pill.getAttribute('aria-label'), /^Wind from the [a-z-]+ at \d+ km\/h, carrying the exhaust/);
+  assert.ok(p.node('html').classList.contains('has-ex-wind'), "the weather's own wind reading hides meanwhile");
+  p.sky.air({ pm: 8, rh: 47, ctx: { roads: [] }, summary: { items: [] } });
+  assert.ok(!kids().some(el => el.className?.includes('cap-ex-wind')));
+  assert.ok(!p.node('html').classList.contains('has-ex-wind'));
+});
+
+// The Live sky switches (Sacha, 26 Nov): Sky, Wind, Air. Air alone turns the air effects on and off; a choice saved
+// with the old Haze switch carries over to Air.
+test('the Air switch alone turns the air effects on and off, and a saved Haze choice carries over', () => {
+  const road = [{ name: 'BQE', short: 'BQE', side: 'SE', reaching: true, strength: 'peak' }];
+  const shown = prefs => {
+    const p = airPage({ randomValue: .5, prefs });
+    p.sky.air({ pm: 22, rh: 47, ctx: { roads: road }, summary: { items: [{ id: 'pm', action: { text: 'Windows shut' } }] } });
+    const word = [...p.node('sky-conditions').children].find(b => b.dataset.skyPlay === 'exhaust');
+    return { enabled: !!word && !word.disabled, air: p.node('fx-on-air').checked };
+  };
+  assert.deepEqual(shown({ sky: true, wind: true, air: true }), { enabled: true, air: true });
+  assert.deepEqual(shown({ sky: false, wind: false, air: true }), { enabled: true, air: true }, 'no sky or wind: the air still shows');
+  assert.deepEqual(shown({ sky: true, wind: true, air: false }), { enabled: false, air: false }, 'Air off: no air effects, whatever the sky');
+  assert.deepEqual(shown({ sky: true, wind: true, haze: false }), { enabled: false, air: false }, 'a saved Haze off is Air off');
+  assert.deepEqual(shown({ sky: true, wind: true, haze: true }), { enabled: true, air: true });
+  const html = readFileSync(new URL('index.html', root), 'utf8');
+  assert.match(html, /<b>Air<\/b>/); assert.doesNotMatch(html, /fx-on-haze|sky-haze/);
+});

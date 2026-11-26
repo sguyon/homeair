@@ -77,7 +77,7 @@
   const MODEL_LABEL = 'PM2.5 outside · model';
   const pmPastSvg = (source, d, area, at, col) => source !== 'model' ? `<path d="${area}" fill="url(#sx-fp)"/>`
     : `<path d="${area}" fill="${col.fill}" fill-opacity=".14"/><path d="${d}" fill="none" stroke="${col.muted}" stroke-width="1.5" stroke-dasharray="2 3" stroke-linecap="round"/>` +
-      `<text x="${at.x}" y="${at.y}" font-size="10.5" font-weight="600" fill="${col.muted}" stroke="${col.card}" stroke-width="3" paint-order="stroke">${MODEL_LABEL}</text>`;
+      `<text class="sx-chart-halo" x="${at.x}" y="${at.y}" font-size="10.5" font-weight="600" fill="${col.muted}" stroke="${col.card}" stroke-width="3" paint-order="stroke">${MODEL_LABEL}</text>`;
   // a temperature in the page's unit (app.js fmtTemp: the home's, or the viewer's pick); °C, as readings arrive, without the page
   const tempText = c => (typeof fmtTemp === 'function' ? fmtTemp(c, { tight: true }) : Math.round(c) + '°C');
   // each redraw replaces the chart's listeners (including the one on document) instead of adding more
@@ -91,7 +91,8 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ── drawing ──
-  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  // SVG colours inherit the containing card's material and update on a theme change without a redraw.
+  const css = n => `var(${n})`;
   const CO2_COL = '#6f8194', PM_COL = '#7f93a6', RH_COL = '#a3aeb9';
   const MODEL_LABEL_TOP = 26;   // px: the model label's highest baseline, under the FORECAST → caption
   const MODEL_LABEL_W = 130;    // px: about how wide "PM2.5 outside · model" is at 10.5 px, for finding room over the line
@@ -135,8 +136,8 @@
       `<pattern id="sx-h" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="rgba(127,147,166,.42)" stroke-width="1.2"/></pattern>
        <pattern id="sx-hw" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="rgba(217,138,28,.10)"/><line x1="0" y1="0" x2="0" y2="5" stroke="rgba(217,138,28,.7)" stroke-width="1.4"/></pattern>
        <clipPath id="sx-above"><rect x="0" y="-10" width="${w}" height="${yl + 10}"/></clipPath>`;
-    let g = `<rect x="0" y="${top}" width="${xn}" height="${P + 12}" fill="${css('--tile')}" opacity=".8"/>`;
-    const lab = (xx, yy, s, col, anchor = 'start') => { g += `<text x="${xx}" y="${yy}" font-size="10.5" font-weight="600" fill="${col}" text-anchor="${anchor}" stroke="${card}" stroke-width="3" paint-order="stroke">${esc(s)}</text>`; };
+    let g = `<rect class="sx-chart-past" x="0" y="${top}" width="${xn}" height="${P + 12}" fill="${css('--tile')}" opacity=".8"/>`;
+    const lab = (xx, yy, s, col, anchor = 'start') => { g += `<text class="sx-chart-label sx-chart-halo${col === warn ? ' is-warn' : ''}" x="${xx}" y="${yy}" font-size="10.5" font-weight="600" fill="${col}" text-anchor="${anchor}" stroke="${card}" stroke-width="3" paint-order="stroke">${esc(s)}</text>`; };
     if (pm.length > 1) {
       const area = ps => `${path(ps, c.lim.pm)} L ${x(ps[ps.length - 1][0])} ${bot} L ${x(ps[0][0])} ${bot} Z`;
       if (c.pmPast.length > 1) {
@@ -164,7 +165,7 @@
     let co2LabY = null;   // where the CO₂ label sits when it's above its dot, so the humidity label can avoid it
     if (c.co2.length) {
       const [tc, vc] = c.co2[c.co2.length - 1], over = vc > c.lim.co2, y = ys(vc / c.lim.co2);
-      g += `<circle cx="${x(tc)}" cy="${y}" r="3.5" fill="${over ? warnFill : css('--ink')}" stroke="${card}" stroke-width="1.5"/>`;
+      g += `<circle class="sx-chart-point" cx="${x(tc)}" cy="${y}" r="3.5" fill="${over ? warnFill : css('--ink')}" stroke="${card}" stroke-width="1.5"/>`;
       const txt = `CO₂ inside ${Math.round(vc).toLocaleString('en-US')}`;
       if (over) { lab(x(tc) - 7, y - 7, txt, warn, 'end'); co2LabY = y - 7; } else lab(x(tc) + 7, y + 14, txt, css('--soft'));
     }
@@ -189,12 +190,12 @@
     for (const u of c.uv) {
       const xa = x(u.a), xb = x(u.b), xm = (xa + xb) / 2;
       g += `<rect x="${xa}" y="${axisY - 2}" width="${xb - xa}" height="4" rx="2" fill="#e8b04d" opacity=".7"/>`;
-      g += `<g transform="translate(${xm} ${axisY - 11})" fill="none" stroke="#d48a1e" stroke-width="1.4" stroke-linecap="round"><circle r="9" fill="${card}" stroke="none"/><circle r="2.8"/><path d="M0-6.5v1.6M0 4.9v1.6M-6.5 0h1.6M4.9 0h1.6M-4.6-4.6l1.1 1.1M3.5 3.5l1.1 1.1M-4.6 4.6l1.1-1.1M3.5-3.5l1.1-1.1"/></g>`;
+      g += `<g transform="translate(${xm} ${axisY - 11})" fill="none" stroke="#d48a1e" stroke-width="1.4" stroke-linecap="round"><circle class="sx-chart-knockout" r="9" fill="${card}" stroke="none"/><circle r="2.8"/><path d="M0-6.5v1.6M0 4.9v1.6M-6.5 0h1.6M4.9 0h1.6M-4.6-4.6l1.1 1.1M3.5 3.5l1.1 1.1M-4.6 4.6l1.1-1.1M3.5-3.5l1.1-1.1"/></g>`;
       lab(xm + 11, axisY - 7, `UV ${u.m}`, css('--muted'));
     }
     for (const e of c.sun) {
       const xe = x(e.t), arrow = e.kind === 'Sunrise' ? 'M0 -2.5V-8M-2.3 -5.8 0 -8 2.3 -5.8' : 'M0 -8V-2.5M-2.3 -4.7 0 -2.5 2.3 -4.7';
-      g += `<g transform="translate(${xe} ${axisY - 1})" fill="none" stroke="#d48a1e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><title>${e.kind} ${e.s}</title><circle r="10" fill="${card}" stroke="none"/><path d="M-6.5 4.5h13"/><path d="M-3.8 4.5a3.8 3.8 0 0 1 7.6 0"/><path d="${arrow}"/></g>`;
+      g += `<g transform="translate(${xe} ${axisY - 1})" fill="none" stroke="#d48a1e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><title>${e.kind} ${e.s}</title><circle class="sx-chart-knockout" r="10" fill="${card}" stroke="none"/><path d="M-6.5 4.5h13"/><path d="M-3.8 4.5a3.8 3.8 0 0 1 7.6 0"/><path d="${arrow}"/></g>`;
       lab(xe + 11, axisY - 6, e.s, css('--muted'));
     }
     const rainy = c.hours.some(hh => hh.pop);
@@ -221,8 +222,11 @@
     const coarse = matchMedia('(pointer: coarse)').matches || el.clientWidth < 560;   // a narrow chart docks the readout too
     tip.classList.toggle('dock', coarse);
     const temps = c.hours.filter(hh => hh.temp != null).map(hh => [hh.t, hh.temp]);
-    const show = e => {
-      const r = svg.getBoundingClientRect(), px = Math.min(Math.max(e.clientX - r.left, 0), geo.R);
+    let hoverFrame = 0, hoverX = 0;
+    const drawHover = clientX => {
+      // Batch reads before writes; pointer events are coalesced to one tooltip update per frame.
+      const r = svg.getBoundingClientRect(), tipWidth = coarse ? 0 : parseFloat(getComputedStyle(tip).width);
+      const warnFill = css('--warn-fill'), px = Math.min(Math.max(clientX - r.left, 0), geo.R);
       const t = c.t0 + px / geo.R * (c.t1 - c.t0), fc = t > c.now + .05, past = c.pmModel ? 'Model' : 'Measured';
       const co2 = lerp(c.co2, t), rh = lerp(c.rh, t), pm = lerp([...c.pmPast, ...c.pmFc], t), temp = lerp(temps, t);
       const rain = c.hours.find(hh => hh.pop && Math.abs(hh.t - t) <= 1.5);
@@ -231,7 +235,7 @@
       g.style.display = '';
       svg.querySelector('.sx-hvl').setAttribute('x1', px); svg.querySelector('.sx-hvl').setAttribute('x2', px);
       const dot = (cls, v, lim, col) => { const d = svg.querySelector(cls); if (v == null) { d.style.display = 'none'; return; }
-        d.style.display = ''; d.setAttribute('cx', px); d.setAttribute('cy', geo.ys(v / lim)); d.setAttribute('stroke', v > lim ? css('--warn-fill') : col); };
+        d.style.display = ''; d.setAttribute('cx', px); d.setAttribute('cy', geo.ys(v / lim)); d.setAttribute('stroke', v > lim ? warnFill : col); };
       dot('.sx-hvc', co2, c.lim.co2, CO2_COL); dot('.sx-hvp', pm, c.lim.pm, '#8a97a4');
       const rows = [];
       if (co2 != null) rows.push({ sw: '<i class="sx-sw-co2"></i>', lb: 'CO₂ inside', v: Math.round(co2).toLocaleString('en-US'), u: 'ppm', over: co2 > c.lim.co2 });
@@ -250,9 +254,15 @@
           (ev ? `<div class="sx-ev">${ICON[ev.kind]}<span>${esc(evText)}</span></div>` : '');
       }
       tip.style.display = 'block';
-      if (!coarse) { const tw = tip.offsetWidth; tip.style.left = Math.max(0, tipSide(px, r.width, tw) === 'left' ? px - 16 - tw : px + 16) + 'px'; }
+      if (!coarse) tip.style.left = Math.max(0, tipSide(px, r.width, tipWidth) === 'left' ? px - 16 - tipWidth : px + 16) + 'px';
     };
-    const hide = () => { g.style.display = 'none'; tip.style.display = 'none'; };
+    const show = e => {
+      hoverX = e.clientX;
+      if (!hoverFrame) hoverFrame = requestAnimationFrame(() => { hoverFrame = 0; drawHover(hoverX); });
+    };
+    const cancelHover = () => { cancelAnimationFrame(hoverFrame); hoverFrame = 0; };
+    const hide = () => { cancelHover(); g.style.display = 'none'; tip.style.display = 'none'; };
+    signal.addEventListener('abort', cancelHover, { once: true });
     el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') show(e); }, { signal });
     el.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) show(e); }, { signal });
     el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); }, { signal });
@@ -262,7 +272,7 @@
 
   function itemHtml(it, now, profiles) {
     const when = staleWhen(it.action, now);
-    return `<div class="sx-row">
+    return `<div class="sx-row" data-item-id="${esc(it.id)}">
       <div class="sx-lab"><span>${it.key ? `<i class="sx-key ${it.key}${it.forecast ? ' fc' : ''}"></i>` : ''}${esc(it.label)}${it.forecast ? ' · <span class="sx-fct">forecast</span>' : ''}</span>${itemProfileHtml(it, profiles)}</div>
       <div class="sx-num">${esc(it.num)}<small>${esc(it.unit)}</small></div>
       <div class="sx-ctx">${esc(it.ctx)}</div>

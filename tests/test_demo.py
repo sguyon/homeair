@@ -95,10 +95,12 @@ def test_rush_story(c):
     r = read(c, "rush")
     s = r["summary"]
     items = {i["id"]: i for i in s["items"]}
-    # three items: PM2.5 and CO₂ make one timeline (shut during the rush, air after it), humidity a dehumidifier;
-    # pollen is moderate (2 of 5), under the line, so no window card contradicts the airing
-    assert set(items) == {"pm", "co2", "rh"}
-    assert items["rh"]["num"] == "63" and items["rh"]["action"]["text"] == "Run the dehumidifier"
+    # the first sample people see stays simple: PM2.5 (the BQE's exhaust) leads, CO₂ follows, nothing else; pollen is
+    # low and the bedroom's humidity comfortable, so no pollen action, no humidity line and only exhaust in the sky
+    assert [i["id"] for i in s["items"]] == ["pm", "co2"]
+    assert s["also"] is None
+    app = app_of(c, "rush")
+    assert payload(c.get("/api/current?moment=rush").get_json())["indoor_humidity"] <= app["limits"]["rh_good"]
     # the tension: stale inside, dirty outside, so air out after the rush
     co2 = items["co2"]
     assert co2["action"]["text"] == "Open a window for 10 min"
@@ -116,9 +118,10 @@ def test_rush_story(c):
     # the toddler: stale now, after a stale night that peaked about 1,400
     assert profiles["toddler"]["ok"] is False and profiles["toddler"]["state"] == "Stale indoors"
     assert 1350 <= profiles["toddler"]["facts"]["night_peak"] <= 1450 and "last night" in profiles["toddler"]["why"].lower()
-    assert profiles["sinus"]["state"] == "Too damp"
+    assert profiles["sinus"]["ok"] is True and profiles["sinus"]["state"] == "Pollen low"
     ctx = c.get("/api/context?moment=rush").get_json()
     assert ctx["road"] == {"name": "BQE", "toward": True}
+    assert all(p["index"] < app["limits"]["pollen"] for p in ctx["pollen"])
     assert ctx["status"] == {"pollen": "ok", "smoke": "ok", "road": "ok", "nearby": "ok"}
 
 
@@ -229,7 +232,8 @@ def test_fresh_copy_opens_as_the_demo(demo, tmp_path):
 
 # ── the hidden one-monitor cases (?moment=indoor-near, indoor-model, outdoor-only): not samples, not in the top area ──
 
-HIDDEN = ("indoor-near", "indoor-model", "outdoor-only")
+SKY_MOMENTS = ("sky-smoke", "sky-pollen", "sky-smoke-damp", "sky-particles")
+HIDDEN = ("indoor-near", "indoor-model", "outdoor-only") + SKY_MOMENTS
 SOURCE_ID = 900001   # the made-up public monitor indoor-near reads
 
 
@@ -240,13 +244,14 @@ def app_of(c, moment):
 
 def test_hidden_moments_load_without_outside_calls(c, monkeypatch):
     """Each hidden case's page, its window.APP and every request the page makes answer, with no network."""
+    from demo.moments import moment_for
     def refuse(*a, **k):
         raise AssertionError("the demo called the network")
     monkeypatch.setattr(requests, "get", refuse)
     monkeypatch.setattr(requests, "post", refuse)
     for m in HIDDEN:
         app = app_of(c, m)
-        assert app["now"]["moment"] == m and app["now"]["at"].startswith("2026-04-21T07:45:00")   # the rush's morning
+        assert app["now"]["moment"] == m and app["now"]["at"] == moment_for(m).at.isoformat()
         assert [x["key"] for x in app["now"]["moments"]] == ["rush", "clear", "humid"]   # the top area keeps the three
         current = c.get(f"/api/current?moment={m}")
         assert current.status_code == 200
@@ -267,6 +272,107 @@ def test_hidden_moments_stay_hidden(c):
         assert moment_for(m).key == m
     assert all(m not in SAMPLES for m in HIDDEN)
     assert c.get("/?moment=indoor-near").get_data() != c.get("/?moment=rush").get_data()
+
+
+def test_sky_smoke_story(c):
+    current = payload(c.get("/api/current?moment=sky-smoke").get_json())
+    assert current["outdoor_pm25"] == 48 and current["indoor_humidity"] == 45
+    s = read(c, "sky-smoke")["summary"]
+    assert [i["id"] for i in s["items"]] == ["pm"]
+    assert s["items"][0]["action"] and s["items"][0]["facts"]["cause"] == "smoke"
+    ctx = c.get("/api/context?moment=sky-smoke").get_json()
+    assert ctx["smoke"]["detected"] is True and ctx["road"]["toward"] is False
+    assert ctx["smoke"]["density"] == "Medium"
+    assert all(p["index"] == 0 for p in ctx["pollen"])
+
+
+def test_sky_pollen_story(c):
+    current = payload(c.get("/api/current?moment=sky-pollen").get_json())
+    assert current["outdoor_pm25"] == 5 and current["indoor_humidity"] == 45
+    s = read(c, "sky-pollen")["summary"]
+    assert [i["id"] for i in s["items"]] == ["pollen"] and s["all_clear"] is False
+    assert s["items"][0]["action"] and s["items"][0]["num"] == "4"
+    ctx = c.get("/api/context?moment=sky-pollen").get_json()
+    assert ctx["smoke"]["detected"] is False and ctx["road"]["toward"] is False
+
+
+def test_sky_smoke_damp_story(c):
+    app = app_of(c, "sky-smoke-damp")
+    current = payload(c.get("/api/current?moment=sky-smoke-damp").get_json())
+    assert current["outdoor_pm25"] == 48 > app["limits"]["pm_high"]
+    assert current["indoor_humidity"] == 66 > app["limits"]["rh_damp"]
+    s = read(c, "sky-smoke-damp")["summary"]
+    assert [i["id"] for i in s["items"]] == ["pm", "rh"]
+    assert s["items"][0]["action"] and s["items"][0]["facts"]["cause"] == "smoke"
+    assert s["items"][1]["action"]["text"] == "Run the dehumidifier"
+    ctx = c.get("/api/context?moment=sky-smoke-damp").get_json()
+    assert ctx["smoke"]["detected"] is True and ctx["road"]["toward"] is False
+    assert all(p["index"] == 0 for p in ctx["pollen"])
+
+
+def test_sky_particles_story(c):
+    """Fine particles: outdoor PM2.5 over the limit (not the high limit), no smoke on the map, the road's exhaust blown
+    away, nothing else over its limit, and the PM2.5 action leading. The page's rule (static/home.js) names it."""
+    app = app_of(c, "sky-particles")
+    current = payload(c.get("/api/current?moment=sky-particles").get_json())
+    assert app["limits"]["pm"] < current["outdoor_pm25"] == 24 <= app["limits"]["pm_high"]
+    assert current["indoor_humidity"] <= app["limits"]["rh_damp"]
+    s = read(c, "sky-particles")["summary"]
+    assert [i["id"] for i in s["items"]] == ["pm"] and s["all_clear"] is False
+    assert s["items"][0]["action"]["text"] and "cause" not in s["items"][0]["facts"]
+    ctx = c.get("/api/context?moment=sky-particles").get_json()
+    assert ctx["smoke"]["detected"] is False and ctx["road"]["toward"] is False
+    assert all(p["index"] < app["limits"]["pollen"] for p in ctx["pollen"])
+
+
+@pytest.mark.parametrize("moment", ("sky-smoke", "sky-smoke-damp"))
+def test_smoke_windows_reopen_at_first_clean_forecast_hour(c, moment):
+    from demo.moments import moment_for
+    from summary import OUTLOOK_HOURS
+
+    now = moment_for(moment).at
+    summary = read(c, moment)["summary"]
+    forecast = c.get(f"/api/context?moment={moment}").get_json()["forecast"]
+    limit = app_of(c, moment)["limits"]["pm"]
+    clean = [datetime.fromisoformat(h["time"]).replace(tzinfo=now.tzinfo) for h in forecast
+             if h["pm25"] is not None and round(h["pm25"]) <= limit
+             and now < datetime.fromisoformat(h["time"]).replace(tzinfo=now.tzinfo)
+             <= now + timedelta(hours=OUTLOOK_HOURS)]
+    assert clean, "smoke must clear within the Summary's forecast window"
+    assert datetime.fromisoformat(summary["items"][0]["action"]["when_end"]) == clean[0]
+
+
+@pytest.mark.parametrize("moment", ("sky-smoke", "sky-smoke-damp"))
+def test_smoke_is_regional_in_nearby_readings(c, moment):
+    current = c.get(f"/api/current?moment={moment}").get_json()
+    home = next(m for m in current if m["locationType"] == "outdoor")
+    nearby = c.get(f"/api/neighborhood?moment={moment}").get_json()
+    pm = [m["pm02"] for m in nearby if m["locationId"] != home["locationId"]]
+    assert len(pm) == 12
+    assert pm == pytest.approx([home["pm02_corrected"]] * len(pm), abs=3)
+    assert min(pm) < max(pm)
+
+
+@pytest.mark.parametrize("moment", SKY_MOMENTS)
+def test_sky_history_is_a_full_week_ending_at_current_reading(c, moment):
+    from demo.moments import moment_for
+
+    at = moment_for(moment).at
+    step = timedelta(minutes=5)
+    for monitor in c.get(f"/api/current?moment={moment}").get_json():
+        rows = c.get(week_url(moment, monitor["locationId"])).get_json()
+        times = [datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")) for row in rows]
+        assert len(times) == timedelta(days=7) // step + 1
+        assert times[-1] == at
+        assert all(b - a == step for a, b in zip(times, times[1:]))
+        assert rows[-1] == {field: monitor[field] for field in rows[-1]}
+
+
+@pytest.mark.parametrize("moment", ("sky-smoke", "sky-smoke-damp"))
+def test_smoke_weather_is_partly_cloudy(c, moment):
+    weather = c.get(f"/api/context?moment={moment}").get_json()["weather"]
+    assert weather["cloud_cover"] == 55
+    assert weather["weather_code"] == 2
 
 
 def test_indoor_near_story(c):
@@ -299,7 +405,7 @@ def test_indoor_near_story(c):
     assert items["co2"]["action"]["text"] == "Open a window for 10 min" and items["co2"]["action"]["when"] == "after 11 AM"
     profiles = profiles_of(s)
     assert profiles["runner"]["state"] == "Run after 11 AM"
-    assert profiles["toddler"]["state"] == "Stale indoors" and profiles["sinus"]["state"] == "Damp + pollen"
+    assert profiles["toddler"]["state"] == "Stale indoors" and profiles["sinus"]["state"] == "Pollen high"
     # the sinus sentence keeps the CO₂ airing beside its "windows shut", as the pollen card does
     assert "except a short airing for CO₂" in profiles["sinus"]["why"], profiles["sinus"]["why"]
 
@@ -332,7 +438,8 @@ def test_indoor_model_story(c):
 
 
 def test_outdoor_only_story(c):
-    """An outdoor-only home: no indoor monitor, so no CO₂, the toddler waits for one, the sinus profile on pollen only."""
+    """An outdoor-only home: no indoor monitor, so no CO₂, the toddler waits for one, the sinus profile on pollen only
+    (the case's own high tree pollen: the rush's is low)."""
     app = app_of(c, "outdoor-only")
     assert app["place"]["indoor"] is None and app["place"]["outdoor"] == "balcony"
     assert "outdoor_from" not in app

@@ -50,6 +50,14 @@ const READ_MAX_AGE = 10 * 60 * 1000;
 const CACHE_KEY = 'air-read-v3' + (APP.now ? ':' + APP.now.moment : '');   // the demo keeps one per moment
 
 const state = { range: '1h', indoor: null, outdoor: null, neighbors: [], read: null, readAt: 0, readKey: '' };
+let shownSkySummary = null, skyInitialOutcome = null, skyReadingsAvailable = false, skyLoadSkipped = false;
+// Inputs that consume the load pass while the renderer scripts are still downloading. Not scroll: iOS fires one at load.
+const SKY_EARLY_INPUTS = ['pointerdown', 'click', 'wheel', 'keydown', 'touchmove'];
+let skyEarlySkip = null;
+if (APP.state !== 'no_token' && !/[?&]shot\b/.test(location.search)) {
+  skyEarlySkip = e => { skyLoadSkipped = skyLoadSkipped || e.type; };   // the first input's type, for ?skydebug
+  for (const type of SKY_EARLY_INPUTS) document.addEventListener(type, skyEarlySkip, { capture: true, passive: true });
+}
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -169,7 +177,11 @@ async function getJSON(url, opts = {}) {
   try {
     const r = await fetch(apiUrl(url), { ...opts, signal: ctl.signal });
     if (!r.ok) throw new Error(`${url} ${r.status}`);
-    return await r.json();
+    const data = await r.json();
+    if (r.headers?.get('X-Home-Air-Cache') === 'fallback' && data && typeof data === 'object') {
+      Object.defineProperty(data, '_offline', { value: true });
+    }
+    return data;
   } finally {
     clearTimeout(timer);
   }
@@ -258,8 +270,24 @@ function tempScale(tC, otherC, indoor) {
 // An indoor-only home's outdoor PM2.5 now when it is an estimate: the summary's model hour (null until the summary has one).
 const estimateAt = () => estimateNow(state.read && state.read.summary && state.read.summary.timeline, readingsNow());   // {pm, at} or null
 const estimatePm = () => { const e = estimateAt(); return e ? e.pm : null; };
-// Outdoor PM2.5 as the outdoor card shows it: the monitor's reading, or an indoor-only home's estimate.
-const outdoorPm = () => { const w = outSource() && sourceLine(outSource()); return w && w.estimate ? estimatePm() : reading(state.outdoor, false).pm; };
+// The sky uses the same source as the outdoor card, but a saved Summary does not supply live model PM2.5.
+function outdoorPm() {
+  if (!sourceLine(outSource())?.estimate) return reading(state.outdoor, false).pm;
+  return state.readAt ? estimatePm() : null;
+}
+
+// Retain an early initial outcome until sky.js has loaded; saved Summary content never elects a load leader.
+function syncSkyAir({ initial = false, freshSummary = null } = {}) {
+  if (initial) skyInitialOutcome = { initial: true, freshSummary };
+  if (typeof SKY === 'undefined' || !SKY) return;
+  if (skyEarlySkip) {
+    for (const type of SKY_EARLY_INPUTS) document.removeEventListener(type, skyEarlySkip, true);
+    skyEarlySkip = null;
+  }
+  SKY.air({ ctx: state.ctx || null, pm: skyReadingsAvailable ? outdoorPm() : null,
+    rh: skyReadingsAvailable && !NO_INDOOR ? reading(state.indoor, true).rh : null, summary: shownSkySummary }, { ...skyInitialOutcome, skipped: skyLoadSkipped });
+  skyInitialOutcome = null;
+}
 
 // ghost: a monitor this view doesn't have (a public monitor's page, or a home without an indoor one): the same card, empty, greyed
 function monitorCard(m, indoor, ghost = false) {
@@ -346,15 +374,15 @@ const estimateKey = () => { const e = estimateAt(), w = (state.ctx && state.ctx.
   return JSON.stringify([e && e.pm, e && e.at, w.temperature, w.humidity]); };
 let shownEstimate = '';
 function redrawEstimate() {
+  syncSkyAir();
   const src = outSource(); if (!src || !sourceLine(src).estimate || !$('monitors').childElementCount) return;
   const key = estimateKey(); if (key === shownEstimate) return;   // nothing new: no redraw, no replayed animation
   $('monitors').innerHTML = monitorsHTML(); shownEstimate = key;
-  if (typeof SKY !== 'undefined' && SKY) SKY.pm(outdoorPm());
 }
 
 function renderMonitors() {
   $('monitors').innerHTML = monitorsHTML(); shownEstimate = estimateKey();
-  if (typeof SKY !== 'undefined' && SKY) SKY.pm(outdoorPm());
+  syncSkyAir();
   updateStatus();
   const stamps = [state.indoor, state.outdoor].filter(m => m && m.timestamp).map(m => new Date(m.timestamp));
   lastStamp = stamps.length ? Math.max(...stamps) : null;
@@ -425,11 +453,12 @@ function idleCard(id, { word, line, calendar }) {
 
 function renderContext(ctx) {
   state.ctx = ctx;   // kept so a unit switch can redraw without a reload
+  syncSkyAir();
   redrawEstimate();
   const w = ctx.weather || {}, b = ctx.bqe || {}, pollen = ctx.pollen || [], st0 = ctx.status || {};
-  window.__wx = w; window.__bqe = b; window.__road = ctx.road || null; window.__fc = Array.isArray(ctx.forecast) ? ctx.forecast : []; window.__pollenT = Array.isArray(ctx.pollen_tomorrow) ? ctx.pollen_tomorrow : [];
+  window.__wx = ctx._offline ? null : w; window.__bqe = b; window.__road = ctx.road || null; window.__fc = Array.isArray(ctx.forecast) ? ctx.forecast : []; window.__pollenT = Array.isArray(ctx.pollen_tomorrow) ? ctx.pollen_tomorrow : [];
   if (state.neighbors && state.neighbors.length) renderNeighborhood();
-  if (typeof SKY !== 'undefined' && SKY) SKY.weather(w);
+  if (typeof SKY !== 'undefined' && SKY) SKY.weather(w, { cached: !!ctx._offline });
   const wxOff = st0.weather === 'needs_place' || NO_PLACE ? sourceOff('wx', 'needs_place') : null;
   $('wx-hero').closest('.card').classList.remove('off');   // idleCard greys it again if still off
   if (wxOff) idleCard('wx', wxOff);
@@ -704,7 +733,7 @@ function draw(id, a, b, times, range, spec) {
     const f = k / ticks;
     g += `<text x="${(L + f * iw).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === ticks ? 'end' : 'middle'}">${new Date(t0 + f * (t1 - t0)).toLocaleString('en-US', opt)}</text>`;
   }
-  g += `<g class="ts-hover" style="display:none"><line class="ts-xh" y1="${T}" y2="${T + ih}"/><circle class="ts-hd in" r="4"/><circle class="ts-hd out" r="4"/></g>`;
+  g += `<g class="ts-hover" data-chart-scrub="marker" style="display:none"><line class="ts-xh" y1="${T}" y2="${T + ih}"/><circle class="ts-hd in" r="4"/><circle class="ts-hd out" r="4"/></g>`;
   svg.innerHTML = g;
   $(spec.noteId).textContent = RANGE_LABEL[range];
   svg.__hover = { kind: 'big', L, iw, x, y, a, b, times: times.map(Number), note: $(spec.noteId), label: RANGE_LABEL[range], spec };
@@ -832,6 +861,11 @@ const atLabel = t => { const day = x => new Date(x).toLocaleDateString('en-US', 
   return pre + d.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }); };
 function linkHover(el) {
   hoverCharts.add(el);
+  const hover = el.__hover;
+  if (hover && hover.kind !== 'big') {
+    hover.readout.dataset.chartScrub = 'readout';
+    hover.mark.dataset.chartScrub = 'marker';
+  }
   if (el.__wired) return; el.__wired = true;
   const at = e => { const h = el.__hover; if (!h) return null;
     const r = (h.kind === 'big' ? el : el.querySelector('svg')).getBoundingClientRect();
@@ -908,8 +942,9 @@ function renderRead(r, stale, why) {
   shownSig = readSig(r);
   redrawEstimate();   // an estimate's PM2.5 now comes with the summary
   // the card is drawn by static/summary.js from the rules' summary; an earlier read without one keeps what's shown
-  if (r.summary) SummaryCard.renderSummary($('summary'), r.summary, appNow(), SUMMARY_OPTS());   // TODAY/TONIGHT is the heading above
+  if (r.summary) { shownSkySummary = r.summary; SummaryCard.renderSummary($('summary'), r.summary, appNow(), SUMMARY_OPTS()); }   // TODAY/TONIGHT is the heading above
   else if (!$('summary').childElementCount) SummaryCard.renderSummary($('summary'), null, appNow(), SUMMARY_OPTS());
+  syncSkyAir();
   showUpdated();   // the heading follows the summary (Today / Tonight)
   if (revealNext) { revealNext = false; reveal(); }
   $('s-by').textContent = '';
@@ -991,7 +1026,9 @@ let shownSig = null;
 async function loadRead(force) {
   const payload = readPayload();
   const key = readKey(payload);
-  if (!force && state.read && Date.now() - state.readAt < READ_MAX_AGE && key === state.readKey) return;
+  if (!force && state.read && Date.now() - state.readAt < READ_MAX_AGE && key === state.readKey) {
+    syncSkyAir(); return { freshSummary: null };
+  }
   setBusy(true);
   try {
     if (busyCount) setPhase('write');
@@ -1003,20 +1040,24 @@ async function loadRead(force) {
     store.set({ at: Date.now(), read: r });
     // nothing new to show: leave the page alone (no re-render, no fade). A manual refresh always shows its result.
     if (!revealNext && readSig(r) === shownSig) {   // redraw only so passed times drop ("before 4 PM"), unless a sentence is open
-      if (r.summary && !summaryPopOpen()) SummaryCard.renderSummary($('summary'), r.summary, appNow(), SUMMARY_OPTS());
+      if (r.summary && !summaryPopOpen()) { shownSkySummary = r.summary; SummaryCard.renderSummary($('summary'), r.summary, appNow(), SUMMARY_OPTS()); }
       redrawEstimate();
-      return;
+      syncSkyAir(); return { freshSummary: r.summary || null };
     }
     const parts = ['summary'].map(id => [$(id), $(id).innerHTML]);
     renderRead(r, false);
     parts.forEach(([el, before]) => settle(el, before));
+    return { freshSummary: r.summary || null };
   } catch (err) {
     console.error('read', err);
     const why = navigator.onLine === false ? 'offline' : 'failed';
     const saved = store.get();
-    if (!state.read && saved && saved.read) renderRead(saved.read, true, why);
-    else if (!state.read) $('summary').innerHTML = '<p class="sx-none">The summary didn’t load. Refresh to try again.</p>';
+    if (!state.read && saved && saved.read) {
+      Object.assign(state, { read: saved.read, readAt: 0 }); renderRead(saved.read, true, why);
+    }
+    else if (!state.read) { shownSkySummary = null; $('summary').innerHTML = '<p class="sx-none">The summary didn’t load. Refresh to try again.</p>'; }
     else renderRead(state.read, true, why);
+    syncSkyAir(); return { freshSummary: null };
   } finally {
     setBusy(false);
   }
@@ -1024,7 +1065,7 @@ async function loadRead(force) {
 
 // ── Refresh ───────────────────────────────────────────
 
-let lastRefresh = 0, recheck = null;
+let lastRefresh = 0, recheck = null, skyFirstRefresh = true;
 
 // How often the Connected card asks whether setup has restarted the app with the home, in ms: soon enough to feel
 // immediate, rare enough to cost nothing while the agent works.
@@ -1064,6 +1105,7 @@ function showNoToken() {
 // One refresh at a time (home.js singleFlight): a call meanwhile shares it; one stuck past REFRESH_TIMEOUT_MS is
 // dropped so the next starts.
 const refreshOnce = singleFlight(async ({ manual = false, busy = false } = {}) => {
+    const initial = skyFirstRefresh; skyFirstRefresh = false;
     const showBusy = manual || busy;
     if (manual) manualBusy = true;
     if (showBusy) setBusy(true);
@@ -1072,20 +1114,33 @@ const refreshOnce = singleFlight(async ({ manual = false, busy = false } = {}) =
       if (showBusy) setPhase('read');
       forceNext = manual;
       const nbP = SRC_ON.nearby === false ? Promise.resolve(null) : getJSON('/api/neighborhood').catch(() => null);   // the slowest source; the rest doesn't wait for it
-      const [current, ctx] = await Promise.all([getJSON('/api/current'), getJSON('/api/context').catch(() => null)]);
+      const [current, ctx] = await Promise.all([getJSON('/api/current').catch(() => null), getJSON('/api/context').catch(() => null)]);
       if (current && current.state === 'no_token') { showNoToken(); return; }
+      skyReadingsAvailable = !!current && !current._offline;
+      state.ctx = ctx;
       // the home's own entries (home.js pickEntries): none for a monitor it doesn't have; an indoor-only home's source
-      Object.assign(state, pickEntries(current, NO_INDOOR, NO_OUTDOOR));
-      renderMonitors();
+      if (current) { Object.assign(state, pickEntries(current, NO_INDOOR, NO_OUTDOOR)); renderMonitors(); }
+      else loadFailed = true;
       showBootRead();
       nbP.then(nb => { if (Array.isArray(nb)) { state.neighbors = nb; renderNeighborhood(); } });
       if (ctx) renderContext(ctx);
+      else {
+        window.__wx = null;
+        if (typeof SKY !== 'undefined' && SKY) SKY.weather(null);
+      }
       contextStatus(ctx);
-      await Promise.all([loadRead(manual), loadCharts({ fresh: true }), nbP]);
+      syncSkyAir();
+      // Elect as soon as current/context and analysis finish; slow charts and Nearby cannot delay the one load pass.
+      const readP = (current ? loadRead(manual) : Promise.resolve({ freshSummary: null })).then(outcome => {
+        syncSkyAir({ initial, freshSummary: current?._offline || ctx?._offline ? null : outcome.freshSummary });
+      });
+      await Promise.all([readP, loadCharts({ fresh: true }).catch(err => console.error('charts', err)), nbP]);
       forceNext = false;
     } catch (err) {
       console.error('refresh', err);
       loadFailed = true;
+      skyReadingsAvailable = false; state.ctx = null;
+      syncSkyAir({ initial, freshSummary: null });
     } finally {
       forceNext = false;
       if (showBusy) setBusy(false);
@@ -1357,7 +1412,9 @@ function busyRipple(mode) {
 
 // Preview menu: "Random" cycles through random moments, a new one every 8 s (long enough for the sky to ease into it).
 // It stops on a preset, a slider, Back to live, or a second click.
-(() => { const b = document.getElementById('fx-rand'); if (!b) return;
+(() => {
+  if (/[?&]shot\b/.test(location.search) || APP.state === 'no_token') return;
+  const b = document.getElementById('fx-rand'); if (!b) return;
   const CYCLE_MS = 8000; let t = null;
   const r = (a, z, step = 1) => Math.round((a + Math.random() * (z - a)) / step) * step;
   const pick = () => { const rain = Math.random() < .3 ? r(20, 100) / 100 : 0;

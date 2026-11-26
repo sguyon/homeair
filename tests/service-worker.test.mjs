@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+test('API cache fallbacks are marked while network responses stay unmarked', async () => {
+  const cached = new Response('{"weather":{"weather_code":95}}', { headers: { 'Content-Type': 'application/json' } });
+  const context = vm.createContext({ self: { addEventListener() {} }, URL, Request, Response, Headers,
+    fetch: async () => { throw Error('offline'); }, caches: { match: async () => cached.clone() } });
+  vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), context);
+  const response = await vm.runInContext('networkFirst("/api/context", "/api/context", () => Response.error())', context);
+  assert.equal(response.headers.get('X-Home-Air-Cache'), 'fallback');
+  assert.deepEqual(await response.json(), { weather: { weather_code: 95 } });
+  context.fetch = async () => cached.clone();
+  context.caches.open = async () => ({ put() {} });
+  const live = await vm.runInContext('networkFirst("/api/context", "/api/context", () => Response.error())', context);
+  assert.equal(live.headers.get('X-Home-Air-Cache'), null);
+});
+
 // Exercise the real worker cache path: a setup form must not be saved for offline reuse.
 test('the service worker never caches a no-store setup page', async () => {
   const stored = [];

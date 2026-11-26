@@ -424,6 +424,72 @@
     return Math.round(v) > limit;
   }
 
+  const SKY_KINDS = ['smoke', 'exhaust', 'particles', 'pollen', 'damp'];   // the sky's condition kinds, strongest first
+  const SKY_LABELS = { smoke: 'Smoke', particles: 'Fine particles', pollen: 'Pollen high', damp: 'Damp inside' };   // their words in the sky line (exhaust names its road)
+
+  // All current sky conditions, in stable order (smoke, exhaust, fine particles, pollen, damp). Optional context never
+  // substitutes for a measured PM/RH reading. Outdoor PM2.5 over the home's limit is one kind only: smoke, else a
+  // reaching road's exhaust, else fine particles (no source named).
+  function skyConditions({ pm, rh, ctx, limits, road }) {
+    const context = ctx || {}, status = context.status || {};
+    const available = id => !['off', 'error', 'not_set_up'].includes(status[id]);
+    const conditions = [];
+    const smoke = Number.isFinite(pm) && (pmOver(pm, limits.pm_high) ||
+      (available('smoke') && context.smoke && context.smoke.detected === true && pmOver(pm, limits.pm)));
+    if (smoke) conditions.push({ kind: 'smoke', label: SKY_LABELS.smoke, road: null });
+
+    let roadNow = null;
+    if (available('road')) {
+      if ('roads' in context) {
+        const first = Array.isArray(context.roads) ? context.roads[0] : null;
+        if (first && first.reaching === true) {
+          const { name, short, side, reaching, strength } = first;
+          roadNow = { name, short, side, reaching, strength };
+        }
+      } else if (road && context.road && context.road.toward && context.bqe && typeof context.bqe.traffic === 'string' && /^(PEAK|HIGH)/.test(context.bqe.traffic)) {
+        roadNow = { name: road.name, short: road.name, side: null, reaching: true,
+          strength: context.bqe.traffic.startsWith('PEAK') ? 'peak' : 'high' };
+      }
+    }
+    if (roadNow) conditions.push({ kind: 'exhaust', label: `${roadNow.short} exhaust`, road: roadNow });
+    if (!smoke && !roadNow && Number.isFinite(pm) && pmOver(pm, limits.pm)) conditions.push({ kind: 'particles', label: SKY_LABELS.particles, road: null });
+    if (available('pollen') && Array.isArray(context.pollen) &&
+        context.pollen.some(p => p && Number.isFinite(p.index) && pollenHigh(p.index, limits))) {
+      conditions.push({ kind: 'pollen', label: SKY_LABELS.pollen, road: null });
+    }
+    if (Number.isFinite(rh) && rh > limits.rh_damp) conditions.push({ kind: 'damp', label: SKY_LABELS.damp, road: null });
+    return conditions;
+  }
+
+  // The display menu's air preview on a home (Smoke, Exhaust, Fine particles, Pollen, Damp): the home's conditions with
+  // that kind added in its place in skyConditions' order, or kept if it's already there. The home's readings and Summary
+  // don't change; the sky shows the previewed kind (one outdoor kind in the sky, damp on the glass).
+  function previewConditions(conditions, kind, { ctx, road } = {}) {
+    if (!SKY_KINDS.includes(kind)) return conditions;
+    if (conditions.some(c => c.kind === kind)) return conditions;
+    let added = { kind, label: SKY_LABELS[kind], road: null };
+    if (kind === 'exhaust') {
+      // The home's nearest road (the first one in the context, else the configured one), named as the page names it.
+      const first = ctx && Array.isArray(ctx.roads) ? ctx.roads[0] : null;
+      const name = first ? first.short || first.name : road ? road.name : null;
+      added = { kind, label: name ? `${name} exhaust` : 'Road exhaust',
+        road: { name: first ? first.name : name, short: name, side: first ? first.side || null : null, reaching: true, strength: 'peak' } };
+    }
+    const rank = c => SKY_KINDS.indexOf(c.kind), at = SKY_KINDS.indexOf(kind);
+    return [...conditions.filter(c => rank(c) < at), added, ...conditions.filter(c => rank(c) > at)];
+  }
+
+  // Only the first Summary item's action can lead a pass; unrelated actions leave every condition settled.
+  function skyLeader(conditions, summary) {
+    const first = summary && Array.isArray(summary.items) && summary.items[0];
+    if (!first || !first.action || typeof first.action.text !== 'string' || !first.action.text.trim()) return null;   // the server sends action {text: null} for a row with nothing to do
+    const active = kind => conditions.some(c => c.kind === kind);
+    if (first.id === 'pm') return ['smoke', 'exhaust', 'particles'].find(active) || null;
+    const kind = first.id === 'pollen' ? 'pollen' : first.id === 'traffic' ? 'exhaust'
+      : first.id === 'rh' && first.facts && first.facts.dry === false ? 'damp' : null;
+    return kind && active(kind) ? kind : null;
+  }
+
   const PM_AQI_UNHEALTHY = 55.4;   // µg/m³: top of the US AQI band "Unhealthy for sensitive groups"; a display scale, not a limit
   // The outdoor card's word for a PM2.5 reading: the home's limits (APP.limits pm and pm_high), then the AQI band.
   function pmLevel(pm, limits) {
@@ -499,7 +565,7 @@
     return { arm, stop, armed: () => t !== null };
   }
 
-  const api = { refreshDue, recheckDue, singleFlight, recheckTimer, FETCH_TIMEOUT_MS, REFRESH_TIMEOUT_MS, RECHECK_MS, REFRESH_STALE_MS, readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel };
+  const api = { refreshDue, recheckDue, singleFlight, recheckTimer, FETCH_TIMEOUT_MS, REFRESH_TIMEOUT_MS, RECHECK_MS, REFRESH_STALE_MS, readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, skyConditions, skyLeader, previewConditions, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);
