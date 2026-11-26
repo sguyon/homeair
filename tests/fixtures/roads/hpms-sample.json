@@ -1,0 +1,179 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "Cross Bronx Expressway",
+    "route_number": 95,
+    "route_signing": 2,
+    "aadt": 111822,
+    "aadt_combination": 9856,
+    "aadt_single_unit": 9085,
+    "f_system": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -73.886,
+      40.842
+     ],
+     [
+      -73.885,
+      40.8425
+     ],
+     [
+      -73.884,
+      40.843
+     ],
+     [
+      -73.883,
+      40.8435
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "I95 SB to E 175th St",
+    "route_number": null,
+    "route_signing": 1,
+    "aadt": 8130,
+    "aadt_combination": null,
+    "aadt_single_unit": null,
+    "f_system": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -73.886,
+      40.8421
+     ],
+     [
+      -73.885,
+      40.842600000000004
+     ],
+     [
+      -73.884,
+      40.84310000000001
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "Thrid Ave @ Cross Bronx Expy to I95 NB",
+    "route_number": null,
+    "route_signing": 1,
+    "aadt": 17600,
+    "aadt_combination": null,
+    "aadt_single_unit": null,
+    "f_system": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -73.885,
+      40.8424
+     ],
+     [
+      -73.884,
+      40.8429
+     ],
+     [
+      -73.883,
+      40.843399999999995
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "Gowanus Expressway",
+    "route_number": 278,
+    "route_signing": 2,
+    "aadt": 147008,
+    "aadt_combination": 4415,
+    "aadt_single_unit": 11561,
+    "f_system": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -74.013,
+      40.658
+     ],
+     [
+      -74.012,
+      40.659
+     ],
+     [
+      -74.011,
+      40.66
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "4TH AVE",
+    "route_number": null,
+    "route_signing": 1,
+    "aadt": 15189,
+    "aadt_combination": 48,
+    "aadt_single_unit": 777,
+    "f_system": 3
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -74.009,
+      40.662
+     ],
+     [
+      -74.0085,
+      40.663
+     ],
+     [
+      -74.008,
+      40.664
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "route_name": "I278 EB to 4th Ave",
+    "route_number": null,
+    "route_signing": 1,
+    "aadt": 9330,
+    "aadt_combination": null,
+    "aadt_single_unit": null,
+    "f_system": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -74.01,
+      40.661
+     ],
+     [
+      -74.009,
+      40.662
+     ]
+    ]
+   }
+  }
+ ]
+}

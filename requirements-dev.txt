@@ -1,2 +1,4 @@
 pytest
 pytest-xdist
+pyogrio>=0.13
+shapely>=2.1

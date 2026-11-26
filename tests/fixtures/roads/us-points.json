@@ -1,0 +1,845 @@
+{
+ "placeholder": false,
+ "status": "Hand-checked from OSM (Geofabrik extract 2026-11-24); naming rulings of 25 Nov applied.",
+ "licence": "ODbL-1.0",
+ "credit": "© OpenStreetMap contributors",
+ "clip": "us-clip.json.gz",
+ "points": [
+  {
+   "cbsa": "31080",
+   "kind": "highway",
+   "label": "Monroe Street & North Mariposa Avenue, East Hollywood, Los Angeles",
+   "lat": 34.08558,
+   "lon": -118.29906,
+   "expected": [
+    [
+     "Hollywood Freeway",
+     "within 500 m",
+     "SW"
+    ]
+   ],
+   "not_followed": [
+    "Santa Monica Boulevard",
+    "North Vermont Avenue",
+    "North Western Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/31377232",
+    "https://www.openstreetmap.org/way/398186813",
+    "https://www.openstreetmap.org/way/1230947817",
+    "https://www.openstreetmap.org/way/398061146",
+    "https://www.openstreetmap.org/?mlat=34.08558&mlon=-118.29906#map=16/34.08558/-118.29906"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "31080",
+   "kind": "between",
+   "label": "North Saint Andrews Place & Virginia Avenue, Hollywood, Los Angeles",
+   "lat": 34.09179,
+   "lon": -118.3109,
+   "expected": [
+    [
+     "Hollywood Freeway",
+     "within 500 m",
+     "NE"
+    ],
+    [
+     "Santa Monica Boulevard",
+     "within 200 m",
+     "S"
+    ],
+    [
+     "North Western Avenue",
+     "within 200 m",
+     "E"
+    ]
+   ],
+   "not_followed": [
+    "West Sunset Boulevard"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/607788508",
+    "https://www.openstreetmap.org/way/398048111",
+    "https://www.openstreetmap.org/way/1230947802",
+    "https://www.openstreetmap.org/way/405192248",
+    "https://www.openstreetmap.org/?mlat=34.09179&mlon=-118.31090#map=16/34.09179/-118.31090"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "31080",
+   "kind": "suburb",
+   "label": "Northwood Courtside Park, Irvine",
+   "lat": 33.70916,
+   "lon": -117.77695,
+   "expected": [
+    [
+     "Santa Ana Freeway",
+     "within 500 m",
+     "SW"
+    ]
+   ],
+   "not_followed": [
+    "Culver Drive"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/839043264",
+    "https://www.openstreetmap.org/way/111775205",
+    "https://www.openstreetmap.org/?mlat=33.70916&mlon=-117.77695#map=16/33.70916/-117.77695"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "31080",
+   "kind": "rural",
+   "label": "Gumtree Drive & Joshua Tree Drive, Antelope Acres (Antelope Valley)",
+   "lat": 34.65312,
+   "lon": -118.37816,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=34.65312&mlon=-118.37816#map=16/34.65312/-118.37816"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "16980",
+   "kind": "highway",
+   "label": "South Church Street & West 107th Street, Morgan Park, Chicago",
+   "lat": 41.69943,
+   "lon": -87.66045,
+   "expected": [
+    [
+     "I-57",
+     "within 500 m",
+     "SE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/1138588207",
+    "https://www.openstreetmap.org/?mlat=41.69943&mlon=-87.66045#map=16/41.69943/-87.66045"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "16980",
+   "kind": "between",
+   "label": "South Green Street & West 106th Street, Chicago",
+   "lat": 41.70145,
+   "lon": -87.64388,
+   "expected": [
+    [
+     "South Halsted Street",
+     "within 200 m",
+     "E"
+    ],
+    [
+     "I-57",
+     "500 m to 1 km",
+     "W"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/435345692",
+    "https://www.openstreetmap.org/way/74942372",
+    "https://www.openstreetmap.org/?mlat=41.70145&mlon=-87.64388#map=16/41.70145/-87.64388"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "16980",
+   "kind": "suburb",
+   "label": "189th Street & 82nd Avenue, Tinley Park",
+   "lat": 41.54807,
+   "lon": -87.81562,
+   "expected": [
+    [
+     "I-80",
+     "within 500 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/573562625",
+    "https://www.openstreetmap.org/?mlat=41.54807&mlon=-87.81562#map=16/41.54807/-87.81562"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "16980",
+   "kind": "rural",
+   "label": "East Wonder Lake Drive & North Drive, Wonder Lake",
+   "lat": 42.38816,
+   "lon": -88.3447,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=42.38816&mlon=-88.34470#map=16/42.38816/-88.34470"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "19100",
+   "kind": "highway",
+   "label": "Chimney Wood Circle & Meadow Wood Lane, east Fort Worth",
+   "lat": 32.75942,
+   "lon": -97.22962,
+   "expected": [
+    [
+     "Tom Landry Freeway",
+     "within 500 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/28618923",
+    "https://www.openstreetmap.org/?mlat=32.75942&mlon=-97.22962#map=16/32.75942/-97.22962"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "19100",
+   "kind": "between",
+   "label": "East Daggett Avenue & South Riverside Drive, Fort Worth",
+   "lat": 32.74289,
+   "lon": -97.30304,
+   "expected": [
+    [
+     "Martin Luther King Jr Freeway",
+     "within 500 m",
+     "SW"
+    ],
+    [
+     "Tom Landry Freeway",
+     "500 m to 1 km",
+     "N"
+    ]
+   ],
+   "not_followed": [
+    "East Lancaster Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/922074275",
+    "https://www.openstreetmap.org/way/122733054",
+    "https://www.openstreetmap.org/way/1095370799",
+    "https://www.openstreetmap.org/?mlat=32.74289&mlon=-97.30304#map=16/32.74289/-97.30304"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "19100",
+   "kind": "suburb",
+   "label": "Woods Park, Corinth",
+   "lat": 33.16104,
+   "lon": -97.07816,
+   "expected": [
+    [
+     "I-35E",
+     "within 500 m",
+     "NE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/870412922",
+    "https://www.openstreetmap.org/?mlat=33.16104&mlon=-97.07816#map=16/33.16104/-97.07816"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "19100",
+   "kind": "rural",
+   "label": "Locust Road & Pine Street, Millsap",
+   "lat": 32.74902,
+   "lon": -98.00875,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=32.74902&mlon=-98.00875#map=16/32.74902/-98.00875"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "26420",
+   "kind": "highway",
+   "label": "Forester Street & Stude Street, Houston",
+   "lat": 29.77943,
+   "lon": -95.38555,
+   "expected": [
+    [
+     "Katy Freeway",
+     "within 500 m",
+     "S"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/103705913",
+    "https://www.openstreetmap.org/?mlat=29.77943&mlon=-95.38555#map=16/29.77943/-95.38555"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "26420",
+   "kind": "between",
+   "label": "Bernard Street & Taylor Avenue, Pasadena",
+   "lat": 29.7061,
+   "lon": -95.19247,
+   "expected": [
+    [
+     "Red Bluff Road",
+     "within 200 m",
+     "NE"
+    ],
+    [
+     "Pasadena Freeway",
+     "500 m to 1 km",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/719591763",
+    "https://www.openstreetmap.org/way/51335869",
+    "https://www.openstreetmap.org/?mlat=29.70610&mlon=-95.19247#map=16/29.70610/-95.19247"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "26420",
+   "kind": "suburb",
+   "label": "Holland Road & Lago Mar Boulevard, Galveston County (near Dickinson)",
+   "lat": 29.43046,
+   "lon": -95.06463,
+   "expected": [
+    [
+     "Gulf Freeway",
+     "within 500 m",
+     "NE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/1067066025",
+    "https://www.openstreetmap.org/?mlat=29.43046&mlon=-95.06463#map=16/29.43046/-95.06463"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "26420",
+   "kind": "rural",
+   "label": "The Woodlands Hills Park, Montgomery County (Woodland Hills)",
+   "lat": 30.398,
+   "lon": -95.50442,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=30.39800&mlon=-95.50442#map=16/30.39800/-95.50442"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "47900",
+   "kind": "highway",
+   "label": "Aragona Boulevard & Constellation Court, Fort Washington",
+   "lat": 38.73524,
+   "lon": -76.98743,
+   "expected": [
+    [
+     "Indian Head Highway",
+     "within 500 m",
+     "W"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/291848212",
+    "https://www.openstreetmap.org/?mlat=38.73524&mlon=-76.98743#map=16/38.73524/-76.98743"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "47900",
+   "kind": "between",
+   "label": "41st Avenue & Roanoke Road, Hyattsville",
+   "lat": 38.96557,
+   "lon": -76.94836,
+   "expected": [
+    [
+     "Queens Chapel Road",
+     "within 200 m",
+     "NW"
+    ],
+    [
+     "East-West Highway",
+     "within 200 m",
+     "N"
+    ]
+   ],
+   "not_followed": [
+    "Baltimore Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/469139133",
+    "https://www.openstreetmap.org/way/604087827",
+    "https://www.openstreetmap.org/way/589551041",
+    "https://www.openstreetmap.org/?mlat=38.96557&mlon=-76.94836#map=16/38.96557/-76.94836"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "47900",
+   "kind": "suburb",
+   "label": "Lackawanna Court & Lackawanna Street, Adelphi",
+   "lat": 39.01639,
+   "lon": -76.96024,
+   "expected": [
+    [
+     "Capital Beltway",
+     "within 500 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/6116099",
+    "https://www.openstreetmap.org/?mlat=39.01639&mlon=-76.96024#map=16/39.01639/-76.96024"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "47900",
+   "kind": "rural",
+   "label": "Foxcroft Road & Unison Road, Loudoun County",
+   "lat": 39.03609,
+   "lon": -77.78824,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=39.03609&mlon=-77.78824#map=16/39.03609/-77.78824"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "37980",
+   "kind": "highway",
+   "label": "Calvert Street & Shelmire Avenue, Philadelphia",
+   "lat": 40.04878,
+   "lon": -75.05296,
+   "expected": [
+    [
+     "US-1",
+     "within 500 m",
+     "E"
+    ]
+   ],
+   "not_followed": [
+    "Bustleton Avenue",
+    "Cottman Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/62278516",
+    "https://www.openstreetmap.org/way/527686933",
+    "https://www.openstreetmap.org/way/779838630",
+    "https://www.openstreetmap.org/?mlat=40.04878&mlon=-75.05296#map=16/40.04878/-75.05296"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "37980",
+   "kind": "between",
+   "label": "Holman Avenue & Velde Avenue, Pennsauken",
+   "lat": 39.9769,
+   "lon": -75.05518,
+   "expected": [
+    [
+     "NJ-90",
+     "within 500 m",
+     "NE"
+    ],
+    [
+     "River Road",
+     "within 200 m",
+     "NW"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/11595932",
+    "https://www.openstreetmap.org/way/30086511",
+    "https://www.openstreetmap.org/?mlat=39.97690&mlon=-75.05518#map=16/39.97690/-75.05518"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "37980",
+   "kind": "suburb",
+   "label": "Alan Wood Park, Plymouth Township (Conshohocken)",
+   "lat": 40.08173,
+   "lon": -75.3153,
+   "expected": [
+    [
+     "the Mid-County Expressway",
+     "within 500 m",
+     "SE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/16385948",
+    "https://www.openstreetmap.org/?mlat=40.08173&mlon=-75.31530#map=16/40.08173/-75.31530"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "37980",
+   "kind": "rural",
+   "label": "3rd Avenue & Elkmore Road, Cecil County (near Chesapeake City)",
+   "lat": 39.55543,
+   "lon": -75.87741,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=39.55543&mlon=-75.87741#map=16/39.55543/-75.87741"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "33100",
+   "kind": "highway",
+   "label": "Jean Willis Park, South Miami",
+   "lat": 25.7034,
+   "lon": -80.2927,
+   "expected": [
+    [
+     "South Dixie Highway",
+     "within 500 m",
+     "SE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/535350155",
+    "https://www.openstreetmap.org/?mlat=25.70340&mlon=-80.29270#map=16/25.70340/-80.29270"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "33100",
+   "kind": "between",
+   "label": "Northeast 9th Street & Sunrise Lane, Fort Lauderdale",
+   "lat": 26.13686,
+   "lon": -80.10375,
+   "expected": [
+    [
+     "North Fort Lauderdale Beach Boulevard",
+     "within 200 m",
+     "E"
+    ],
+    [
+     "East Sunrise Boulevard",
+     "within 200 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/418249877",
+    "https://www.openstreetmap.org/way/572618093",
+    "https://www.openstreetmap.org/?mlat=26.13686&mlon=-80.10375#map=16/26.13686/-80.10375"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "33100",
+   "kind": "suburb",
+   "label": "Southwest 13th Avenue & Southwest 2nd Street, Delray Beach",
+   "lat": 26.45797,
+   "lon": -80.08635,
+   "expected": [
+    [
+     "I-95",
+     "within 500 m",
+     "W"
+    ]
+   ],
+   "not_followed": [
+    "West Atlantic Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/87383937",
+    "https://www.openstreetmap.org/way/1233934790",
+    "https://www.openstreetmap.org/?mlat=26.45797&mlon=-80.08635#map=16/26.45797/-80.08635"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "33100",
+   "kind": "rural",
+   "label": "Southwest 142nd Avenue & Southwest 196th Street, Redland (near Goulds)",
+   "lat": 25.58429,
+   "lon": -80.42145,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=25.58429&mlon=-80.42145#map=16/25.58429/-80.42145"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "12060",
+   "kind": "highway",
+   "label": "Lenox Road & Stone Gate Drive, Buckhead area, Atlanta",
+   "lat": 33.83721,
+   "lon": -84.35814,
+   "expected": [
+    [
+     "the T Harvey Mathis Parkway",
+     "within 500 m",
+     "W"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/40010290",
+    "https://www.openstreetmap.org/?mlat=33.83721&mlon=-84.35814#map=16/33.83721/-84.35814"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "12060",
+   "kind": "between",
+   "label": "Boulevard Southeast & McDonald Street Southeast, Grant Park, Atlanta",
+   "lat": 33.74606,
+   "lon": -84.36812,
+   "expected": [
+    [
+     "Ralph David Abernathy Freeway",
+     "within 500 m",
+     "S"
+    ],
+    [
+     "Memorial Drive Southeast",
+     "within 200 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/877766395",
+    "https://www.openstreetmap.org/way/1324078898",
+    "https://www.openstreetmap.org/?mlat=33.74606&mlon=-84.36812#map=16/33.74606/-84.36812"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "12060",
+   "kind": "suburb",
+   "label": "Edgewater Drive & Wildwood Drive, Carroll County (near Temple)",
+   "lat": 33.71399,
+   "lon": -84.99793,
+   "expected": [
+    [
+     "Tom Murphy Freeway",
+     "within 500 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/459653670",
+    "https://www.openstreetmap.org/?mlat=33.71399&mlon=-84.99793#map=16/33.71399/-84.99793"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "12060",
+   "kind": "rural",
+   "label": "Somerset Drive & Spring Road, Newton County",
+   "lat": 33.58527,
+   "lon": -83.97005,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=33.58527&mlon=-83.97005#map=16/33.58527/-83.97005"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "14460",
+   "kind": "highway",
+   "label": "Bassett Avenue & Beacon Street, Burlington",
+   "lat": 42.49701,
+   "lon": -71.17701,
+   "expected": [
+    [
+     "Yankee Division Highway",
+     "within 500 m",
+     "S"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/1091246353",
+    "https://www.openstreetmap.org/?mlat=42.49701&mlon=-71.17701#map=16/42.49701/-71.17701"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "14460",
+   "kind": "between",
+   "label": "Arapahoe Road & Gilbert Street, Auburndale, Newton",
+   "lat": 42.34357,
+   "lon": -71.23727,
+   "expected": [
+    [
+     "Massachusetts Turnpike",
+     "within 500 m",
+     "N"
+    ],
+    [
+     "Washington Street",
+     "within 200 m",
+     "SE"
+    ]
+   ],
+   "not_followed": [
+    "Commonwealth Avenue",
+    "Lexington Street"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/9126375",
+    "https://www.openstreetmap.org/way/9126115",
+    "https://www.openstreetmap.org/way/426489969",
+    "https://www.openstreetmap.org/way/426490749",
+    "https://www.openstreetmap.org/?mlat=42.34357&mlon=-71.23727#map=16/42.34357/-71.23727"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "14460",
+   "kind": "suburb",
+   "label": "Ossipee Lane & Pine Hill Road, Chelmsford",
+   "lat": 42.60055,
+   "lon": -71.36897,
+   "expected": [
+    [
+     "I-495",
+     "within 500 m",
+     "SE"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/1213749902",
+    "https://www.openstreetmap.org/?mlat=42.60055&mlon=-71.36897#map=16/42.60055/-71.36897"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "14460",
+   "kind": "rural",
+   "label": "Analore Circle & Timberline Drive, Norfolk",
+   "lat": 42.10396,
+   "lon": -71.3522,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=42.10396&mlon=-71.35220#map=16/42.10396/-71.35220"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "38060",
+   "kind": "highway",
+   "label": "East Manzanita Drive & North Dreamy Draw Drive, Phoenix",
+   "lat": 33.55425,
+   "lon": -112.03939,
+   "expected": [
+    [
+     "Piestewa Freeway",
+     "within 500 m",
+     "E"
+    ]
+   ],
+   "not_followed": [
+    "East Northern Avenue"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/528352242",
+    "https://www.openstreetmap.org/way/436886225",
+    "https://www.openstreetmap.org/?mlat=33.55425&mlon=-112.03939#map=16/33.55425/-112.03939"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "38060",
+   "kind": "between",
+   "label": "North 36th Drive & West Lynwood Street, Phoenix",
+   "lat": 33.465,
+   "lon": -112.1376,
+   "expected": [
+    [
+     "Papago Freeway",
+     "within 500 m",
+     "S"
+    ],
+    [
+     "West McDowell Road",
+     "within 200 m",
+     "N"
+    ]
+   ],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/way/528320140",
+    "https://www.openstreetmap.org/way/436793003",
+    "https://www.openstreetmap.org/?mlat=33.46500&mlon=-112.13760#map=16/33.46500/-112.13760"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "38060",
+   "kind": "suburb",
+   "label": "North 161st Avenue & West Latham Street, Goodyear",
+   "lat": 33.45845,
+   "lon": -112.40504,
+   "expected": [
+    [
+     "Papago Freeway",
+     "within 500 m",
+     "N"
+    ]
+   ],
+   "not_followed": [
+    "West McDowell Road",
+    "West Van Buren Street"
+   ],
+   "sources": [
+    "https://www.openstreetmap.org/way/527795618",
+    "https://www.openstreetmap.org/way/436935164",
+    "https://www.openstreetmap.org/way/436935174",
+    "https://www.openstreetmap.org/?mlat=33.45845&mlon=-112.40504#map=16/33.45845/-112.40504"
+   ],
+   "reviewed": "2026-11-25"
+  },
+  {
+   "cbsa": "38060",
+   "kind": "rural",
+   "label": "North Eagle Trail & North Sutter Lane, Anthem",
+   "lat": 33.85867,
+   "lon": -112.1288,
+   "expected": [],
+   "not_followed": [],
+   "sources": [
+    "https://www.openstreetmap.org/?mlat=33.85867&mlon=-112.12880#map=16/33.85867/-112.12880"
+   ],
+   "reviewed": "2026-11-25"
+  }
+ ]
+}

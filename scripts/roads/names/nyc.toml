@@ -1,0 +1,73 @@
+# The reviewed name table for New York. OSM names on highway pieces are often local or structural
+# ("14th Street" on I-78), so this table says which name to show for a piece.
+# shown: the name shown; a leading "the " means the name takes "the".
+# [[rename]]: a piece called `name` (and, when `ref` is set, carrying that route number) is shown as `shown`.
+#   `ref` keeps a name that is also a real street ("14th Street") to the road it names here.
+# [[unnamed]]: a piece with no name that carries route number `ref` is shown as `shown`.
+# Every other name keeps its own words; the_suffixes say which of them take "the".
+
+the_suffixes = ["Expressway", "Parkway", "Bridge"]
+# Keep the reviewed NYC build's names, including NJ 139 Lower Level.
+numbered_routes = false
+
+[[rename]]
+name = "Brooklyn–Queens Expressway"
+shown = "the BQE"
+
+[[rename]]
+name = "14th Street"
+ref = "I 78"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "14th Street Viaduct"
+ref = "I 78"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "14th Street Viaduct"
+ref = "NJ 139"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "12th Street Viaduct"
+ref = "NJ 139"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "12th Street"
+ref = "I 78"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "New Jersey Turnpike Newark Bay Extension"
+shown = "the New Jersey Turnpike (Newark Bay Extension)"
+
+[[rename]]
+name = "George Washington Bridge Lower Level"
+shown = "I-95 (GW Bridge)"
+
+[[rename]]
+name = "George Washington Bridge Upper Level"
+ref = "I 95"
+shown = "I-95 (GW Bridge)"
+
+[[rename]]
+name = "New Jersey Turnpike Local Roadway"
+shown = "I-95 (GW Bridge)"
+
+[[rename]]
+name = "Holland Tunnel"
+shown = "the Holland Tunnel"
+
+[[rename]]
+name = "Queensboro Plaza"
+shown = "Queens Boulevard"
+
+[[unnamed]]
+ref = "NY 25"
+shown = "Queens Boulevard"
+
+[[unnamed]]
+ref = "I 495"
+shown = "the Long Island Expressway"

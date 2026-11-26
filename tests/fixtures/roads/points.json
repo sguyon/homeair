@@ -1,0 +1,82 @@
+[
+ {
+  "label": "Williamsburg, Havemeyer St",
+  "lat": 40.7127,
+  "lon": -73.959
+ },
+ {
+  "label": "Sunset Park, 4th Ave & 40th St",
+  "lat": 40.653,
+  "lon": -74.006
+ },
+ {
+  "label": "East Tremont, Bronx",
+  "lat": 40.843,
+  "lon": -73.896
+ },
+ {
+  "label": "Rego Park, Queens Blvd & 63rd Dr",
+  "lat": 40.7297,
+  "lon": -73.8616
+ },
+ {
+  "label": "Stuyvesant Town",
+  "lat": 40.731,
+  "lon": -73.976
+ },
+ {
+  "label": "Yorkville, East End Ave",
+  "lat": 40.775,
+  "lon": -73.945
+ },
+ {
+  "label": "Boerum Hill, Atlantic Ave & Bond St",
+  "lat": 40.6862,
+  "lon": -73.987
+ },
+ {
+  "label": "Park Slope, 8th Ave & 4th St",
+  "lat": 40.672,
+  "lon": -73.9745
+ },
+ {
+  "label": "Great Kills, Staten Island",
+  "lat": 40.545,
+  "lon": -74.16
+ },
+ {
+  "label": "Westerleigh, Staten Island",
+  "lat": 40.615,
+  "lon": -74.132
+ },
+ {
+  "label": "Jersey City, Hamilton Park",
+  "lat": 40.7278,
+  "lon": -74.047
+ },
+ {
+  "label": "Midtown East, 2nd Ave & 45th St",
+  "lat": 40.752,
+  "lon": -73.97
+ },
+ {
+  "label": "Fort Lee, NJ",
+  "lat": 40.851,
+  "lon": -73.97
+ },
+ {
+  "label": "Long Island City, Queens Plaza",
+  "lat": 40.75,
+  "lon": -73.94
+ },
+ {
+  "label": "Kew Gardens",
+  "lat": 40.711,
+  "lon": -73.827
+ },
+ {
+  "label": "Hunts Point, Bronx",
+  "lat": 40.818,
+  "lon": -73.889
+ }
+]

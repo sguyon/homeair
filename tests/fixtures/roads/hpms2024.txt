@@ -1,0 +1,14 @@
+hpms2024.zip is synthetic test data, not a BTS download.
+
+Regenerate with `python tests/fixtures/roads/make_hpms_gdb.py` using the
+packages in requirements-dev.txt. Created with pyogrio.raw.write, driver OpenFileGDB, EPSG:4326, then zipped
+under HPMS2024.gdb/. Its only layer is HPMS_FULL_NY_2024. OBJECTID is the
+driver's feature ID (1 through 5), as in the national file.
+
+The first four lines run from (-74, 40) to (-73.99, 40): I9 has AADT 30000,
+1200 combination trucks and no single-unit count; 4TH AVE has AADT 15000
+with no route number or truck counts; Ramp has facility_type 4 and AADT
+5000; No count has AADT 0. Far has AADT 90000 at (-72, 42) to (-71.99, 42).
+The source columns use route_id, routename, routenumber and routesigning. An unused
+column checks column selection. The M-value test supplies measured WKB at
+the reader boundary because this synthetic layer stores 2D lines.

@@ -1,0 +1,16 @@
+# One table per metro: the area built, where its OpenStreetMap extract comes from and what is joined to it.
+# level: 1 = reviewed name table and test points; the build reads names/<id>.toml when it exists.
+# speeds: the id of a speed source for the metro, left out when there is none.
+# The `us` CLI target reads the frozen Census us-metros.json and us-states.json,
+# prepared by freeze_us.py. It uses one Geofabrik US extract, level = "counted",
+# HPMS for all 50 states and DC, 2-degree regional cores (split smaller if needed), and no speed source.
+# NYC's smaller Measured box stays separate and wins index selection inside it.
+
+[nyc]
+name = "New York"
+level = 1
+country = "US"
+box = [-74.359, 40.479, -73.671, 40.960]  # west, south, east, north (degrees)
+source_url = "https://download.bbbike.org/osm/bbbike/NewYork/NewYork.osm.pbf"
+hpms_states = ["NY", "NJ"]
+speeds = "nyc-dot"
