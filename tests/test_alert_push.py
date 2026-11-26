@@ -108,7 +108,7 @@ def test_a_redirect_is_not_followed(monkeypatch):
             asked.append(request.url)
             r = requests.Response()
             r.status_code, r.url, r.request = 307, request.url, request
-            r.headers["Location"] = "http://10.0.0.1/internal"
+            r.headers["Location"] = "http://10.0.0.1/admin"
             r.raw = None
             return r
     session.mount("https://", Redirecting())

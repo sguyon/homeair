@@ -505,7 +505,7 @@ READ_RETRY_WAIT = 1.0   # s between those reads; a monitor answers one request a
 NO_MONITOR = {None: "No AirGradient monitor answered on this network",
               "wsl": "WSL can't find the monitors on your Wi-Fi",
               "container": "a container can't find the monitors on your Wi-Fi",
-              "hosted": "Home Air online can't find the monitors on your Wi-Fi"}   # by localnet.environment_blocker(): why nothing was found
+              "hosted": "Home Air on a hosted server can't find the monitors on your Wi-Fi"}   # by localnet.environment_blocker(): why nothing was found
 KINDS = ("indoor", "outdoor")
 HOME_SERVER_CMD = f"{CLI} home-server"
 
@@ -851,14 +851,14 @@ def railway(service, root):
         place = tomllib.loads(text).get("place", {})
     except tomllib.TOMLDecodeError:
         place = {}   # online_roads below refuses text that doesn't read: nothing is sent
-    if "lat" in place and "lon" in place:   # the exact location stays on this computer: Home Air online gets it rounded
+    if "lat" in place and "lon" in place:   # the exact location stays on this computer: what leaves it is rounded
         text = config.set_keys(text, "place", {"lat": round(float(place["lat"]), PLACE_DECIMALS),
                                                "lon": round(float(place["lon"]), PLACE_DECIMALS)})
     try:
         text = config.online_roads(text)
     except config.ConfigError as e:
         raise SetupError(str(e)) from None
-    # the roads' arcs in degrees stay on this computer: Home Air online gets 8-point sectors
+    # the roads' arcs in degrees stay on this computer: what leaves it has 8-point sectors
     values = {"CONFIG_TOML": text}
     values.update((name, env_key(name, keys)) for name in KEY_NAMES if env_key(name, keys))
     for name, value in values.items():
@@ -1154,10 +1154,10 @@ def status(env, root):
     if cfg is not None and not has_place:
         nexts.append('open a coding agent in this folder and say "set up my home in Home Air"')
 
-    print("On a home server or online")
+    print("On a home server or a hosted server")
     missing = [w for w, ok in (("the AirGradient API token", token), ("the address", has_place)) if not ok]
-    print(f"  Home Air online needs: {' and '.join(missing)}" if missing else
-          "  Home Air online: ready (DEPLOYMENT.md); a home server: ./homeair home-server")
+    print(f"  On a hosted server, Home Air needs: {' and '.join(missing)}" if missing else
+          "  On a hosted server: ready (./homeair railway); a home server: ./homeair home-server")
     print(f"Next: {nexts[0]}" if nexts else f"Next: nothing needed. To check that Home Air answers: {CHECK_CMD}")
     return 0
 
@@ -1600,8 +1600,8 @@ def parser():
     ap.add_argument("--agent", choices=("on", "off", "status"),
                     help="add the Home Air skill to the coding agents on this computer (as links), remove it, or "
                          "show the links")
-    ap.add_argument("--url", help="with --agent on: the address of Home Air the skill reads (Home Air online or on a home "
-                                   "server), or local for this computer's")
+    ap.add_argument("--url", help="with --agent on: the address of Home Air on another computer that the skill reads (a home server, or one with remote "
+                                   "access), or local for this computer's")
     ap.add_argument("--wait-token", action="store_true",
                     help=f"wait up to {WAIT_TOKEN_SECONDS} s for the token page to save the token, then say what the account has")
     return ap

@@ -3,7 +3,6 @@
   "context": {
    "bqe": {
     "current_hour": 16,
-    "pollution_pressure": 1.8,
     "traffic": "PEAK (evening rush)",
     "wind_impact": "Blowing toward Greenpoint"
    },
@@ -234,7 +233,7 @@
      "why": "The room is too damp (64%), and the air outside holds more water."
     },
     {
-     "text": "Run after 8 pm",
+     "text": "Run after 8 PM",
      "tone": "warn",
      "why": "The BQE rush runs until 8 PM, with the wind toward Greenpoint."
     },
@@ -281,7 +280,7 @@
      "why": "The room is too damp (64%), and the air outside holds more water."
     },
     {
-     "action": "Run after 8 pm",
+     "action": "Run after 8 PM",
      "id": "runner",
      "metric": "pm",
      "name": "Runner",
@@ -703,7 +702,6 @@
   "context": {
    "bqe": {
     "current_hour": 7,
-    "pollution_pressure": 2.0,
     "traffic": "PEAK (morning rush)",
     "wind_impact": "Blowing toward Greenpoint"
    },
@@ -934,7 +932,7 @@
      "why": "The room is too damp (64%), and the air outside holds more water."
     },
     {
-     "text": "Run after 10 am",
+     "text": "Run after 10 AM",
      "tone": "warn",
      "why": "The BQE rush runs until 10 AM, with the wind toward Greenpoint."
     },
@@ -981,7 +979,7 @@
      "why": "The room is too damp (64%), and the air outside holds more water."
     },
     {
-     "action": "Run after 10 am",
+     "action": "Run after 10 AM",
      "id": "runner",
      "metric": "pm",
      "name": "Runner",

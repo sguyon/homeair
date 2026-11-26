@@ -64,7 +64,7 @@ def view_of(monitor, base_view):
         links["forecast"] = None   # NWS forecasts only the US
     place = {**base_view.get("place", {}), "name": name, "lat": lat, "lon": lon, "timezone": here.tz,
              "indoor": None, "outdoor": name, "pollen_zip": None, "region": None}
-    return {**base_view, "place": place, "links": links, "road": None, "profiles": dict(PROFILES),
+    return {**base_view, "place": place, "links": links, "road": None, "roads": [], "roads_status": "none", "profiles": dict(PROFILES),
             "pollen_seasons": list(base_view.get("pollen_seasons") or []) if near_home else [],
             "sources": {**base_view.get("sources", {}), "pollen": False, "road": False, "smoke": na, "nearby": True},
             "public": {"id": monitor["locationId"], "name": name, "street": monitor.get("publicPlaceName"),

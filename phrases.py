@@ -1,10 +1,9 @@
 """The sentence library behind each (i) on the summary card. Written by hand, no model.
 
-Each item's explanation is up to four sentences, one per part:
+Each item's explanation is up to three sentences, one per part:
   effect: what the reading does to people (fixed knowledge)
   now:    why it's happening now (facts from the readings and forecasts)
   timing: why this time (from the action's time)
-  unseen: what the monitor doesn't measure (the traffic action only)
 For each part, the first template whose {slots} are all in the facts is used; a part with none that fits is
 skipped, so no sentence ever prints an empty slot. Every number comes from the facts or from the limits below.
 """
@@ -63,8 +62,8 @@ LIBRARY = {
                    "{area_on}{fallback_lead}The forecast is Open-Meteo’s prediction for the wider area, scaled to what {area_count} public monitors near you measured over the last day.",
                    "{model_on}{fallback_lead}The forecast is Open-Meteo’s prediction for the wider area: an estimate, with no monitor outside to check it against."],
     },
-    # the traffic action (summary.traffic_item): which road's exhaust the wind or calm air brings, then what the monitor
-    # can't see. {road_poss} is set for one road, {road_names} for any number; {wind}, the wind's own direction now
+    # the traffic action (summary.traffic_item): which road's exhaust the wind or calm air brings. {road_poss} is set for
+    # one road, {road_names} for any number; {wind}, the wind's own direction now
     "traffic": {
         "now": ["{calm_on}Calm air holds {road_poss} exhaust close before sunrise.",
                 "{calm_on}Calm air holds exhaust from {road_names} close before sunrise.",
@@ -72,7 +71,6 @@ LIBRARY = {
                 "The {wind} wind carries exhaust from {road_names} here.",
                 "The wind carries {road_poss} exhaust here.",
                 "The wind carries exhaust from {road_names} here."],
-        "unseen": ["Your monitor counts PM2.5; traffic’s NO₂ and ultrafine particles don’t show on it."],
     },
     "pollen": {
         "effect": ["{pollen_type_cap} pollen sets off sneezing and a stuffy nose for allergic sinuses."],
@@ -256,7 +254,7 @@ def why(item_id, facts):
         key = "rh_dry" if facts.get("dry") else "rh_damp"
     parts = LIBRARY[key]
     out = []
-    for kind in ("effect", "now", "timing", "unseen"):
+    for kind in ("effect", "now", "timing"):
         for t in parts.get(kind, []):
             s = fill(t, facts)
             if s:

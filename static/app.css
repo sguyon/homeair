@@ -91,6 +91,21 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .custom[open] .fold { margin-left: 0; transform: rotate(180deg); }
 .fold { justify-self: end; align-self: center; margin-left: 0; color: var(--soft); transition: transform .15s ease; }
 .blocks { display: grid; gap: 14px; margin-top: 14px; }
+.around-road { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+.around-road > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.around-road.off { color: var(--muted); background: var(--card); }
+.around-road.readonly { color: var(--muted); background: var(--card); }
+.around-road input { appearance: none; flex: none; width: 36px; height: 22px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--track); cursor: pointer; margin: 0; position: relative; }
+.around-road input::after { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: var(--soft); }
+.around-road input:checked { background: var(--accent); border-color: var(--accent); }
+.around-road input:checked::after { background: var(--card); }   /* moved by input[role="switch"]:checked::after; a left here too pushed the knob past the track */
+.around-road input[aria-disabled="true"] { cursor: default; background: var(--track); border-color: var(--line-strong); }
+.around-road input[aria-disabled="true"]::after { background: var(--muted); }
+.around-road input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.around-reaching { display: block; color: var(--warn); font-style: normal; font-weight: 550; }
+.around-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.around-note:empty { display: none; }
+@media (pointer: coarse) { .around-road { min-height: 44px; } }
 .sub { display: grid; grid-template-columns: 108px 1fr; gap: 8px; align-items: start; margin-top: 4px; color: var(--soft); font-size: 14px; }
 .custom .view { margin-top: 8px; }
 .custom .view.profiles .chip { background: var(--card); border-color: var(--line); color: var(--ink); font: 500 14px/1.2 Inter, sans-serif;
@@ -1100,7 +1115,28 @@ h2:not(.now-h):not(.s-do) { margin-top: 32px !important; }
 .lg-you { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lg-dot { width: 9px; height: 9px; border-radius: 50%; background: #22a55a; }
 .lg-bqe { width: 16px; height: 4px; border-radius: 2px; background: #71717a; }
-.lg-plume { width: 14px; height: 10px; border-radius: 3px; background: color-mix(in srgb, #f59e0b 45%, transparent) !important; }
+/* the exhaust's key swatches: the map's colour (--map-exhaust, set by map.js from the sky's) at the plume's strengths,
+   0.74 at the road to 0.30 at the reach; carried away: 55% greyer at 0.55 of that (map.js AWAY, AWAY_GREY) */
+.lg-plume { width: 18px; height: 10px; border-radius: 3px; --mx: var(--map-exhaust, hsl(36 54% 42%));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mx) 74%, transparent), color-mix(in srgb, var(--mx) 30%, transparent)) !important; }
+.lg-plume.away { --mg: color-mix(in srgb, var(--mx) 45%, rgb(150 150 150));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mg) 41%, transparent), color-mix(in srgb, var(--mg) 17%, transparent)) !important; }
+/* the dark map's haze: toward a lighter grey, at 0.8 of the strength (map.js AWAY, GREY) */
+:root[data-theme="dark"] .lg-plume.away { --mg: color-mix(in srgb, var(--mx) 45%, rgb(200 200 200));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mg) 59%, transparent), color-mix(in srgb, var(--mg) 24%, transparent)) !important; }
+.nb-legend .lg-wind { color: var(--soft) !important; font-weight: 500; }
+.nb-legend .lg-wind svg { flex: none; width: 14px; height: 14px; color: var(--ink); }
+.nb-legend [hidden] { display: none !important; }
+.nb-headline { margin: 0; padding: 18px 24px 16px; font: 600 17px/1.4 Inter, sans-serif; letter-spacing: -.005em; color: var(--ink); text-wrap: pretty; }
+.nb-headline[hidden], .nb-roads[hidden] { display: none; }
+.nb-roads { list-style: none; margin: 0; padding: 16px 24px 0; font: 400 15px/1.5 Inter, sans-serif; color: var(--ink); }
+.nb-roads li + li { margin-top: 6px; }
+.nb-roads b { font-weight: 600; }
+@media (max-width: 700px) {
+  .nb-headline { padding: 14px 12px 12px; font-size: 16px; }
+  .nb-roads { padding: 14px 12px 0; }
+  .nb-legend { padding: 9px 12px !important; }
+}
 .nb-find { padding: 16px 24px 4px; font: 400 15px/1.5 Inter, sans-serif; color: var(--ink); }
 .nb-find p { margin: 0; }
 .nb-find p + p:not([hidden]) { margin-top: 8px; }
@@ -1743,8 +1779,10 @@ body.no-token .page > :not(.bar):not(.no-token-card) { display: none; }
 body.no-token .bar .custom { display: none; }   /* the token page: no home menu until the app reads the monitors */
 .nb-credit { margin: 0; padding: 0 24px 14px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .nb-credit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+#roads-map-legend { margin: 8px 0 2px; padding: 0 24px; }   /* the followed roads' names under the map, aligned with the credit */
 @media (max-width: 640px) {
   .nb-credit { padding: 0 12px 12px; }
+  #roads-map-legend { padding: 0 12px; }
 }
 
 /* Summary profile icons and phone byline layout */

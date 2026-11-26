@@ -68,7 +68,7 @@ def test_a_recorded_port_that_does_not_answer_falls_back_to_the_default(home_air
     monkeypatch.setenv("HOME_AIR_URL", "http://example.invalid/")
     assert home_air.base_urls() == ["http://example.invalid"]   # set by the user: the only address
     monkeypatch.delenv("HOME_AIR_URL")
-    (tmp_path / "agent-url").write_text("https://home.example/\n")   # ./homeair skill add --url: Home Air online
+    (tmp_path / "agent-url").write_text("https://home.example/\n")   # ./homeair skill add --url: Home Air on another computer
     assert home_air.base_urls() == ["https://home.example"]
 
 

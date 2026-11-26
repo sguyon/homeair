@@ -274,7 +274,7 @@
     const when = staleWhen(it.action, now);
     return `<div class="sx-row" data-item-id="${esc(it.id)}">
       <div class="sx-lab"><span>${it.key ? `<i class="sx-key ${it.key}${it.forecast ? ' fc' : ''}"></i>` : ''}${esc(it.label)}${it.forecast ? ' · <span class="sx-fct">forecast</span>' : ''}</span>${itemProfileHtml(it, profiles)}</div>
-      <div class="sx-num">${esc(it.num)}<small>${esc(it.unit)}</small></div>
+      ${it.num == null ? '' : `<div class="sx-num">${esc(it.num)}${it.unit ? `<small>${esc(it.unit)}</small>` : ''}</div>`}
       <div class="sx-ctx">${esc(it.ctx)}</div>
       ${it.action && it.action.text ? `<div class="sx-do">${esc(it.action.text)}${when ? ` <span class="sx-when">· ${esc(when)}</span>` : ''}</div>` : ''}
     </div>`;
@@ -295,6 +295,7 @@
       html += '<div class="sx-clear"><div class="sx-big">All clear.</div><div class="sx-sub">Nothing to do inside or out.</div></div>';
     }
     html += '<div class="sx-tl"></div>';
+    if (!root.APP?.public && (root.APP?.roads || []).some(r => r.on && r.found === 'auto')) html += '<p class="around-note">Roads © OpenStreetMap contributors</p>';
     el.innerHTML = html;
     const tlEl = el.querySelector('.sx-tl'), c = prep(s);
     const draw = () => {

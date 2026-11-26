@@ -1,6 +1,6 @@
 """The alert check on a timer: every ALERT_CHECK_SECONDS it reads the same Summary the page shows, asks alert_rules what
 is due for each phone, and sends it through web push. It runs where Home Air reads the home (a token, or the monitors
-on the Wi-Fi) and has push keys (server.py); phones can be added only on Home Air online (available)."""
+on the Wi-Fi) and has push keys (server.py); phones can be added only with remote access over HTTPS (available)."""
 import ipaddress
 import json
 import logging
@@ -48,9 +48,9 @@ def _private_host(host):
 
 def available(request, demo=False, reading=True):
     """"online" (HTTPS on a public address, push keys set: phones can be added), "local" (this computer or the home
-    network: the page says to put Home Air online), "setup" (HTTPS on a public address without push keys: the page says
-    alerts aren't set up) or "demo". X-Forwarded-Proto is trusted for the HTTPS part only: a
-    forged header can't make a private address online, and it adds no phone by itself. Home Air with no reading source
+    network: the page says to set up Home Air on a server with HTTPS), "setup" (HTTPS on a public address without push keys: the page says
+    the alert keys are missing) or "demo". X-Forwarded-Proto is trusted for the HTTPS part only: a
+    forged header can't make a private address "online", and it adds no phone by itself. Home Air with no reading source
     (`reading` False: no token and no monitor read on the Wi-Fi, so no checker runs) is "local" too: a phone added
     there would never get an alert."""
     if demo:
@@ -276,7 +276,7 @@ def make_blueprint(app, get_store, demo=lambda: False, reading=lambda: True, tz=
         return available(request, demo=demo(), reading=reading())
 
     def body_or_refusal():
-        """(the JSON body, None) or (None, the refusal): an online copy, a same-origin request, a small JSON object."""
+        """(the JSON body, None) or (None, the refusal): the state "online", a same-origin request, a small JSON object."""
         if state() != "online" or not _same_origin():
             return None, reply({"error": "refused"}, 403)
         if request.content_length is None:

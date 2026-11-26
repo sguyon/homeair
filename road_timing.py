@@ -134,16 +134,6 @@ def _first_off(roads, at: datetime, hourly: list[dict], sunrises: dict[date, dat
     return None
 
 
-def reaching_before(roads, at, until, hourly, sunrises):
-    """Road indexes reaching before `until`, using the same wind and boundaries as all_until."""
-    found = set()
-    for t, active in _reach_events(roads, at, hourly, sunrises):
-        if _instant(t) >= _instant(until) or active is None:
-            break
-        found.update(k for k, state in enumerate(active) if state["reaching"])
-    return found
-
-
 def road_until(road, at: datetime, hourly: list[dict], sunrises: dict[date, datetime]) -> datetime | None:
     """For a road reaching now: its first wind, busy-hour or sunrise end within UNTIL_HOURS, else None.
     `hourly` rows: {"time", "wind_dir", "wind_kmh"}, including current wind at `at` when known;
@@ -155,3 +145,42 @@ def road_until(road, at: datetime, hourly: list[dict], sunrises: dict[date, date
 def all_until(roads: list, at: datetime, hourly: list[dict], sunrises: dict[date, datetime]) -> datetime | None:
     """The first wind, busy-hour or sunrise end with no road reaching, else None, as road_until."""
     return _first_off(roads, at, hourly, sunrises)
+
+
+def toward_home(road, wind_dir: float | None) -> bool:
+    """Whether the wind now blows from the road toward the home, whatever the hour or the wind's strength (the map's
+    words say "toward your home, but…" when the flag is off for another reason)."""
+    return wind_dir is not None and road.toward is not None and reaches(road.toward, wind_dir)
+
+
+def end_reason(road, until: datetime | None, hourly: list[dict], calm: bool) -> tuple[str | None, float | None]:
+    """Why a reaching road's flag turns off at `until` (road_until): ("sunrise", None) for the calm reach, ("busy_end",
+    None) when its busy hours are over by then, else ("wind", the forecast wind direction at `until`). (None, None)
+    without an end."""
+    if until is None:
+        return None, None
+    if calm:
+        return "sunrise", None
+    windows, _ = busy_windows(road, until.weekday() < 5)
+    h = until.hour + until.minute / 60
+    if not any(a <= h < b for a, b in windows):
+        return "busy_end", None
+    rows = [r for r in hourly if _instant(r["time"]) <= _instant(until)]
+    row = max(rows, key=lambda r: _instant(r["time"]), default=None)
+    return "wind", (row or {}).get("wind_dir")
+
+
+def far_toward(road, wind_dir: float | None) -> bool:
+    """For a road with no point within the day's reach (toward None): whether the wind blows from it toward the home
+    (its calm arc), so its exhaust thins out on the way rather than going elsewhere."""
+    return wind_dir is not None and road.toward is None and road.toward_calm is not None and reaches(road.toward_calm, wind_dir)
+
+
+def forecast_covers(at: datetime, hourly: list[dict]) -> bool:
+    """Whether the hourly wind is known for UNTIL_HOURS from `at`: then a reaching road with no end (road_until None)
+    reaches for at least that long, rather than for an unknown time."""
+    start = _instant(at)
+    rows = [r for r in hourly if start < _instant(r["time"]) <= start + timedelta(hours=UNTIL_HOURS)]
+    return (bool(rows) and all(r.get("wind_dir") is not None and r.get("wind_kmh") is not None for r in rows)
+            and max(_instant(r["time"]) for r in rows) >= start + timedelta(hours=UNTIL_HOURS - 1))
+

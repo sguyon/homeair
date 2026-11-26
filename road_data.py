@@ -28,7 +28,7 @@ import upstream
 from config import ROOT, ROAD_FOUND, ConfigError, backup_config, load_config, replace_text, set_auto_roads
 from roads import RoadFile, entry, find_roads, haversine_m, local_xy
 
-ROADS_BASE = os.environ.get("HOMEAIR_ROADS_BASE", "https://github.com/sguyon/homeair/releases/download/data")  # the data host
+ROADS_BASE = os.environ.get("HOMEAIR_ROADS_BASE", "https://github.com/sguyon/homeair/releases/download/data-v1")  # the data host: the road-data release this version reads
 DOWNLOAD_TIMEOUT = 20  # seconds to wait for the data host, per GET
 RETRY_EVERY_H = 24  # hours between two tries at start after a failed download: at most once a day
 ROUTE_CLIP_M = 3000  # the map's route: the road's lines within this many metres of the rounded place

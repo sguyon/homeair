@@ -23,7 +23,7 @@ else dir=./homeair; fi
 cd "$dir" && pwd
 ```
 
-Tell the user the printed folder, with: "Home Air is set up on this computer first. After that, you can keep Home Air on this computer, or run it on a home server or online, with the same settings." If the folder is `~/homeair` because you were inside another project, say so in one line.
+Tell the user the printed folder, with: "Home Air is set up on this computer first. After that, you can keep Home Air on this computer, or run it on a home server or a hosted server, with the same settings." If the folder is `~/homeair` because you were inside another project, say so in one line.
 
 Run every command below from this folder. `./homeair` runs them through `scripts/run.sh` with uv (installed if missing), else Python 3.11 or newer, and says which, or what to install. Some commands wait: `./homeair connect --wait` up to 90 s, `start` 30 s, `start-at-login on` 60 s on a Mac, `check` 10 s after a start. Use a timeout of at least 100 s; don't poll.
 
@@ -57,7 +57,7 @@ Its lines:
   > Follow the steps on the token page (about 1 min). You type the token on that page, not in this chat. When the page says Saved, reply **done** here.
 
   On their reply, run `./homeair connect --wait` (it prints the account's monitors, never the token); on "Not saved yet", say so in one line and wait for done again. Then send step 3's message with "Saved. The token is in `.env` in Home Air's folder. Your AirGradient account has <n> monitors, and the page now shows <them>:" before the readings, and "Step 1 is done. Next come 3 optional steps (about 2 min). To stop at any step and do the rest later, reply **skip**." as its last line, then go on to step 4's address. A refused token or an account with no monitor: pass on what the page says. No monitor at all: the user can set one up with AirGradient's instructions; meanwhile [the demo](https://homeair.app) shows any public monitor ("Near me").
-- `WSL can't find the monitors on your Wi-Fi` (also with `a container` or `Home Air online`): `./homeair setup` can't find the monitors from there. WSL: use the token path above. Docker: `./homeair home-server` (step 5). Cloud sandbox: step 1.
+- `WSL can't find the monitors on your Wi-Fi` (also with `a container` or `Home Air on a hosted server`): `./homeair setup` can't find the monitors from there. WSL: use the token path above. Docker: `./homeair home-server` (step 5). Cloud sandbox: step 1.
 - `Waiting for the first reading on your Wi-Fi … press Allow`: Home Air started at login waits for macOS's prompt "Allow "uv" to find devices on local networks?". `No reading on your Wi-Fi after 60 s`: tell the user to turn on "uv" in System Settings › Privacy & Security › Local Network, then run `./homeair check`.
 - `Start at login isn't available here (…)`: the app stops when the computer restarts; say so. `./homeair start` starts it again.
 - `Problem:` or `Not live yet`: fix what the line says, then run the command again (safe to repeat).
@@ -92,7 +92,7 @@ Each step is one message, sent as written below: a bold title "Step N of 4: …"
 
    > **Step 1 of 4: Your AirGradient API token**
    >
-   > *Optional on this computer. Required to deploy Home Air online.*
+   > *Optional on this computer. Required on a hosted server.*
    >
    > Home Air reads your monitors on your Wi-Fi, through their Local API. On the Wi-Fi, a monitor gives only its current reading, so the charts show readings from now on.
    >
@@ -112,13 +112,17 @@ Each step is one message, sent as written below: a bold title "Step N of 4: …"
    >
    > Home Air uses the address for the weather, the nearby public monitors and the timezone.
    >
-   > Your exact address stays in `config.toml` on this computer. What's sent for weather and pollen, and what the page shows, is rounded to about 1 km.
+   > During setup, one lookup sends your typed address to OpenStreetMap's Nominatim. With supplied coordinates instead of an address, Nominatim receives those coordinates rounded to four decimal places to look up the place name. Home Air saves the exact place in `config.toml` on this computer. Home Air sends the rounded place (two decimal places, about 1 km) to Open-Meteo for the timezone when needed, and a widened box around the rounded place to AirGradient's public map when selecting an outdoor source. Home Air filters and ranks those monitors from the exact place on this computer. During setup's config check, AirGradient can also receive a second box around the rounded place and, if the selected public monitor is absent from that box, its ID for place and current-reading requests. While Home Air runs, the place sent for weather, pollen and the map is also rounded. The page receives the rounded place and the saved pollen ZIP when set; opening its pollen.com link sends that ZIP to pollen.com. The separate `./homeair check --suggest` can send an area around the exact saved coordinates when suggesting a source; checking an indoor-only home's saved outdoor source uses the rounded place. Home Air does not run that command during setup.
    >
    > You can type an exact address, like *1475 Broadway, New York*, or a neighborhood or landmark, like *Times Square, New York*.
    >
    > **What is your home's address?** Type it as you would in a map app.
 
-   Run `./homeair setup --address "<their answer>"`, then `./homeair start`, and send "**Saved:** <the place setup printed>. The page now shows the weather there and the nearby public monitors." Never invent a location. Not found: retry with what the user gave (a ZIP code, a nearby street or landmark) before asking again. Several matches: ask which city or state, then run the command again. Other fixes: `--name`, `--lat` with `--lon`, `--timezone`. No token needed; the monitors found on the Wi-Fi stay.
+   Run `./homeair setup --address "<their answer>"`, then `./homeair start`, and send "**Saved:** <the place setup printed>. The page now shows the weather there and the nearby public monitors." Then send the "Roads:" line the command printed, as it is. Home Air finds the main OpenStreetMap roads near the home from the saved coordinates, with no extra question. Home Air follows up to four eligible roads by default; other roads can be listed with their switches off. The owner turns a road off in "Your home" › "Around you".
+
+   The road data comes from the [`data-v1`](https://github.com/sguyon/homeair/releases/tag/data-v1) release ([road-data downloads](docs/roads.md#data-and-license)). After a failed setup download, Home Air retries at start only with a config file, outside hosted environments and containers, and when a `pending` marker makes a retry due (at most once a day). Separately, Home Air downloads missing files named by saved automatic roads at start when a trusted digest is available, requesting the index too if needed, including after a restart on Railway. Running setup again at the same place with automatic roads saved keeps those roads and makes no road-data request; the command can still make its address, timezone and monitor requests.
+
+   Never invent a location. Not found: retry with what the user gave (a ZIP code, a nearby street or landmark) before asking again. Several matches: ask which city or state, then run the command again. Other fixes: `--name`, `--lat` with `--lon`, `--timezone`. No token needed; the monitors found on the Wi-Fi stay.
 
 3. **Who lives here** (plain text, in every agent):
 
@@ -156,29 +160,29 @@ Then the end, in one message:
 >
 > **Next: deploy Home Air (optional)**
 >
-> Home Air runs on this computer. The page opens only here, and only while this computer is on. To open the page from your other devices, deploy Home Air to a home server or online. `./homeair home-server` and `./homeair railway` copy your settings and keys from this computer (`config.toml` and `.env`), so you don't run setup again there.
+> Home Air runs on this computer. The page opens only here, and only while this computer is on. To open the page from your other devices: a home server (at home) or Railway (from anywhere). `./homeair home-server` and `./homeair railway` copy your settings and keys from this computer (`config.toml` and `.env`), so you don't run setup again there.
 
 Then ask where, as step 5 says.
 
-## 5. On a home server or online
+## 5. On a home server or a hosted server
 
 With the question tool, "Only this computer" goes first (the default):
 
 > Where should Home Air run?
 > 1. **Only this computer:** nothing more to do. You can close this window.
 > 2. **A home server, with Docker:** reads your monitors on your Wi-Fi. The page opens on your home network only.
-> 3. **Online, on Railway:** the page opens from anywhere, with no sign-in. Anyone with its address sees your readings. Needs your AirGradient API token.
+> 3. **On Railway, with remote access:** the page opens from anywhere, with no sign-in. Anyone with its address sees your readings. Needs your AirGradient API token.
 > 4. **Another host that runs Docker** (Fly.io, Render, a rented server): they can build Home Air from its Dockerfile. Not tested on these hosts.
 >
 > Reply 1, 2, 3 or 4.
 
-Also when the user asks later ("put Home Air online"). Before deploying, ask only what `./homeair status` lists as missing, one line each: the address (step 4's step 2) and, for online, the token ("Home Air online reads your monitors through AirGradient's Cloud API, so it needs your AirGradient API token", then step 4's step 1).
+Also when the user asks later ("put Home Air online"). Before deploying, ask only what `./homeair status` lists as missing, one line each: the address (step 4's step 2) and, for Railway, the token ("Home Air on Railway reads your monitors through AirGradient's Cloud API, so it needs your AirGradient API token", then step 4's step 1).
 
 - A home server: run `./homeair home-server` and pass on the two steps it prints. Don't offer to copy the folder over SSH; do more only if asked. Once Home Air runs there, if you can reach the server, run `./homeair check http://<the server>:8000`.
-- Online: [DEPLOYMENT.md](DEPLOYMENT.md#railway), with its one OK before anything changes on Railway. The location sent is rounded to about 1 km.
+- Railway: [DEPLOYMENT.md](DEPLOYMENT.md#railway), with its one OK before anything changes on Railway. The location sent is rounded to about 1 km.
 - Another host: the [Dockerfile](Dockerfile) and the variables DEPLOYMENT.md lists for Railway; not covered here.
 
-Afterwards: "Home Air online is at <the address>. Home Air on this computer still runs and starts at login. To turn it off: `./homeair stop` and `./homeair start-at-login off`." When the skill is added, run `./homeair skill add --url <the address>` and add "The Home Air skill now reads Home Air online." Other AI assistants: [docs/agents.md](docs/agents.md).
+Afterwards: "Home Air on Railway is at <the address>. Home Air on this computer still runs and starts at login. To turn it off: `./homeair stop` and `./homeair start-at-login off`." When the skill is added, run `./homeair skill add --url <the address>` and add "The Home Air skill now reads Home Air on Railway." Other AI assistants: [docs/agents.md](docs/agents.md).
 
 ## Commands for later
 

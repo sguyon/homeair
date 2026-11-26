@@ -42,7 +42,7 @@
 
 ## Calls per day for one home with two monitors, read through the cloud
 
-A home read on the Wi-Fi makes none of these: its two monitors make 2,880 reads a day on your own network, counted as `ag_local`. The table is for Home Air online, or a home read only through the cloud.
+A home read on the Wi-Fi makes none of these: its two monitors make 2,880 reads a day on your own network, counted as `ag_local`. The table is for Home Air on a hosted server (Railway, for example), or a home read only through the cloud.
 
 | Use | Token calls | Map calls with Nearby on |
 |---|---|---|

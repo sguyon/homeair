@@ -9,7 +9,6 @@ Each reading is a curve through knots (a usual day's shape, jittered day to day,
 it), plus a little noise that fades to nothing at the moment, so the latest reading is exactly the story's number.
 """
 import bisect
-import json
 import math
 import random
 import re
@@ -21,7 +20,6 @@ from time import monotonic
 import requests
 
 import publicmap
-from config import route_path
 from summary import corrected_pm
 
 from . import public
@@ -282,7 +280,8 @@ def weather(key):
             return 0.0
         v = m.uv_max * math.sin(math.pi * (x - rise) / (set_ - rise)) ** 1.6
         return round(v * (.3 if _raining(m, h) else 1), 1)
-    wind = lambda h: round((m.wind_dir + 9 * math.sin(h / 1.2)) % 360)
+    wind_curve = Curve([(_hour(m, h), v) for h, v in m.story["wind_dir"]]) if "wind_dir" in m.story else None
+    wind = lambda h: round(wind_curve(_hour(m, h)) if wind_curve else (m.wind_dir + 9 * math.sin(h / 1.2)) % 360)
     speed = lambda h: round(m.wind_speed * (1 + .25 * math.sin(math.pi * (h - 9) / 12)), 1)
     rain_mm = lambda h: round(.5 + 1.5 * math.sin(math.pi * (h - m.rain[0]) / (m.rain[1] - m.rain[0])), 1) if _raining(m, h) else 0.0
     code = lambda h: (63 if rain_mm(h) >= 1 else 61) if _raining(m, h) else m.weather_code if not m.rain else 3
@@ -347,8 +346,10 @@ def smoke(key):
 @lru_cache(maxsize=1)
 def _route():
     try:
-        return json.loads(route_path(_HOME["route"]).read_text(encoding="utf-8")) if _HOME.get("route") else []
-    except (OSError, ValueError):
+        from .roads import route_stretch
+        lines = route_stretch(_HOME["road_data"], _HOME["road_key"], _HOME["lat"], _HOME["lon"])
+        return [point for line in lines or [] for point in line]
+    except (OSError, ValueError, KeyError, RuntimeError):  # RuntimeError: a symlink loop (Python 3.12)
         return []
 
 
@@ -408,8 +409,9 @@ def install(server, moment_for_request):
     thread: the demo's _CONTEXT_POOL runs inline, and the real cache only ever runs the real fetchers in its pool."""
     sources, air_read = server.sources, server.air_read
     cfg = server.CFG
+    road = next((r for r in cfg.roads if r.on), None)
     _HOME.update(lat=cfg.place.lat, lon=cfg.place.lon, indoor=cfg.place.indoor, outdoor=cfg.place.outdoor,
-                 route=cfg.road.route if cfg.road else None)
+                 road_data=road.data if road else None, road_key=road.key if road else None)
     _route.cache_clear()
     nearby.cache_clear()
     key = lambda: data_key(moment_for_request())   # whose made-up readings: a hidden case shows the rush's
@@ -418,7 +420,7 @@ def install(server, moment_for_request):
     _REAL.update({name: getattr(sources, name) for name in (
         "cached", "_fetch_nearby", "get_open_meteo_data", "get_air_forecast", "smoke_status",
         "local_now", "source_on", "outdoor_source")},
-        road_traffic=air_read.road_traffic, page_view=server.page_view, force=sources._force)
+        road_traffic=air_read.road_traffic, home_roads=air_read.home_roads, page_view=server.page_view, force=sources._force)
     real = _REAL
     request_monitor = server.request_monitor
     ranges = sorted(sources.HIST_TTL)   # the History card's ranges (h): a monitor's history is fetched and cached by them
@@ -570,7 +572,7 @@ def install(server, moment_for_request):
             return history_points(key(), location_id, now_local, hours)
         return monitor_points(monitor(), location_id, now_local, hours)
 
-    no_road = {"toward": False, "traffic": None, "wind_impact": None, "pollution_pressure": None}   # road_traffic without a road
+    no_road = {"toward": False, "traffic": None, "wind_impact": None}   # road_traffic without a road
 
     sources.api_get = api_get
     sources.get_open_meteo_data = weather_now
@@ -586,6 +588,7 @@ def install(server, moment_for_request):
     sources._fetch_nearby = nearby_of
     air_read.active_road = lambda: server.ROAD if which() == "sample" else None
     air_read.road_traffic = lambda hour, wind: real["road_traffic"](hour, wind) if which() == "sample" else dict(no_road)
+    air_read.home_roads = lambda: real["home_roads"]() if which() == "sample" else ()   # a public monitor has no road
     sources.local_now = now
     # every sample's answer is computed per request: no shared cache (its keys don't know the moment), no pool threads
     sources.cached = cached

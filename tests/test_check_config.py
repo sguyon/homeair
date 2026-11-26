@@ -66,7 +66,7 @@ def test_never_prints_values(tmp_path, capsys):
 
 
 def test_decimals(tmp_path, capsys, monkeypatch):
-    # config.toml on this computer keeps the exact location (for the roads); online (CONFIG_TOML) it must be rounded
+    # config.toml on this computer keeps the exact location (for the roads); sent off it (CONFIG_TOML) it must be rounded
     code, out = run(tmp_path, EXAMPLE.replace("lat = 39.95", "lat = 39.9526"), capsys=capsys)
     assert "decimals" not in out
     monkeypatch.chdir(tmp_path)

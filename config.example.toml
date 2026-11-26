@@ -96,7 +96,7 @@ nearby = true
 # Roads found near your home: `./homeair setup` writes one [[roads]] block for each main road it finds (OpenStreetMap
 # data), after the other settings. `on` is the switch: true to follow the road, false to list it and not follow it.
 # `toward` (left out for a road farther than 500 m) and `toward_calm` are the bearings (degrees) to the road's points,
-# or sector names when the file is sent to Home Air online. `slow` (New York only) holds the weekday hours, [from, to),
+# or sector names when the file is sent off this computer (`./homeair railway`). `slow` (New York only) holds the weekday hours, [from, to),
 # when NYC DOT's measured speeds show the road slow. Change `on` only; setup writes the other values.
 # [[roads]]
 # name = "the BQE"

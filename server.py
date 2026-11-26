@@ -22,6 +22,7 @@ from flask import Flask, Response, g, jsonify, request, send_file, make_response
 import budgets
 import phrases
 import road_data
+import road_timing
 import roads as roads_mod
 import token_setup
 import upstream
@@ -618,7 +619,7 @@ ROAD_SWITCH_FULL = f"Home Air follows at most {roads_mod.ROADS_MAX} roads; turn 
 @app.route("/api/roads/switch", methods=["POST"])
 def switch_road():
     """A road's switch on the page: set `on` of one [[roads]] entry in config.toml, a backup first, then use the new config
-    (APP.roads shows it at once). Only on the computer Home Air runs on, with the token form's guards; online it is read-only.
+    (APP.roads shows it at once). Only on the computer Home Air runs on, with the token form's guards; anywhere else it is read-only.
     The file is read again under the lock, so a switch from a stale page (no such key now) answers 409 and writes nothing."""
     path = config_path(CFG)
     if (path is None or not token_setup.local_entry(request, path.parent) or not token_setup.same_origin(request)
@@ -1004,10 +1005,13 @@ def context():
     rows = air_read.sky_order(air_read.roads_now(sources.local_now(), weather))
     roads = [{"name": r["road"].name, "short": r["road"].name.removeprefix("the "), "side": r["road"].side,
               "reaching": r["reaching"], "strength": r["strength"], "why": r["why"],
-              "until": r["until"].isoformat() if r["until"] else None} for r in rows]
+              "until": r["until"].isoformat() if r["until"] else None, "until_why": r["until_why"],
+              "wind_after": r["wind_after"], "toward_home": r["toward_home"], "far_toward": r["far_toward"], "busy_source": r["busy_source"],
+              "light_wind": r["light_wind"], "band": r["road"].band, "horizon_h": road_timing.UNTIL_HOURS,
+              # how far the map draws the likely exhaust: the calm reach before sunrise, else the day's
+              "reach_m": roads_mod.CALM_REACH_M if r["why"] == "calm" else roads_mod.REACH_M} for r in rows]
     if road_cfg:   # "bqe" is the shape the page reads today; "road" carries the flag (the page moves to it later)
-        extra = {"bqe": {"traffic": road["traffic"], "wind_impact": road["wind_impact"],
-                         "pollution_pressure": road["pollution_pressure"], "current_hour": current_hour},
+        extra = {"bqe": {"traffic": road["traffic"], "wind_impact": road["wind_impact"], "current_hour": current_hour},
                  "road": {"name": road_cfg.name, "toward": road["toward"]}}
     else:
         extra = {}

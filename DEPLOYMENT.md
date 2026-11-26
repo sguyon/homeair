@@ -5,7 +5,7 @@ For access away from home, use Railway. For a home server or NAS, use Docker Com
 ## What each host reads
 
 - **This computer, and a home server with Docker:** the monitors on your Wi-Fi, directly, one reading a minute, with no AirGradient API token. They keep their own history of the readings (`history.sqlite`). A token is optional there: it adds the monitors' cloud ids, fills the last 7 days of history, and is the fallback if a monitor stops answering.
-- **Railway, or any host online:** AirGradient's cloud only. Home Air online can't read the monitors on your Wi-Fi, so it needs the AirGradient API token, shows readings up to 5 minutes old, and keeps no history of its own (charts come from AirGradient's cloud). Alerts on a phone ([docs/optional.md](docs/optional.md#alerts-on-your-phone)) keep each phone's settings in a small file (`alerts.sqlite`) in `/data`: on Railway that needs a volume, added below. A home without a token adds one first, on its computer's page ([SETUP.md](SETUP.md)); `./homeair railway` refuses to send a home that has none, and leaves the monitors' Wi-Fi addresses out of what it sends.
+- **Railway, or another hosted server:** AirGradient's cloud only. Home Air on a hosted server can't read the monitors on your Wi-Fi, so it needs the AirGradient API token, shows readings up to 5 minutes old, and keeps no history of its own (charts come from AirGradient's cloud). Alerts on a phone ([docs/optional.md](docs/optional.md#alerts-on-your-phone)) keep each phone's settings in a small file (`alerts.sqlite`) in `/data`: on Railway that needs a volume, added below. A home without a token adds one first, on its computer's page ([SETUP.md](SETUP.md)); `./homeair railway` refuses to send a home that has none, and leaves the monitors' Wi-Fi addresses out of what it sends.
 
 ## Railway
 
@@ -32,11 +32,11 @@ railway volume add --mount-path /data
 railway variable set RAILWAY_RUN_UID=0 --service homeair --skip-deploys
 ```
 
-The volume keeps `alerts.sqlite` (each phone's alerts, and what was sent to it) across deploys; without it, every deploy turns the alerts off on every phone. The image already sets `HISTORY_FILE=/data/history.sqlite`, and the alerts' file sits in the same folder. Railway creates volumes owned by root. `RAILWAY_RUN_UID=0` lets Home Air write to `/data` ([Railway's volumes reference](https://docs.railway.com/volumes/reference)). Home Air online reads history from AirGradient's cloud; the volume stores the alert database. Keep app sleeping off: alerts need the app running to check every 2 minutes.
+The volume keeps `alerts.sqlite` (each phone's alerts, and what was sent to it) across deploys; without it, every deploy turns the alerts off on every phone. The image already sets `HISTORY_FILE=/data/history.sqlite`, and the alerts' file sits in the same folder. Railway creates volumes owned by root. `RAILWAY_RUN_UID=0` lets Home Air write to `/data` ([Railway's volumes reference](https://docs.railway.com/volumes/reference)). Home Air on Railway reads history from AirGradient's cloud; the volume stores the alert database. Keep app sleeping off: alerts need the app running to check every 2 minutes.
 
 `railway list` should show the project once; if the name appears twice, delete only the one you made, by its ID (see removing it below).
 
-Check the AirGradient API token first: Home Air online reads your monitors through AirGradient's Cloud API, so it needs the token. If `./homeair status` says the token is missing, tell the user in one line why, run `./homeair connect` and open the address it prints, then `./homeair connect --wait` until it prints `Connected`.
+Check the AirGradient API token first: Home Air on Railway reads your monitors through AirGradient's Cloud API, so it needs the token. If `./homeair status` says the token is missing, tell the user in one line why, run `./homeair connect` and open the address it prints, then `./homeair connect --wait` until it prints `Connected`.
 
 Send settings using the helper:
 
@@ -44,7 +44,7 @@ Send settings using the helper:
 ./homeair railway --service homeair
 ```
 
-It sends `CONFIG_TOML` from `config.toml` and each set key from `.env` (the AirGradient token, the pollen key and the two alert keys) through stdin, and prints only the names sent. Neither private file is uploaded with the code. It sets them without starting a deploy (`--skip-deploys`), so no empty or failing deploy starts before the code is up; the next step deploys with all of them. To set one variable yourself the same way, add `--skip-deploys` to `railway variable set`.
+It sends `CONFIG_TOML` from `config.toml` and each set key from `.env` (the AirGradient token, the pollen key and the two alert keys) through stdin, and prints only the names sent. Neither private file is uploaded with the code. It sets them without starting a deploy (`--skip-deploys`), so no empty or failing deploy starts before the code is up; the next step deploys with all of them. To set one variable yourself the same way, add `--skip-deploys` to `railway variable set`. The roads found at setup go too: on Railway, each road is named and timed, and the arcs are sent as 8-point sector names, never the exact degrees. The map draws the roads after Home Air on Railway has downloaded the road data once.
 
 Deploy:
 

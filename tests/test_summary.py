@@ -771,8 +771,7 @@ def summary_at(cfg, now, wind, co2=600, hourly=None, hourly_leaving_at=None, cam
     return build_summary(r={"co2": co2, "rh": 45, "pm_now": 4}, cams=cams or [(now + timedelta(hours=h), 4) for h in range(13)],
                          hourly=rows_h, co2_pts=[], rh_pts=[], pm_past=[], smoke=False, pollen_today=None,
                          pollen_tomorrow=None, rush=[], sun=sun, now=now, roads=rows,
-                         roads_until=air_read.reaching_until(now, weather, rows), wind_now=weather["current"]["wind_direction_10m"],
-                         wind_kmh_now=weather["current"]["wind_speed_10m"])
+                         roads_until=air_read.reaching_until(now, weather, rows), wind_now=weather["current"]["wind_direction_10m"])
 
 
 def item(s, item_id):
@@ -784,7 +783,7 @@ def test_traffic_action_names_road_wind_and_until(auto_bqe):   # user path 3, Do
     t = item(s, "traffic")
     assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east windows shut", "until 4 PM")
     assert t["facts"]["roads"] == [{"name": "the BQE", "band": "within 500 m", "side": "E"}]
-    assert "NO₂ and ultrafine particles don’t show" in t["why"]
+    assert "ultrafine" not in t["why"]   # the reason says where the exhaust comes from, not what the monitor misses
     # the windows by the road's side, the wind by its own direction (120° is south-east)
     assert t["why"].startswith("The south-east wind carries the BQE’s exhaust here.")
     assert item(summary_at(auto_bqe, tue(13), wind=(120, 9), hourly=[], co2=600), "traffic")["action"]["when"] == "until 9 PM"
@@ -825,16 +824,36 @@ def test_auto_road_times_the_run_and_names_the_pm_peak(auto_bqe):
     assert "traffic" not in {i["id"] for i in s["items"]}
 
 
-def test_until_waits_for_a_road_that_starts_reaching_later(tmp_path):
-    """"until" is the first hour with every road's flag off: when the wind turns at 4 PM from the BQE (east) to a road on
-    the west side, busy from 3 to 6 PM, the windows stay shut until 6 PM, and the action names both sides so it holds
-    until then. The why and the facts are about the road reaching now."""
+def test_run_compares_the_rounded_pm25_like_the_outdoor_card():
+    """15.3 reads "15" on the outdoor card, which isn't over 15: the run says fine too, so the two agree."""
+    no_rush = {"in_rush": False, "tomorrow": True}
+    limit = air_read.runtime.PM_FINE
+    assert air_read.rule_run(limit + .3, False, no_rush, False, 13)["word"] == "Fine"
+    assert air_read.rule_run(limit + .6, False, no_rush, False, 13)["word"] == "Keep it short"
+
+
+def test_run_until_says_noon_and_the_run_action_keeps_its_capitals(auto_bqe):
+    """A road slow until 12: "until noon" in the reason; the action is "Run after 12 PM", never "pm"."""
+    no_rush = {"in_rush": False, "tomorrow": True}
+    v = air_read.rule_run(4, False, no_rush, False, 10, {"name": "the BQE", "why": "slow", "end": 12})
+    assert v["why"] == f"The BQE is slow until noon, with the wind toward {air_read.home_name()}."
+    assert v["word"] == "After 12 PM"
+
+
+def test_a_road_that_starts_reaching_later_gets_its_own_action(tmp_path):
+    """The action names only the sides whose road reaches now, until it stops: when the wind turns at 4 PM from the
+    BQE (east) to a road on the west side, slow from 3 to 6 PM, the east windows stay shut until 4 PM; at 4 PM the
+    west road gets its own action, until 6 PM."""
     west = {**AUTO_BQE, "name": "Kent Avenue", "key": "kent", "kind": "main road", "band": "within 200 m", "side": "W",
             "toward": [250, 340], "toward_calm": [240, 350], "slow": [[15, 18]]}
-    t = item(summary_at(auto_config(tmp_path, west, AUTO_BQE), tue(13), wind=(120, 9), hourly_leaving_at=16), "traffic")
-    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east and west windows shut", "until 6 PM")
+    cfg = auto_config(tmp_path, west, AUTO_BQE)
+    t = item(summary_at(cfg, tue(13), wind=(120, 9), hourly_leaving_at=16), "traffic")
+    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east windows shut", "until 4 PM")
     assert [r["name"] for r in t["facts"]["roads"]] == ["the BQE"]
     assert t["why"].startswith("The south-east wind carries the BQE’s exhaust here.")
+    t = item(summary_at(cfg, tue(16), wind=(300, 9)), "traffic")
+    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the west windows shut", "until 6 PM")
+    assert [r["name"] for r in t["facts"]["roads"]] == ["Kent Avenue"]
 
 
 def test_three_sides_shut_every_window(tmp_path):
@@ -885,6 +904,22 @@ def test_calm_until_ignores_later_wind_before_sunrise(auto_bqe):
     assert air_read.reaching_until(now, weather, rows) == tue(6, 47)
 
 
+def test_calm_action_ends_about_sunrise_to_the_quarter_hour(auto_bqe):
+    """A sunrise end is a minute from Open-Meteo: the action says it to the quarter hour, with "about"."""
+    from summary import traffic_item
+    rows = [{"road": r, "reaching": True, "why": "calm"} for r in auto_bqe.roads]
+    assert traffic_item(rows, tue(6, 47), 120, tue(5))["action"]["when"] == "until about 6:45 AM"
+    assert traffic_item(rows, tue(6, 53), 120, tue(5))["action"]["when"] == "until about 7 AM"
+    assert traffic_item(rows, tue(6, 47), 120, tue(5))["action"]["when_end"] == tue(6, 47).isoformat()
+
+
+def test_until_says_noon_and_midnight():
+    from summary import until
+    assert (until(tue(12)), until(tue(0)), until(tue(16)), until(tue(16, 30))) == (
+        "until noon", "until midnight", "until 4 PM", "until 4:30 PM")
+    assert until(tue(11, 55), about=True) == "until about noon"
+
+
 def test_calm_until_keeps_sunrise_without_hourly_forecast(auto_bqe):
     now = tue(6, 30)
     weather = weather_at(now, (120, 4), hourly=[])
@@ -909,22 +944,29 @@ def test_busy_road_reaches_without_a_real_sunrise(auto_bqe, sunset):
 
 @pytest.mark.parametrize("hours", [[], [(tue(9), 120, 9)], [(tue(7), 120, 9), (tue(10), 120, 9)]])
 @pytest.mark.parametrize("east_end,west_end", [(8, 10), (10, 8)])
-def test_combined_action_covers_roads_starting_between_wind_rows(tmp_path, canned, monkeypatch, hours, east_end, west_end):
-    now = tue(6, 30)
+def test_each_action_covers_the_roads_reaching_at_its_time(tmp_path, canned, monkeypatch, hours, east_end, west_end):
+    """Wind rows or not between the roads' slow hours: at 6:30 only the east road reaches, so the action names it until
+    its own end; at 7 the west road starts and both are named until the later end. A road starting exactly at the end
+    (north, its wind away) never extends it."""
     east = {**AUTO_BQE, "slow": [[6, east_end]]}
     west = {**AUTO_BQE, "key": "west", "name": "West Road", "side": "W", "slow": [[7, west_end]]}
-    # A road starting exactly at the end doesn't extend the action: its wind is away.
     north = {**AUTO_BQE, "key": "north", "name": "North Road", "side": "N", "slow": [[10, 12]],
              "toward": [250, 340]}
     cfg = auto_config(tmp_path, east, west, north)
-    weather = weather_at(now, (120, 9), hourly=hours)
     monkeypatch.setattr(air_read, "home_roads", lambda: cfg.roads)
-    monkeypatch.setattr(air_read.sources, "get_open_meteo_data", lambda: weather)
-    inputs = air_read.summary_inputs({}, 600, 45, 45, 21, 21, 4, [], [], now)
-    t = item(build_summary(**inputs), "traffic")
+
+    def traffic(now):
+        weather = weather_at(now, (120, 9), hourly=hours)
+        monkeypatch.setattr(air_read.sources, "get_open_meteo_data", lambda: weather)
+        return item(build_summary(**air_read.summary_inputs({}, 600, 45, 45, 21, 21, 4, [], [], now)), "traffic")
+
+    t = traffic(tue(6, 30))
+    assert (t["action"]["text"], t["action"]["when"], t["action"]["when_end"]) == (
+        "Keep the east windows shut", f"until {east_end} AM", tue(east_end).isoformat())
+    assert [r["name"] for r in t["facts"]["roads"]] == ["the BQE"]
+    t = traffic(tue(7))
     assert (t["action"]["text"], t["action"]["when"], t["action"]["when_end"]) == (
         "Keep the east and west windows shut", "until 10 AM", tue(10).isoformat())
-    assert [r["name"] for r in t["facts"]["roads"]] == ["the BQE"]
 
 
 @pytest.mark.parametrize("sunset,reaching", [(tue(0), False), (tue(0) + timedelta(days=1), False),

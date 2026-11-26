@@ -23,9 +23,9 @@ Set up Home Air for my home by following the instructions here: https://raw.gith
 
 Home Air installs in a `homeair` folder where you open the agent (or `~/homeair` if that's inside another project). To choose another folder, name it in the prompt.
 
-The agent finds your monitors and opens your page, then asks a few questions about your home, most of them optional, and offers to add the skill for your coding agents. To run it on a home server (Docker) or online (Railway): [DEPLOYMENT.md](DEPLOYMENT.md).
+The agent finds your monitors and opens your page, then asks a few questions about your home, most of them optional, and offers to add the skill for your coding agents. To run it on a home server (Docker) or a hosted server (Railway, for example): [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**AI assistants:** ask Claude, ChatGPT and other agents about the air at home, and they answer from your monitors. Coding agents use Home Air's skill, other assistants its MCP server ([how](docs/agents.md)); claude.ai and ChatGPT need Home Air online.
+**AI assistants:** ask Claude, ChatGPT and other agents about the air at home, and they answer from your monitors. Coding agents use Home Air's skill, other assistants its MCP server ([how](docs/agents.md)); claude.ai and ChatGPT need Home Air with remote access, at an HTTPS address.
 
 ## Features
 
@@ -34,6 +34,7 @@ The agent finds your monitors and opens your page, then asks a few questions abo
 - **Alerts on your phone:** the actions above as web push notifications, for CO₂, humidity, PM2.5 and pollen ([setup](docs/optional.md#alerts-on-your-phone))
 - **Profiles:** pick the ones that match your home (a toddler, someone with sinus allergies, a runner); the page says whether the air suits each of them.
 - **More sources:** weather, pollen, wildfire smoke, nearby public monitors (is bad air regional or just around your home?), and a highway's exhaust when the wind blows it your way
+- **Road exhaust on the map:** the main roads within 1 km, found during setup (US), each with where its exhaust goes now: likely to reach you, or carried away, and until when ([how](docs/roads.md#what-the-map-shows)).
 - A live sky behind the page, with the real sun, clouds and rain. Useless, but my toddler's favorite feature :)
 - Installs on your phone's home screen like an app (a PWA): Share › Add to Home Screen (iPhone) or ⋮ › Install app (Android)
 
@@ -51,12 +52,12 @@ AirGradient's dashboard shows my two monitors' readings well, but not what to do
 - **Works best in the US:** smoke, pollen and the forecast links use US sources. Elsewhere, turn them off in `config.toml`; the rest works.
 - **One or two monitors:** one indoor, one outdoor, or both. With one, outdoor PM2.5 comes from public monitors nearby. No rooms yet.
 - **Wi-Fi reads need the same network** and firmware 3.1.4 or newer; from Docker, setup finds the monitors first.
-- **No road for new homes yet:** the highway's exhaust needs a route file, and only the demo has one. Working on it :)
+- **Road coverage:** during setup, Home Air finds nearby roads from a built area's file. The road data is the [`data-v1`](https://github.com/sguyon/homeair/releases/tag/data-v1) release. See [Roads near your home](docs/roads.md) for coverage, timing and downloads.
 
 ## Data and privacy
 
-- **Your readings stay on your computer:** Home Air keeps its own history in `history.sqlite`, next to `config.toml`, until you delete it, and never sends it anywhere. Home Air online keeps none (its charts come from AirGradient's cloud).
-- **What leaves:** your token goes only to AirGradient; your home's position, rounded to about 1 km, goes to Open-Meteo, to AirGradient's public map and, with a pollen key, to Google. Reading monitors on the Wi-Fi sends nothing out. How often it calls AirGradient: [docs/api-usage.md](docs/api-usage.md).
+- **Your readings stay on your computer:** Home Air keeps its own history in `history.sqlite`, next to `config.toml`, until you delete it, and never sends it anywhere. Home Air on a hosted server (Railway, for example) keeps none (its charts come from AirGradient's cloud).
+- **What leaves:** during setup, one lookup sends your typed address to OpenStreetMap's Nominatim (or the coordinates you supply instead, rounded to four decimal places, to look up the place name). Home Air sends the rounded place (two decimal places, about 1 km) to Open-Meteo for the timezone when needed, and a widened box around the rounded place to AirGradient's public map when selecting an outdoor source. Home Air filters and ranks those monitors from the exact place on this computer. During setup's config check, AirGradient can also receive a second box around the rounded place and, if the selected public monitor is absent from that box, its ID for place and current-reading requests. Road-data file names reveal the selected area; the configured data host receives the requested file name and the requesting IP address; a host reached through a download redirect receives the redirect URL and the requesting IP address. The default host is GitHub, whose release downloads can redirect to `release-assets.githubusercontent.com`. While Home Air runs, the place sent for weather, pollen and the map is also rounded: Open-Meteo, Google (with a pollen key) and AirGradient's public map. The page receives the rounded place and the saved pollen ZIP when set; opening its pollen.com link sends that ZIP to pollen.com. The separate `./homeair check --suggest` can send an area around the exact saved coordinates when suggesting a source; checking an indoor-only home's saved outdoor source uses the rounded place ([details](docs/roads.md#privacy)). For monitor lookups, Home Air sends your token only to AirGradient; `./homeair railway` also sends saved settings and keys, including that token, to Railway. Reading monitors on the Wi-Fi sends nothing out. How often it calls AirGradient: [docs/api-usage.md](docs/api-usage.md).
 - **No accounts, no analytics:** logs list the sources called, never readings or keys. Only the public demo site counts visits (Vercel Web Analytics, no cookies).
 
 ## How it works

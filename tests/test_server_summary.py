@@ -140,7 +140,9 @@ def test_context_roads_sorted_for_the_sky(client, tmp_path, monkeypatch):   # Do
         rows = client.get("/api/context").get_json()["roads"]
         assert [r["strength"] for r in rows if r["reaching"]] == ["peak", "high"]   # whatever the selection order
         assert [r["name"] for r in rows] == ["the BQE", "Queens Boulevard"]
-        assert set(rows[0]) == {"name", "short", "side", "reaching", "strength", "why", "until"}
+        assert set(rows[0]) == {"name", "short", "side", "band", "reaching", "strength", "why", "until", "until_why", "wind_after",
+                                "toward_home", "light_wind", "reach_m", "far_toward",
+                                "busy_source", "horizon_h"}
         assert rows[0]["short"] == "BQE" and rows[0]["side"] == "E" and rows[0]["why"] == "slow"
         assert all(r["until"] is None or r["until"].startswith("2026-12-01T") for r in rows)
         assert [r["name"] for r in server.APP_VIEW["roads"]] == ["Queens Boulevard", "the BQE"]   # APP keeps the selection order

@@ -1,5 +1,5 @@
 """The public demo's head: Vercel Web Analytics, Speed Insights and the link preview. Only there: the README promises Home
-Air on your computer, a home server or online has no analytics."""
+Air on your computer, a home server or a hosted server has no analytics."""
 from pathlib import Path
 
 DEMO_ONLY = ("/_vercel/insights/script.js", "/_vercel/speed-insights/script.js", 'property="og:image"')

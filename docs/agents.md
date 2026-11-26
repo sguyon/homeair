@@ -8,7 +8,7 @@ No Home Air yet? [Install it first](../README.md#installation).
 Two ways to connect an AI assistant:
 
 - **The skill**: for coding agents on the computer with Home Air's folder. With it, they can also change your settings when you ask.
-- **The MCP server**: at `<your Home Air address>/mcp`, for other assistants. Read-only. claude.ai and ChatGPT need Home Air [online](../DEPLOYMENT.md#railway).
+- **The MCP server**: at `<your Home Air address>/mcp`, for other assistants. Read-only. claude.ai and ChatGPT need Home Air with remote access over HTTPS (on [Railway](../DEPLOYMENT.md#railway), for example).
 
 ## Coding agents on this computer (Claude Code, Codex, Cursor, Gemini CLI)
 
@@ -18,7 +18,7 @@ In Home Air's folder, run this command. It adds the skill to the coding agents o
 ./homeair skill add
 ```
 
-If Home Air runs on a home server or online, add its address: `./homeair skill add --url <your Home Air address>`.
+If Home Air runs on another computer, add its address: `./homeair skill add --url <your Home Air address>`.
 
 Then open a new session in the agent and ask "How is the air inside now?"
 
@@ -28,7 +28,7 @@ To see where the skill is: `./homeair skill status`. To remove it: `./homeair sk
 
 1. On claude.ai or in Claude Desktop, open **Plugins › Add › Add custom connector**.
 2. Name: `Home Air`.
-3. URL: your Home Air online address followed by `/mcp` (for example `https://<name>.up.railway.app/mcp`).
+3. URL: your Home Air's HTTPS address with remote access, followed by `/mcp` (for example `https://<name>.up.railway.app/mcp`).
 4. Choose **No sign-in**, then **Add**.
 5. In a new chat, ask "How is the air at home? Should I open a window?"
 
@@ -36,7 +36,7 @@ To see where the skill is: `./homeair skill status`. To remove it: `./homeair sk
 
 1. Open **Plugins › Add › Add custom MCP server**.
 2. Name: `Home Air`.
-3. Connection URL: your Home Air online address followed by `/mcp` (for example `https://<name>.up.railway.app/mcp`).
+3. Connection URL: your Home Air's HTTPS address with remote access, followed by `/mcp` (for example `https://<name>.up.railway.app/mcp`).
 4. Authentication: **No authentication**.
 5. Select the box "I understand and want to continue", then **Create as a plugin**.
 6. In a new chat, ask "How is the air at home? Should I open a window?"

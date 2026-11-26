@@ -153,7 +153,7 @@ def test_without_a_token_the_address_goes_into_the_wifi_config(root, capsys):
 
 
 def test_railway_gets_the_location_rounded(root, monkeypatch, capsys):
-    # The exact location never leaves this computer: Home Air online is public, with no sign-in.
+    # The exact location never leaves this computer: Home Air with remote access is public, with no sign-in.
     (root / "config.toml").write_text('[place]\nname = "Ogden"\nlat = 39.7403\nlon = -104.9753\ntimezone = "America/Denver"\n')
     (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
     sent = {}
@@ -398,7 +398,7 @@ def test_railway_uses_stdin_and_prints_only_names(root, monkeypatch, capsys):
 
 
 def test_railway_sends_no_monitor_address_and_needs_the_token(root, monkeypatch, capsys):
-    """A Home Air online reads the cloud only: no host line leaves this computer, and without the token nothing is sent."""
+    """Home Air on a hosted server reads the cloud only: no host line leaves this computer, and without the token nothing is sent."""
     config = '[place]\nname = "Home"\nindoor_serial = "84fce6000001"\nindoor_host = "192.168.1.20"\noutdoor_host = "10.0.0.7"\n'
     (root / "config.toml").write_text(config)
     (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
@@ -592,7 +592,7 @@ def next_line(out):
 def test_status_on_an_empty_folder_names_the_first_command(root, capsys):
     out = status(root, capsys, env={"HOME": str(root)})
     assert next_line(out) == setup.SETUP_CMD
-    assert "A first look" in out and "Your home" in out and "On a home server or online" in out and not (root / ".env").exists()
+    assert "A first look" in out and "Your home" in out and "On a home server or a hosted server" in out and not (root / ".env").exists()
 
 
 def test_status_without_a_place_points_to_the_home_questions(root, capsys, monitors, calls):
@@ -600,14 +600,14 @@ def test_status_without_a_place_points_to_the_home_questions(root, capsys, monit
     run(root, capsys, env=monitors((IN_SERIAL, "I-9PSL", "3.7.1", None)))
     out = status(root, capsys, env={"HOME": str(root)})
     assert "Address: not set" in out and "set up my home in Home Air" in out
-    assert "Home Air online needs: the AirGradient API token and the address" in out
+    assert "On a hosted server, Home Air needs: the AirGradient API token and the address" in out
 
 
 def test_status_on_a_complete_home_needs_nothing_and_never_prints_keys(root, capsys):
     run(root, capsys, "--address", "Denver", "--profiles", "runner")
     (root / ".env").write_text(f'AIRGRADIENT_TOKEN="{TOKEN}"\n')
     out = status(root, capsys, env={"HOME": str(root), "GOOGLE_POLLEN_API_KEY": "invented-pollen-key"})
-    assert "Who lives here: runner" in out and "API token: added" in out and "Home Air online: ready" in out
+    assert "Who lives here: runner" in out and "API token: added" in out and "On a hosted server: ready" in out
     assert next_line(out).startswith("nothing needed") or setup.START_CMD in next_line(out)
     assert TOKEN not in out and "invented-pollen-key" not in out
 
@@ -646,7 +646,7 @@ def test_setup_md_last_message_is_the_decided_text():
 
 
 def test_setup_md_says_what_each_offer_runs():
-    later = section(doc("SETUP.md"), "5. On a home server or online")
+    later = section(doc("SETUP.md"), "5. On a home server or a hosted server")
     assert "./homeair start-at-login on" in section(doc("SETUP.md"), "Commands for later")
     assert "./homeair home-server" in later and "DEPLOYMENT.md" in later and "skill add --url" in later
 

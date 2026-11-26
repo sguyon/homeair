@@ -1,6 +1,7 @@
 // Home Air: the home's profiles and road in words, and compass bearings. app.js, sky.js and map.js use these; the home itself
 // comes from the server as window.APP (config.public_view). Twin of config.bearing_in in Python: change both together.
 (function (root) {
+  const COUNT_ROUND = 1000; // vehicles/day: show traffic counts to the nearest thousand.
   // True if a compass bearing lies in the arc [lo, hi]; lo > hi means the arc crosses north.
   function bearingIn(deg, [lo, hi]) {
     const d = ((deg % 360) + 360) % 360;
@@ -33,6 +34,22 @@
   function roadLabel(road) {
     return `${road.name} ${road.kind || 'highway'}`;
   }
+  const SIDES = { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S: 'south', SW: 'south-west', W: 'west', NW: 'north-west' };
+  function aroundLine(road) {
+    const side = road.several ? 'on several sides' : SIDES[road.side] ? `to the ${SIDES[road.side]}` : '';
+    const where = [road.band, side].filter(Boolean).join(', ');
+    const parts = [road.name, road.kind, where].filter(Boolean);
+    if (Number.isFinite(road.aadt)) {
+      parts.push(`about ${(Math.round(road.aadt / COUNT_ROUND) * COUNT_ROUND).toLocaleString('en-US')} vehicles a day` +
+        (Number.isFinite(road.trucks_pct) ? `, ${road.trucks_pct}% trucks` : ''));
+    }
+    if (road.band === '500 m to 1 km') parts.push('counted only on calm mornings');
+    return parts.join(' · ');
+  }
+  function aroundStatus(status) {
+    return ({ none: 'Traffic · no main road within 1 km', not_built: "Traffic · road data isn't built for your area yet",
+      failed: "Traffic · couldn't get the road data · tried again when Home Air next starts" })[status] || null;
+  }
   // "The BQE expressway runs about 1 km east to south of here"
   function roadRuns(road) {
     const pts = compassIn(road.toward), span = pts.length > 1 ? `${pts[0]} to ${pts[pts.length - 1]}` : pts[0];
@@ -47,6 +64,16 @@
     const away = compassAway(road.toward);
     return `Wind is Open-Meteo’s direction. ${roadRuns(road)}, so wind from the ${list(compassIn(road.toward), 'or')} blows its exhaust toward the block` +
       (away.length ? `, and wind from the ${list(away, 'or')} blows it away.` : '.');
+  }
+  // The Outside data list's Roads row: the roads followed (Around you's switches on) and when their exhaust is likely.
+  function roadsFollowedText(followed) {
+    const names = (followed || []).map(r => r.name);
+    return names.length ? `Roads followed: ${list(names, 'and')}.` : 'No road followed.';
+  }
+  function roadsWhenText(count) {
+    return count > 1
+      ? 'Their exhaust is likely to reach your home when the wind blows from a road toward it in that road’s busy hours, or in calm air before sunrise.'
+      : 'Its exhaust is likely to reach your home when the wind blows from the road toward it in the road’s busy hours, or in calm air before sunrise.';
   }
   function roadWhyText(road) {
     return `${roadRuns(road)}, so it matters on ${list(compassIn(road.toward), 'and')} winds.`;
@@ -316,7 +343,7 @@
       return `<b class="warn">The whole area is elevated</b> (typical nearby reading ${f.num(median)} µg/m³). That points to something regional, such as wildfire smoke, not a source near ${self.near}.`;
     }
     if (you && median != null && pmOver(mine, limit) && mine > median * 2) {
-      return `<b class="warn">${cap(self.block)} reads well above the area</b> (${f.pm(mine)} against a typical ${f.pm(median)}). That points to a source close to ${self.near}: traffic, construction, or a neighbor's smoke.`;
+      return `<b class="warn">${cap(self.block)} reads well above the area</b> (${f.pm(mine)} against a typical ${f.pm(median)}). That points to a source close to ${self.near}, such as construction or a neighbor's smoke; road exhaust barely changes PM2.5.`;
     }
     if (over.length) {
       const n0 = over[0];
@@ -569,7 +596,54 @@
     return { arm, stop, armed: () => t !== null };
   }
 
-  const api = { refreshDue, recheckDue, singleFlight, recheckTimer, FETCH_TIMEOUT_MS, REFRESH_TIMEOUT_MS, RECHECK_MS, REFRESH_STALE_MS, readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, skyConditions, skyLeader, previewConditions, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel };
+  // ---- The Neighborhood map's words for the roads (mock 114): a headline, then one line per followed road ----
+  // `roads`: /api/context's rows (reaching first), `wind`: {from, kmh} or null, `tz`: the home's timezone.
+  const point = deg => POINTS[Math.round(((deg % 360) + 360) % 360 / 45) % 8][0];   // the nearest of the eight points
+  const goesTo = from => point(from + 180);   // where the exhaust goes: away from where the wind comes from
+  const SUNRISE_ROUND_MIN = 15;   // minutes: a sunrise "until" is rounded, as the actions write it ("until about 6:45 AM")
+  function clockAt(iso, tz, round = 0) {   // "11 AM", "6:45 AM", "noon", "midnight"
+    let t = new Date(iso);
+    if (round) t = new Date(Math.round(t / (round * 60e3)) * round * 60e3);
+    const [h, m] = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz }).format(t).split(':').map(Number);
+    if (!m && (h === 12 || h === 0)) return h ? 'noon' : 'midnight';
+    return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+  const possessive = name => cap(name) + (name.endsWith('s') ? '’' : '’s');
+  function roadsHeadline(roads, wind, tz) {
+    if (!roads.length || !wind) return '';
+    const r = roads.find(x => x.reaching);
+    if (!r) return 'Road exhaust is unlikely to reach you now.';
+    const until = !r.until ? (r.until_why === 'steady' ? `for the next ${r.horizon_h} hours or more` : 'now') : r.why === 'calm' ? `until sunrise, about ${clockAt(r.until, tz, SUNRISE_ROUND_MIN)}` : `until ${clockAt(r.until, tz)}`;
+    return `${possessive(r.name)} exhaust is likely to reach you ${until}.`;
+  }
+  function roadLine(r, wind, tz) {
+    if (!wind) return '';
+    const goes = goesTo(wind.from);
+    if (r.reaching && r.why === 'calm') return `its exhaust stays low in the calm air before sunrise and drifts ${goes}, toward your home.`;
+    if (r.reaching) {
+      const then = r.until_why === 'wind' && r.wind_after != null ? ` At ${clockAt(r.until, tz)} the wind turns and carries it ${goesTo(r.wind_after)}, away from you.`
+        : r.until_why === 'busy_end' ? ` After ${clockAt(r.until, tz)} the road is no longer busy.` : '';
+      return `its exhaust blows ${goes}, toward your home.${then}`;
+    }
+    if (r.light_wind) return 'the wind is light, so its exhaust stays near the road.';
+    if (r.toward_home) return `its exhaust blows ${goes}, toward your home, but ${r.busy_source === 'slow' ? 'there is no traffic jam on it now' : 'it’s outside its busy hours now'}.`;
+    if (r.far_toward) return `its exhaust blows ${goes}. It is ${r.band || 'more than 500 m'} away, so its exhaust thins out before it reaches you.`;
+    return `its exhaust blows ${goes}, away from you.`;
+  }
+  // the key's road entry: short names, street types shortened, at most two, then "+n"
+  const KEY_ABBR = [[/ Boulevard$/, ' Blvd'], [/ Street$/, ' St'], [/ Avenue$/, ' Ave'], [/ Expressway$/, ' Expwy'], [/ Parkway$/, ' Pkwy'], [/ Drive$/, ' Dr']];
+  function roadKeyNames(roads) {
+    const names = roads.map(r => KEY_ABBR.reduce((n, [a, b]) => n.replace(a, b), r.short || r.name));
+    return names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '');
+  }
+  // What the map draws for a road, from the same flags as its line: 'reach' (likely exhaust), and in the grey "doesn't
+  // reach you" style: 'away' (carried away), 'far' (toward home from 500 m or more: drawn to its reach only, so it
+  // stops short of the home), 'near' (light wind: a thin haze along the road). A quiet road blowing toward the home
+  // gets none: its plume would cover the home while the headline says unlikely.
+  const plumeKind = r => r.reaching ? 'reach' : r.light_wind ? 'near' : r.far_toward ? 'far' : r.toward_home ? null : 'away';
+  const windKey = wind => wind ? `Wind from the ${point(wind.from)} · ${Math.round(wind.kmh)} km/h` : '';
+
+  const api = { roadsFollowedText, roadsWhenText, aroundLine, aroundStatus, refreshDue, recheckDue, singleFlight, recheckTimer, FETCH_TIMEOUT_MS, REFRESH_TIMEOUT_MS, RECHECK_MS, REFRESH_STALE_MS, readingsState, nbCountText, MAP_PAGE, NB_USED, NO_OUT_YET, pickEntries, rowOff, nbSplit, sourceLine, sourceStatus, histUrl, estimateNow, estimateNote, profileOff, ghostWords, pmOver, pmLevel, pollenHigh, skyConditions, skyLeader, previewConditions, creditHtml, freshness, monitorPill, monitorsLive, monitorRow, safeUrl, monitorCredit, noHistoryHTML, selfWords, nbPm, nbYou, nbLead, nbMoreText, nbRowHTML, nbDetailHTML, lastReadingText, pollenSeasonHTML, sourceOff, sourcesOn, sourcesLabel, smokeText, smokeMapText, pollenBarsTitle, profilesFor, bearingIn, compassIn, compassAway, hourRange, cap, roadClockText, roadWindText, roadWhyText, roadLabel, clockAt, roadsHeadline, roadLine, roadKeyNames, windKey, plumeKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);

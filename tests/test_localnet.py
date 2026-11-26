@@ -293,7 +293,7 @@ def test_wsl_and_containers_never_browse(tmp_path):
 
 def test_a_host_built_from_the_dockerfile_is_hosted_not_a_container(tmp_path, monkeypatch):
     # Railway builds from the Dockerfile, so /.dockerenv may exist there: "container" would start the poller and the
-    # history store on a Home Air online (local_reads_on only stops "hosted").
+    # history store on Home Air on a hosted server (local_reads_on only stops "hosted").
     marker = tmp_path / ".dockerenv"
     marker.write_text("")
     monkeypatch.setattr(localnet.token_setup, "DOCKER_MARKER", marker)

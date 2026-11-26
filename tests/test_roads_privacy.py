@@ -75,7 +75,10 @@ FIELDS_PINNED = {  # Re-measured 24 Nov after name-only grouping, actual publish
     'Hunts Point': 26,
 }
 NOW = datetime(2026, 11, 24, 13, tzinfo=ZoneInfo("America/New_York"))
-DYNAMIC = {"reaching", "strength", "why", "until"}
+# timing fields: they follow the wind and the hour (toward_home is the same test as reaching, at any hour, on the
+# arc the page already acts on: sectors outside this computer)
+DYNAMIC = {"reaching", "strength", "why", "until", "until_why", "wind_after", "toward_home", "light_wind", "reach_m",
+           "far_toward", "busy_source", "horizon_h"}
 PRIVATE_ADDRESS = "123 Privacy Test Lane, Apartment 4B"  # invented street number and apartment, never a real home
 
 

@@ -80,7 +80,7 @@ function applyConfig() {
       set(el, 'href', links.pollen); set(el, 'title', place.pollen_zip && `5-day pollen forecast for ZIP ${place.pollen_zip}, pollen.com`);
       if (!links.pollen) { el.removeAttribute('target'); const arr = el.querySelector('.k-arr'); if (arr) arr.remove(); }
     },
-    'nb-map': el => { el.setAttribute('aria-label', `Map of nearby monitors${road ? ` and the ${road.name}` : ''}`); },
+    'nb-map': el => { el.setAttribute('aria-label', 'Map of nearby monitors and roads'); },
     'runner-tip': el => { el.dataset.tip = runner; if (el.hasAttribute('aria-label')) el.setAttribute('aria-label', runner); },
     'profiles-label': el => {
       const names = { toddler: 'Toddler', sinus: 'Sinus and allergy', runner: 'Runner' };
@@ -93,13 +93,12 @@ function applyConfig() {
     'smoke-about': el => { el.textContent = smokeText(place.region); },
     'smoke-card-about': el => { el.textContent = smokeMapText(place.region); },
     'profiles-for': el => { const t = profilesFor(profiles); el.textContent = t; el.parentElement.hidden = !t; },
-    'sources-label': el => { el.setAttribute('aria-label', sourcesLabel(SRC_ON, !!road, !NO_INDOOR, !NO_OUTDOOR, !!PUB)); },
+    'sources-label': el => { el.setAttribute('aria-label', sourcesLabel(SRC_ON, followedRoads().length > 0, !NO_INDOOR, !NO_OUTDOOR, !!PUB)); },
     'monitors-title': el => { if (PUB) el.textContent = 'Monitor'; },
     'self-legend': el => { el.textContent = SELF.legend; },
   };
   if (road) Object.assign(fill, {
     'road': el => { el.textContent = roadLabel(road); },
-    'road-estimate': el => { el.textContent = `${road.name} estimate`; },
     'road-estimate-title': el => { el.title = `${road.name} estimate`; },
     'road-exhaust': el => { el.textContent = `${road.name} exhaust`; },
     'road-about-label': el => { el.setAttribute('aria-label', `About the ${road.name} estimate`); },
@@ -121,7 +120,71 @@ function applyConfig() {
   const outRow = NO_OUTDOOR && $('st-openair') && $('st-openair').closest('.pr');
   if (outRow) { outRow.querySelector('.pr-t b').textContent = OUT_ROW; outRow.querySelector('.pr-t em').textContent = outWords(); }
 }
+
+const ROAD_SWITCH_NOTE = 'Road switches work on the computer Home Air runs on. Ask your agent: "Turn off the BQE in Home Air".';
+// A loopback URL is required by the server too; the POST remains the authority (containers also refuse it).
+let roadsReadOnly = !!APP.now || !!PUB || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+let roadSwitchBusy = false;
+// The roads the Summary follows: Around you's switches that are on (a public monitor's page has none).
+function followedRoads() { return PUB ? [] : (APP.roads || []).filter(r => r.on); }
+// The Outside data list's Roads row: shown while a road is followed, its tip naming them.
+function renderRoadsRow() {
+  const on = followedRoads();
+  document.querySelectorAll('[data-app="roads-only"]').forEach(el => { el.hidden = !on.length; });
+  document.querySelectorAll('[data-app="roads-followed"]').forEach(el => { el.textContent = roadsFollowedText(on); });
+  document.querySelectorAll('[data-app="roads-when"]').forEach(el => { el.textContent = roadsWhenText(on.length); });
+}
+function renderAround() {
+  const box = $('around-roads'); if (!box) return;
+  const focusedKey = box.contains(document.activeElement) ? document.activeElement.dataset.roadKey : null;
+  $('around-you').hidden = !!PUB;
+  const roads = PUB ? [] : APP.roads || [], current = state.ctx?.roads || [];
+  box.innerHTML = roads.map((road, i) => {
+    const reaching = road.on && current.some(r => r.name === road.name && r.reaching);
+    return `<label class="around-road${road.on ? '' : ' off'}${roadsReadOnly ? ' readonly' : ''}"><span>${esc(aroundLine(road))}${reaching ? '<em class="around-reaching">Reaches you now</em>' : ''}</span>` +
+      `<input type="checkbox" role="switch" data-road-index="${i}" data-road-key="${esc(road.key || '')}" aria-label="Follow ${esc(road.name)}"${road.on ? ' checked' : ''} aria-disabled="${roadsReadOnly || roadSwitchBusy || !road.key}"></label>`;
+  }).join('') + (aroundStatus(APP.roads_status) ? `<p class="around-note">${esc(aroundStatus(APP.roads_status))}</p>` : '') +
+    (roads.some(r => r.found === 'auto') ? '<p class="around-note">Roads © OpenStreetMap contributors</p>' : '');
+  const note = $('around-note'); note.textContent = roadsReadOnly && roads.length ? ROAD_SWITCH_NOTE : '';
+  box.querySelectorAll('[data-road-index]').forEach(input => {
+    // aria-disabled keeps keyboard focus while saving or when the server refuses changes.
+    input.addEventListener('click', event => { if (input.getAttribute('aria-disabled') === 'true') event.preventDefault(); });
+    input.addEventListener('change', () => switchRoad(Number(input.dataset.roadIndex), input.checked));
+    if (focusedKey && input.dataset.roadKey === focusedKey) input.focus({ preventScroll: true });
+  });
+}
+async function switchRoad(index, on) {
+  if (roadSwitchBusy || roadsReadOnly || !APP.roads[index]?.key) return;
+  const road = APP.roads[index];
+  roadSwitchBusy = true; renderAround();
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch('/api/roads/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: road.key, on }), signal: ctl.signal });
+    const result = await response.json();
+    if (!response.ok) {
+      if (response.status === 403) roadsReadOnly = true;
+      throw new Error(result.error || "Couldn't change the road. Try again.");
+    }
+    APP.roads = result.roads; APP.roads_status = result.roads_status;
+    renderRoadsRow();
+    // Drop saved traffic words; the fresh context and Summary use the server's updated config.
+    store.set(null); state.readKey = ''; state.ctx = null; renderAround();
+    if (typeof NBMAP !== 'undefined') NBMAP.roadsChanged();
+    await refresh();
+    await refresh({ manual: true });
+  } catch (error) {
+    $('around-note').textContent = error.name === 'AbortError' ? "Couldn't check the road switch. Reload the page." : error.message;
+  } finally {
+    clearTimeout(timer); roadSwitchBusy = false;
+    const message = $('around-note').textContent;
+    renderAround();
+    if (message) $('around-note').textContent = message;
+  }
+}
 applyConfig();
+renderRoadsRow();
+renderAround();
 if ($('nb-credit')) $('nb-credit').innerHTML = creditHtml(!!APP.now);   // the demo's line, or AirGradient's credit
 if (PUB && $('hist-none')) $('hist-none').innerHTML = noHistoryHTML();   // shown only if AirGradient's map has no past readings
 
@@ -196,7 +259,7 @@ function homeHour() {
 // Connection status for a row in the Home panel: a dot plus a few words.
 // why a source is off: the config turned it off (first), or the home has no place yet
 const offState = id => (APP.sources || {})[id] === false ? 'off' : NO_PLACE ? 'needs_place' : '';
-const srcOk = { ...(SRC_ON.nearby !== false ? { nearby: null } : {}), wx: null, ...(SRC_ON.pollen !== false ? { pollen: null } : {}), ...(SRC_ON.smoke !== false ? { smoke: null } : {}), ...(APP.road ? { bqe: true } : {}) };
+const srcOk = { ...(SRC_ON.nearby !== false ? { nearby: null } : {}), wx: null, ...(SRC_ON.pollen !== false ? { pollen: null } : {}), ...(SRC_ON.smoke !== false ? { smoke: null } : {}), ...(followedRoads().length ? { bqe: true } : {}) };
 function setStatus(id, tone, text, title) {
   const el = $('st-' + id); if (!el) return;
   el.className = 'pst ' + tone; el.lastElementChild.textContent = text; el.title = title || text;
@@ -435,7 +498,8 @@ function contextStatus(ctx) {
   if (!offOf('smoke')) setStatus('smoke', sm.checked ? 'good' : 'bad', sm.checked ? `${sm.date ? new Date(sm.date + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Today'} map` : 'Not checked', sm.checked ? `NOAA smoke map${sm.date ? ' for ' + sm.date : ''}` : 'The NOAA smoke map did not load');
   const nearbyOff = st.nearby === 'off' || st.nearby === 'needs_place' ? st.nearby : offState('nearby');
   if (nearbyOff) setStatus('nearby', 'neutral', 'Off', sourceOff('nearby', nearbyOff).line);
-  setStatus('bqe', 'neutral', 'Estimated', 'Calculated from the hour and the wind; nothing to connect');
+  const followed = followedRoads().length;
+  setStatus('bqe', 'neutral', `${followed} road${followed === 1 ? '' : 's'}`, 'Timed from the wind and each road’s busy hours; nothing to connect');
   updateStatus();
 }
 
@@ -454,10 +518,11 @@ function idleCard(id, { word, line, calendar }) {
 function renderContext(ctx) {
   state.ctx = ctx;   // kept so a unit switch can redraw without a reload
   syncSkyAir();
+  renderAround();
   redrawEstimate();
   const w = ctx.weather || {}, b = ctx.bqe || {}, pollen = ctx.pollen || [], st0 = ctx.status || {};
   window.__wx = ctx._offline ? null : w; window.__bqe = b; window.__road = ctx.road || null; window.__fc = Array.isArray(ctx.forecast) ? ctx.forecast : []; window.__pollenT = Array.isArray(ctx.pollen_tomorrow) ? ctx.pollen_tomorrow : [];
-  if (state.neighbors && state.neighbors.length) renderNeighborhood();
+  if (state.nb) renderNeighborhood(); // context also updates the roads when there are no public monitors nearby
   if (typeof SKY !== 'undefined' && SKY) SKY.weather(w, { cached: !!ctx._offline });
   const wxOff = st0.weather === 'needs_place' || NO_PLACE ? sourceOff('wx', 'needs_place') : null;
   $('wx-hero').closest('.card').classList.remove('off');   // idleCard greys it again if still off
@@ -510,13 +575,10 @@ function renderContext(ctx) {
     $('bqe-hero').textContent = peak ? 'Peak' : high ? 'High' : 'Low';
     $('bqe-hero').style.setProperty('--c', peak || high ? 'var(--warn)' : 'var(--good)');
     $('bqe-sub').textContent = peak ? (rushName ? cap(rushName) + ' rush' : 'Rush hour') : high ? 'Rush shoulders' : 'Off-peak traffic';
-    const pressure = b.pollution_pressure;
     $('bqe-kv').innerHTML = kv([
-      has(pressure) && ['Pollution pressure', `${num(pressure)}×`, pressure > 1 ? 'warn' : 'good'],
       b.wind_impact && ['Wind', esc(b.wind_impact), ctx.road && ctx.road.toward ? 'warn' : ''],
       ...APP.road.rush.map(([a, e, name]) => [esc(cap(name)) + ' rush', hourRange(a, e, '–')]),
     ]);
-    $('bqe-now').textContent = `Pressure is those two multiplied. Now, ${peak ? 'peak' : high ? 'high' : 'low'} traffic times ${has(w.wind_direction) ? 'a ' + w.wind_cardinal + ' wind' : 'an unknown wind'} is ${num(pressure)}.`;
   }
 
   const sm = ctx.smoke || {};
@@ -575,7 +637,6 @@ function renderNeighborhood() {
   setStatus('nearby', others.length ? 'good' : 'bad', others.length ? `${others.length} reporting` : 'No answer', others.length ? `${others.length} nearby monitors sent a reading in the last 2 hours` : 'Nearby monitors did not answer');
   if (!rows.length) {
     $('nb-lead').textContent = 'Nearby monitors did not answer.';
-    $('nb-wind').textContent = '';
     showFindings();
     $('nb').innerHTML = '';
     return;
@@ -594,25 +655,34 @@ function renderNeighborhood() {
   if (!rows.some(n => n.locationId === state.nbOpen)) state.nbOpen = null;   // the open monitor stopped reporting
   drawNbRows();
   if (!growBars.done) { growBars.done = true; growBars(); }   // once, when the table first fills
-  // the map: same monitors, the road, and where the wind takes its exhaust
-  const w = window.__wx || {}, road = APP.road;
-  // what the map means for the block: toward comes from the server (/api/context road.toward); away is the arc opposite the road's
-  const toward = !!(window.__road && window.__road.toward);
-  const away = road && has(w.wind_direction) && bearingIn(w.wind_direction, road.toward.map(d => (d + 180) % 360));
-  const ex = road ? `the ${esc(road.name)}'s traffic exhaust` : '';
-  $('nb-wind').innerHTML = road && has(w.wind_direction) ? `<b>Wind ${esc(w.wind_cardinal || '')} ${num(w.wind_speed)} km/h:</b> ` + (
-    toward ? `<b class="warn">${ex} drifts toward your block.</b> Worst in the rush hours; keep windows shut then.`
-    : away ? `${ex} drifts away from your block.`
-    : `${ex} passes beside your block, not over it.`) : '';   // the road's distance is the ⓘ in the map legend (roadWhyText)
+  // Context is the authority for the roads (reaching first); the headline, the key, the road lines and the map read the same rows.
+  const w = window.__wx || {}, wind = has(w.wind_direction) && has(w.wind_speed) ? { from: w.wind_direction, kmh: w.wind_speed } : null;
+  const roads = PUB ? [] : (state.ctx?.roads || []);
+  renderRoadWords(roads, wind);
   showFindings();
-  if (typeof NBMAP !== 'undefined') NBMAP.update(you, others, has(w.wind_direction) ? w.wind_direction : null);
+  if (typeof NBMAP !== 'undefined') NBMAP.update(you, others, wind ? wind.from : null, roads);
 }
 
-// The findings block between the map and the table: its two lines, hidden when both are empty (no empty gap).
+// The map's words (mock 114): the headline above the map, the wind first in the key, the roads' names and the kinds
+// of exhaust drawn now, then one line per road under the key. No roads (or a public monitor's page): none of them.
+function renderRoadWords(roads, wind) {
+  const head = $('nb-headline'), list = $('nb-roads');
+  head.textContent = roadsHeadline(roads, wind, TZ); head.hidden = !head.textContent;
+  const arrow = deg => `<svg viewBox="0 0 16 16" aria-hidden="true" style="transform:rotate(${deg + 180}deg)"><path d="M8 2v12M8 2 4 6M8 2l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const keyWind = $('nb-key-wind');
+  keyWind.hidden = !(roads.length && wind); keyWind.innerHTML = keyWind.hidden ? '' : `${arrow(wind.from)}<span>${esc(windKey(wind))}</span>`;
+  $('nb-key-road').hidden = !roads.length; $('nb-key-road-names').textContent = roadKeyNames(roads);
+  $('nb-key-reach').hidden = !(wind && roads.some(r => plumeKind(r) === 'reach'));
+  $('nb-key-away').hidden = !(wind && roads.some(r => ['away', 'far', 'near'].includes(plumeKind(r))));
+  const lines = roads.map(r => [r, roadLine(r, wind, TZ)]).filter(([, t]) => t);
+  list.innerHTML = lines.map(([r, t]) => `<li><b>${esc(cap(r.name))}:</b> ${esc(t)}</li>`).join(''); list.hidden = !lines.length;
+}
+
+// The findings block between the road lines and the table: the neighbors' line, hidden when empty (no empty gap).
 function showFindings() {
-  const lead = $('nb-lead'), wind = $('nb-wind');
-  lead.hidden = !lead.textContent; wind.hidden = !wind.textContent;
-  $('nb-find').hidden = lead.hidden && wind.hidden;
+  const lead = $('nb-lead');
+  lead.hidden = !lead.textContent;
+  $('nb-find').hidden = lead.hidden;
 }
 
 // The table's rows (the open one with its band), and the nearest 8 under the map with "Show all" for the rest.
@@ -1309,8 +1379,8 @@ if ('serviceWorker' in navigator) {
 // with a dot on any source that isn't answering, and a card listing each source with its live status.
 const SOURCES = [['AirGradient ONE', 'one', 'Your indoor monitor'], NO_OUTDOOR ? [OUT_ROW, 'openair', OUT_ROW] : ['AirGradient Open Air', 'openair', PUB ? 'This monitor' : 'Your outdoor monitor'],
   ['Open-Meteo', 'wx', 'Weather · Open-Meteo'], ['Google Pollen', 'pollen', 'Pollen · Google'], ['NOAA HMS', 'smoke', 'Smoke · NOAA'],
-  ...(APP.road ? [[`${APP.road.name} estimate`, 'bqe', `Traffic · ${APP.road.name} estimate`]] : [])]
-  .filter(([, id]) => sourcesOn(SRC_ON, !!APP.road, !NO_INDOOR).includes(id) && !(NO_PLACE && id === 'wx'));   // what the config turned off is not listed or counted
+  ...(followedRoads().length ? [['Roads', 'bqe', 'Roads · OpenStreetMap']] : [])]
+  .filter(([, id]) => sourcesOn(SRC_ON, followedRoads().length > 0, !NO_INDOOR).includes(id) && !(NO_PLACE && id === 'wx'));   // what the config turned off is not listed or counted
 function renderSources() {
   const box = $('s-src'); if (!box) return;
   const rows = [...document.querySelectorAll('.blocks .pr')];

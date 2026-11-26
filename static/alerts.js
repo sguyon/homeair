@@ -161,7 +161,7 @@
   }
 
   // Where alerts can't run, the one line that says why: on the bell (for a screen reader) and at the top of the panel,
-  // whose rows are then all disabled. "local" is Home Air on this computer or the home network, "setup" online without
+  // whose rows are then all disabled. "local" is Home Air on this computer or the home network, "setup" over HTTPS without
   // push keys (alerts.available); any other value counts as "local", as the panel's state does.
   const STATES = ['online', 'setup', 'local', 'demo'];
   const WHY = { demo: 'Install Home Air for your own home first. This page is a demo.',
@@ -684,7 +684,7 @@
 
   // Called straight from the tap: iOS shows its prompt only when requestPermission runs in the tap itself, before any wait.
   function turnOn() {
-    if (S.busy || computer() || S.st !== 'online' || !installed()) return;   // a phone's Home Screen app on Home Air online only
+    if (S.busy || computer() || S.st !== 'online' || !installed()) return;   // a phone's Home Screen app, state "online" only
     let asked;
     try {
       asked = Notification.permission === 'granted' ? Promise.resolve('granted') : Promise.resolve(Notification.requestPermission());

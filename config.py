@@ -374,7 +374,7 @@ def set_road_on(text: str, key: str, on: bool) -> str:
 
 
 def online_roads(text: str) -> str:
-    """config.toml text for Home Air online: each [[roads]] `toward` and `toward_calm` in degrees becomes its sector list,
+    """config.toml text for Home Air on another computer: each [[roads]] `toward` and `toward_calm` in degrees becomes its sector list,
     so the arcs never leave this computer. Every other line stays as it is."""
     lines = text.splitlines(keepends=True)
     for start, end in reversed(_road_blocks(lines)):   # the arrays may spread over several lines: work on the block's text
@@ -389,17 +389,17 @@ def online_roads(text: str) -> str:
 
 def only_sectors(text: str) -> None:
     """ConfigError unless the text reads as TOML and every [[roads]] `toward` and `toward_calm` is a list of sector names:
-    what Home Air online gets must hold no arc in degrees. A hand-set [road] is not checked (its arc may stay in degrees)."""
+    what leaves this computer must hold no arc in degrees. A hand-set [road] is not checked (its arc may stay in degrees)."""
     try:
         roads = tomllib.loads(_clean(text)).get("roads", [])
     except tomllib.TOMLDecodeError:
-        raise ConfigError("config.toml can't be read, so nothing was sent to Home Air online. "
+        raise ConfigError("config.toml can't be read, so nothing was sent. "
                           "Run ./homeair check --config to see the problem, then run ./homeair railway again.") from None
     def sectors_only(v):
         return isinstance(v, list) and v and all(isinstance(x, str) and x in roads_mod.SECTORS for x in v)
     if not isinstance(roads, list) or any(not isinstance(r, dict) or not all(sectors_only(r[k]) for k in ("toward", "toward_calm") if k in r)
                                           for r in roads):
-        raise ConfigError("A road's arc in config.toml couldn't be converted for Home Air online, so nothing was sent. "
+        raise ConfigError("A road's arc in config.toml couldn't be converted, so nothing was sent. "
                           "Write it as two whole degrees on one line, like toward = [74, 162], then run ./homeair railway again.")
 
 

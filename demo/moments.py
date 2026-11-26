@@ -60,8 +60,9 @@ class Moment:
 
 MOMENTS = {
     # A bad weekday morning: a stale night in the bedroom, and outside the BQE rush on a southeast wind.
-    # Airing has to wait until the rush fumes clear, at 11. Tree pollen is low and the bedroom's humidity comfortable,
-    # so the exhaust is the one thing outside the limits (the first sample people see stays simple).
+    # The BQE's measured slow hours last until 22; at 11 the wind turns west and carries its exhaust away from home,
+    # so airing waits until 11. Tree pollen is low and the bedroom's humidity comfortable, so the exhaust is the one
+    # thing outside the limits (the first sample people see stays simple).
     "rush": Moment(
         key="rush", label="Morning rush", at=datetime(2026, 4, 21, 7, 45, tzinfo=TZ),
         co2=1250, co2_night=1400, co2_day=640,
@@ -73,7 +74,8 @@ MOMENTS = {
         pollen_today=(2, 1, 0), pollen_tomorrow=(2, 1, 0), pollen_in_season=(True, True, False),
         nearby_road=26,
         # the rush: 22 now, 33 at 9, back under 15 by 11; the evening rush stays under the line
-        story={"pm_out": ((5, 8), (6, 11), (7, 16), (7.75, 22), (8, 27), (9, 33), (10, 17), (11, 10), (12, 8),
+        story={"wind_dir": ((0, 135), (10, 135), (11, 290), (36, 290)),
+               "pm_out": ((5, 8), (6, 11), (7, 16), (7.75, 22), (8, 27), (9, 33), (10, 17), (11, 10), (12, 8),
                           (13, 7), (15, 8), (17, 11), (18, 12), (19, 11), (21, 8), (24, 7))},
     ),
     # A clear November afternoon: west wind, the road's exhaust blown away, nothing to do.

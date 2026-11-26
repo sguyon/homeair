@@ -177,6 +177,7 @@ def test_view_of_a_monitor(demo):
     assert roof["sources"] == {"pollen": False, "road": False, "smoke": True, "nearby": True}   # booleans, like the config's
     assert roof["links"]["forecast"].startswith("https://forecast.weather.gov/")
     assert roof["road"] is None
+    assert roof["roads"] == []
     assert roof["place"]["name"] == "Maple roof" and roof["place"]["outdoor"] == "Maple roof"
     assert roof["place"]["indoor"] is None and roof["place"]["timezone"] == "America/New_York"
     assert roof["public"] == {"id": ROOF, "name": "Maple roof", "street": "Maple Ave", "contributor": "Robin",
@@ -398,17 +399,22 @@ def _h(obj):
     return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
-# The default sample's answers before public monitors existed (sha256 of the sorted JSON, first 16 hex digits;
-# the page is checked in test_demo.py). The rush's are re-pinned for its quieter story (low pollen, comfortable humidity).
+# The samples' API answers (sha256 of sorted JSON, first 16 hex digits; test_demo.py checks the stories).
+# Automatic NYC roads, bundled route geometry and a west wind from 11 AM, 25 Nov; the rush's quieter story (low pollen,
+# comfortable humidity) for the live sky, 26 Nov.
 SAMPLE_BEFORE = {
-    "/api/current": "8d7094020222034b", "/api/context": "9b19ec4b621b11c1",
-    "/api/neighborhood": "8088a41040dae5c0",
+    "/api/current": "8d7094020222034b",
+    "/api/context": "0a2f803a19047a5a",
+    "/api/neighborhood": "10eba24628be4ff5",
     "/api/current?moment=rush": "8d7094020222034b",
-    "/api/context?moment=rush": "9b19ec4b621b11c1", "/api/neighborhood?moment=rush": "8088a41040dae5c0",
+    "/api/context?moment=rush": "0a2f803a19047a5a",
+    "/api/neighborhood?moment=rush": "10eba24628be4ff5",
     "/api/current?moment=clear": "fd99c0e8c62db6c8",
-    "/api/context?moment=clear": "1e5434ff04926b83", "/api/neighborhood?moment=clear": "557e170a3a50a6f8",
+    "/api/context?moment=clear": "dc5d089dde13bd27",
+    "/api/neighborhood?moment=clear": "c282210e10f2ea5d",
     "/api/current?moment=humid": "3f99cb689a5ca5ca",
-    "/api/context?moment=humid": "bdeb37422f9bebb7", "/api/neighborhood?moment=humid": "ad37005d02a64f47",
+    "/api/context?moment=humid": "a3620f8ac7ce2ce5",
+    "/api/neighborhood?moment=humid": "851fa30b6f197d4a"
 }
 
 
@@ -421,6 +427,8 @@ def test_samples_unchanged(demo, monkeypatch):
         for url, want in SAMPLE_BEFORE.items():
             resp = client.get(url)
             got = resp.get_json()
+            if url.startswith("/api/context"):
+                got.pop("roads")   # added with the roads: test_demo.py pins it
             assert _h(got) == want, url
             assert resp.headers["Cache-Control"] == "public, max-age=300, s-maxage=86400"
 
@@ -507,15 +515,17 @@ def test_monitor_chart_past_is_the_model(c, net, pinned):
 
 
 def test_monitor_has_no_road(c, net, demo, pinned):
-    """The demo home's BQE rush is the home's road: a public monitor has none, in the summary or the run verdict."""
+    """The demo home's automatic roads belong to the home: a public monitor has none."""
     net["world"] = world_with(timestamp=ago(0.1))
     net["model"] = model_at("America/New_York", lambda k: 30.0 if 1 <= k <= 2 else 5.0)   # a peak ahead: the PM2.5 item
     with demo.app.test_request_context(f"/?monitor={ROOF}"):
         inputs = air_read.summary_inputs({}, None, None, None, None, None, 4.2, [], [], sources.local_now())
         assert inputs["road"] is None and inputs["rush"] == []
+        assert inputs["roads"] == []
         assert air_read.rush_state(8)["in_rush"] is False and air_read.rush_hours() == []
     with demo.app.test_request_context("/"):
-        assert air_read.rush_state(8)["in_rush"] is True   # a sample keeps the home's road
+        assert [r.name for r in air_read.home_roads() if r.on] == ["the BQE"]
+        assert air_read.rush_state(8)["in_rush"] is False   # no hand-set rush windows
     read = read_of(c)
     pm = next(i for i in read["summary"]["items"] if i["id"] == "pm")
     assert "cause" not in pm["facts"] and pm["ctx"] == "Peak 12 AM · now 5"   # no ", BQE rush" cause (now: 4.8 corrected)

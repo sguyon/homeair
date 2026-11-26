@@ -27,7 +27,7 @@ def test_the_first_look_asks_nothing_and_the_home_questions_follow_the_released_
 
 def test_the_home_server_steps_without_offering_ssh():
     # Codex asked for the SSH address to copy the folder itself
-    assert "Don't offer to copy the folder over SSH" in section("5. On a home server or online")
+    assert "Don't offer to copy the folder over SSH" in section("5. On a home server or a hosted server")
 
 
 def test_the_check_uses_the_address_the_app_printed():

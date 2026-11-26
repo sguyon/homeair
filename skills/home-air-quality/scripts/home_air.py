@@ -38,7 +38,7 @@ STOPPED_OR_SANDBOX = ("Either Home Air is stopped (start it: ./homeair start in 
 REPO = "https://github.com/sguyon/homeair"   # where Home Air and its setup live, for a skill installed on its own
 ALONE = ("No Home Air answers at {}. This skill reads a running Home Air, and the skill's files aren't in a Home Air "
          "folder. If Home Air is installed on this computer, start it (./homeair start in its folder), and set HOME_AIR_URL "
-         "to the address ./homeair status shows if it isn't http://localhost:5555. If it runs on a home server or online, "
+         "to the address ./homeair status shows if it isn't http://localhost:5555. If Home Air runs on another computer, "
          "set HOME_AIR_URL to its address. To install Home Air: " + REPO)
 
 
@@ -50,7 +50,7 @@ def base_urls():
     """The addresses to try, in order: HOME_AIR_URL alone; else the port setup chose, then the default port."""
     url = os.environ.get("HOME_AIR_URL", "").strip()
     if not url:
-        try:   # the address `./homeair skill add --url` saved: Home Air online or on a home server
+        try:   # the address `./homeair skill add --url` saved: Home Air on another computer
             url = (HOME_AIR / "agent-url").read_text().strip()
         except OSError:
             url = ""

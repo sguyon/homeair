@@ -289,3 +289,18 @@ def test_busy_until_ends_between_hourly_rows():
     hourly = [{'time': at.replace(hour=20, minute=0), 'wind_dir': 120, 'wind_kmh': 9},
               {'time': at.replace(hour=22, minute=0), 'wind_dir': 120, 'wind_kmh': 9}]
     assert road_until(road, at, hourly, {SUNRISE.date(): SUNRISE}) == at.replace(hour=21, minute=0)
+
+
+def test_far_toward_and_forecast_covers():
+    """A road beyond the day's reach: the wind toward the home is read on its calm arc. A reaching road with no end
+    reaches for at least UNTIL_HOURS only when the wind is known that far."""
+    from types import SimpleNamespace
+    import road_timing
+    far = SimpleNamespace(toward=None, toward_calm=(90, 180))
+    assert road_timing.far_toward(far, 135) and not road_timing.far_toward(far, 300)
+    assert not road_timing.far_toward(SimpleNamespace(toward=(90, 180), toward_calm=(90, 180)), 135)
+    at = datetime(2026, 4, 21, 8, tzinfo=ZoneInfo("America/New_York"))
+    hours = [{"time": at + timedelta(hours=h), "wind_dir": 135, "wind_kmh": 9} for h in range(0, 14)]
+    assert road_timing.forecast_covers(at, hours)
+    assert not road_timing.forecast_covers(at, hours[:6])   # the forecast stops after 5 hours
+    assert not road_timing.forecast_covers(at, [*hours[:4], {**hours[4], "wind_dir": None}, *hours[5:]])

@@ -25,6 +25,7 @@ NIGHT_STALE, NIGHT_ALL = 0.5, 0.9  # share of last night over the CO₂ limit: "
 COLD_C = 10                        # °C: "close it after ten minutes" when it gets this cold within COLD_AHEAD
 COLD_AHEAD = timedelta(hours=8)
 TONIGHT_FROM = 18                  # hour: a chart starting at or after 6 PM is headed "Tonight"
+SUNRISE_ROUND_MIN = 15             # minutes: a sunrise "until" rounds to the quarter hour ("until about 6:45 AM"): Open-Meteo's minute is false precision
 
 # AirGradient's EPA correction for PM2.5 (the US EPA's correction for Plantower sensors, Barkjohn et al., extended to
 # high concentrations), as AirGradient writes it in its firmware (airgradienthq/arduino, src/PMS/PMS.cpp,
@@ -76,6 +77,16 @@ def clock(t):
     """'4 PM', '4:30 PM'."""
     h = t.hour % 12 or 12
     return f"{h}{'' if t.minute == 0 else f':{t.minute:02d}'} {'PM' if t.hour >= 12 else 'AM'}"
+
+
+def until(t, about=False):
+    """An action's "until": 'until 4 PM', 'until noon', 'until midnight'; with `about`, rounded to SUNRISE_ROUND_MIN
+    ('until about 6:45 AM'), for a sunrise."""
+    if about:
+        q = round((t.hour * 60 + t.minute) / SUNRISE_ROUND_MIN) * SUNRISE_ROUND_MIN
+        t = t.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=q)
+    word = {(12, 0): "noon", (0, 0): "midnight"}.get((t.hour, t.minute)) or clock(t)
+    return f"until about {word}" if about else f"until {word}"
 
 
 def anchor_forecast(cams, measured_now, cams_now):
@@ -284,7 +295,7 @@ def action(item, r, outlook, rush, now, estimate=False, hourly=()):
         if not stretch:
             return act(text, "now")
         if stretch[0] <= now:
-            return act(text, f"until {clock(stretch[1])}", stretch[1])
+            return act(text, until(stretch[1]), stretch[1])
         return act(text, fmt_range(*stretch), stretch[1])
     if kind == "pollen":
         return act("Keep windows shut", "today")
@@ -319,23 +330,23 @@ def road_facts(rows):
     return [{"name": row["road"].name, "band": row["road"].band, "side": row["road"].side} for row in rows]
 
 
-def traffic_item(reaching, until, wind_dir, now, later=()):
+def traffic_item(reaching, end, wind_dir, now):
     """The traffic action for the roads reaching the home now (air_read.roads_now's rows with `reaching`), or None.
-    `until`: the first wind change, busy-hour end or sunrise with every road's flag off (air_read.reaching_until), else None; `wind_dir`: the
-    current wind in degrees, the one roads_now's flags read; `later`: the rows of roads that start reaching before
-    `until`. The action names the sides of all of them, in compass order, so it holds until then; the facts and the why
-    are about the roads reaching now. Score 1.0, under every reading past its limit, so an airing ranks first."""
+    `end`: the first wind change, busy-hour end or sunrise with none of them reaching (air_read.reaching_until), else
+    None; `wind_dir`: the current wind in degrees, the one roads_now's flags read. The action names their sides, in
+    compass order; a road that starts reaching later gets its own action then. An end that isn't on the hour is a
+    sunrise: "until about" it, to the quarter hour. Score 1.0, under every reading past its limit, so an airing ranks first."""
     if not reaching:
         return None
     roads = [row["road"] for row in reaching]
-    sides = sorted({row["road"].side for row in [*reaching, *later] if row["road"].side}, key=SECTORS.index)
+    sides = sorted({row["road"].side for row in reaching if row["road"].side}, key=SECTORS.index)
     why = reaching[0]["why"]
     facts = {"roads": road_facts(reaching), "why": why}
     wind = phrases.wind_word(wind_dir)
-    when = f"until {clock(until)}" if until else phrases.traffic_while(wind, why == "calm")
+    when = until(end, about=bool(end.minute or end.second)) if end else phrases.traffic_while(wind, why == "calm")
     return {"id": "traffic", "score": 1.0, "forecast": False, "label": "Traffic", "key": "out", "num": None, "unit": None,
             "ctx": phrases.road_names([r.name for r in roads]), "facts": facts,
-            "action": {"text": phrases.traffic_text(sides), "when": when, "when_end": until.isoformat() if until else None},
+            "action": {"text": phrases.traffic_text(sides), "when": when, "when_end": end.isoformat() if end else None},
             "why": phrases.why("traffic", {**facts, "wind": wind})}
 
 
@@ -510,7 +521,7 @@ def _since(pts, limit, now):
 
 def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today, pollen_tomorrow, rush, sun, now, road=None,
                   pm_past_model=False, monitor_label=None, area_factor=None, source=None, indoor=True, roads=(),
-                  roads_until=None, wind_now=None, wind_kmh_now=None):
+                  roads_until=None, wind_now=None):
     """The whole card from the rules: items with actions and explanations, the Also line, the profiles row, the chart.
     `road` is the road's name (None without one); `rush` its rush windows from rush_windows(). With pm_past_model,
     pm_past is the model's past hours: the chart draws it, but it can't calibrate the model against itself.
@@ -522,8 +533,8 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
     fallback: "monitor", "list" or False}, server.outdoor_source's facts), for the PM2.5 item's sentences; None for a home with one.
     `indoor` False: an outdoor-only home. No indoor readings, whatever was passed, and the toddler profile waits for an
     indoor monitor. `roads`: air_read.roads_now's rows (the hand-set road among them); `roads_until`: the first wind change, busy-hour end or sunrise
-    when no road reaches (air_read.reaching_until); `wind_now` and `wind_kmh_now`: the current wind's direction and speed,
-    the ones the flags read. A reaching road makes the traffic action,
+    when none of the roads reaching now reaches (air_read.reaching_until); `wind_now`: the current wind's direction, the
+    one the flags read. A reaching road makes the traffic action,
     unless a PM2.5 or pollen action already keeps the windows shut: that action then lists the roads in its facts.
     A road without a hand-set `rush` names the PM2.5 outlook's cause ("the BQE's traffic") when it reaches at the peak."""
     if not indoor:
@@ -601,19 +612,11 @@ def build_summary(r, cams, hourly, co2_pts, rh_pts, pm_past, smoke, pollen_today
         it["why"] = phrases.why(it["id"], {**f, **home})
         it["facts"] = f
     reaching = [row for row in roads if row["reaching"]]
-    # the roads that start reaching before the traffic action's "until": their windows stay shut too
-    later = []
-    if reaching and roads_until:
-        wind_hours = [{"time": h["t"], "wind_dir": h.get("wind_dir"), "wind_kmh": h.get("wind_kmh")} for h in hourly]
-        if wind_now is not None and wind_kmh_now is not None:
-            wind_hours.append({"time": now, "wind_dir": wind_now, "wind_kmh": wind_kmh_now})
-        indexes = road_timing.reaching_before([row["road"] for row in roads], now, roads_until, wind_hours, _sunrises(sun))
-        later = [row for k, row in enumerate(roads) if k in indexes and not row["reaching"]]
     shut = next((it for it in items if it["id"] in SHUT_ITEMS and (it["action"]["text"] or "").startswith(SHUT)), None)
     if reaching and shut:   # one window action: the one already shut keeps the exhaust out too
         shut["facts"]["roads"] = road_facts(reaching)
     elif reaching and len(items) < MAX_ITEMS:   # always room: only a PM2.5 or pollen item could make a third before it
-        t = traffic_item(reaching, roads_until, wind_now, now, later)
+        t = traffic_item(reaching, roads_until, wind_now, now)
         t["profile"] = "toddler" if outlook.get("high") and indoor else "runner"   # an "out" item's profile, as PM2.5's
         items.append(t)
     airing_for = with_airing(items)

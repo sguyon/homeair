@@ -1365,9 +1365,88 @@ test('index.html makes no AirGradient claim in the static credit line', () => {
   assert.match(html, /<p class="nb-credit" id="nb-credit"><\/p>/);
 });
 
-test('the road label says what kind of road it is', () => {
+test("the Roads row names the roads followed and says when their exhaust is likely, not how much", () => {
+  assert.equal(home.roadsFollowedText([{ name: 'the BQE' }]), 'Roads followed: the BQE.');
+  assert.equal(home.roadsFollowedText([{ name: 'the BQE' }, { name: 'Kent Avenue' }]), 'Roads followed: the BQE and Kent Avenue.');
+  assert.match(home.roadsWhenText(1), /^Its exhaust is likely to reach your home when the wind blows from the road toward it in the road’s busy hours, or in calm air before sunrise\.$/);
+  assert.match(home.roadsWhenText(2), /^Their exhaust/);
+  const html = readFileSync(new URL('index.html', root), 'utf8');
+  assert.match(html, /<b>Roads<\/b><em>OpenStreetMap · traffic data<\/em>/);
+  assert.match(html, /It shows when exhaust is likely, not how much\./);
+  assert.doesNotMatch(html, /Hour × wind|Pressure is those two multiplied/);
+});
+
+test('the road label says what kind of road it is', async () => {
   assert.equal(home.roadLabel({ name: 'BQE', kind: 'expressway' }), 'BQE expressway');
   assert.equal(home.roadLabel({ name: 'I-95' }), 'I-95 highway');
+  assert.equal(home.aroundLine({ name: 'the BQE', kind: 'highway', band: 'within 500 m', side: 'E', aadt: 119116, trucks_pct: 11 }),
+    'the BQE · highway · within 500 m, to the east · about 119,000 vehicles a day, 11% trucks');
+  assert.equal(home.aroundLine({ name: 'the Staten Island Expressway', kind: 'highway', band: '500 m to 1 km', side: 'S' }),
+    'the Staten Island Expressway · highway · 500 m to 1 km, to the south · counted only on calm mornings');
+  assert.equal(home.aroundLine({ name: 'Road', several: true }), 'Road · on several sides');
+  assert.equal(home.aroundLine({ name: 'Road', aadt: 2001 }), 'Road · about 2,000 vehicles a day');
+  assert.equal(home.aroundStatus('none'), 'Traffic · no main road within 1 km');
+  assert.equal(home.aroundStatus('not_built'), "Traffic · road data isn't built for your area yet");
+  assert.equal(home.aroundStatus('failed'), "Traffic · couldn't get the road data · tried again when Home Air next starts");
+  for (const status of ['ok', 'manual']) assert.equal(home.aroundStatus(status), null);
+
+  // Run the real redraw/switch functions: replacing inputs must preserve the key,
+  // including reordered answers, without taking focus back after the user leaves.
+  const document = { activeElement: {} };
+  let inputs = [], answer;
+  const box = {
+    contains: input => inputs.includes(input),
+    querySelectorAll: () => inputs,
+    set innerHTML(html) {
+      if (this.contains(document.activeElement)) document.activeElement = {};
+      inputs = [...html.matchAll(/<input[^>]+>/g)].map(([tag]) => ({
+        dataset: { roadKey: tag.match(/data-road-key="([^"]*)"/)[1] },
+        getAttribute: () => tag.match(/aria-disabled="([^"]*)"/)[1],
+        listeners: {},
+        addEventListener(type, listener) { this.listeners[type] = listener; },
+        focus() { document.activeElement = this; }
+      }));
+    }
+  };
+  const nodes = { 'around-roads': box, 'around-you': {}, 'around-note': {} };
+  const roads = [{ key: 'first', name: 'First', on: true }, { key: 'second', name: 'Second', on: true }];
+  const app = { roads, roads_status: 'ok' };
+  const source = readFileSync(new URL('static/app.js', root), 'utf8');
+  const runtime = runInNewContext(source.slice(source.indexOf('const ROAD_SWITCH_NOTE'), source.indexOf('\napplyConfig();')) +
+    '\n({ renderAround, switchRoad })', {
+    APP: app, PUB: false, location: { hostname: 'localhost' }, document,
+    $: id => nodes[id], state: { ctx: null }, ...home, esc: String,
+    AbortController, setTimeout, clearTimeout, FETCH_TIMEOUT_MS: 1000,
+    store: { set() {} }, refresh: async () => {},
+    fetch: () => new Promise(resolve => { answer = resolve; })
+  });
+  runtime.renderAround();
+  inputs[1].focus();
+  runtime.renderAround();
+  assert.equal(document.activeElement, inputs[1]);
+  const saving = runtime.switchRoad(1, false);
+  assert.equal(document.activeElement, inputs[1]);
+  assert.equal(inputs[1].getAttribute('aria-disabled'), 'true');
+  let prevented = false;
+  inputs[1].listeners.click({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  answer({ ok: true, json: async () => ({ roads: [roads[1], roads[0]], roads_status: 'ok' }) });
+  await saving;
+  assert.equal(document.activeElement, inputs[0]);
+  assert.equal(document.activeElement.dataset.roadKey, 'second');
+  const outside = {};
+  const leaving = runtime.switchRoad(0, true);
+  document.activeElement = outside;
+  answer({ ok: false, status: 409, json: async () => ({ error: 'Try again' }) });
+  await leaving;
+  runtime.renderAround();
+  assert.equal(document.activeElement, outside);
+  inputs[0].focus();
+  const refused = runtime.switchRoad(0, true);
+  answer({ ok: false, status: 403, json: async () => ({ error: 'Read only' }) });
+  await refused;
+  assert.equal(document.activeElement, inputs[0]);
+  assert.equal(inputs[0].getAttribute('aria-disabled'), 'true');
 });
 
 test('the top of the comfortable humidity band comes from the config', () => {
@@ -1536,7 +1615,7 @@ test('the neighborhood calls the shown monitor This on a public page, You at hom
   const f = { esc: escHtml, pm: v => (v >= 10 ? String(Math.round(v)) : v.toFixed(1)), num: v => v.toFixed(1) };   // app.js pmNum, num
   const others = [{ pm02: 5, distance_km: 1, locationName: 'A' }, { pm02: 6, distance_km: 2, locationName: 'B' }, { pm02: 7, distance_km: 3, locationName: 'C' }];
   const lead = home.nbLead({ pm02: 40 }, others, 15, home.selfWords(true), f);
-  assert.match(lead, /This monitor reads well above the area.*a source close to this monitor: traffic/);
+  assert.match(lead, /This monitor reads well above the area.*a source close to this monitor, such as construction.*road exhaust barely changes PM2\.5/);
   const area = [{ pm02: 30, distance_km: 1, locationName: 'A' }, { pm02: 31, distance_km: 2, locationName: 'B' }];
   assert.match(home.nbLead(null, area, 15, home.selfWords(true), f), /not a source near this monitor\./);
   assert.match(home.nbLead(null, area, 15, home.selfWords(false), f), /not a source near home\./);
@@ -1738,16 +1817,15 @@ test('neighborhood: the header says only Neighborhood, the findings sit in the c
   const html = readFileSync(new URL('index.html', root), 'utf8');
   assert.match(html, /<h2\b[^>]*>Neighborhood<\/h2>/);
   assert.doesNotMatch(html + app, /nb-sub|nb-foot|nb-why/);
-  // map and legend, then the findings (neighbors line, wind line), then the table
-  assert.ok(html.indexOf('id="nb-map"') < html.indexOf('id="nb-find"') && html.indexOf('id="nb-find"') < html.indexOf('class="nbt"'));
-  assert.ok(html.indexOf('id="nb-lead"') < html.indexOf('id="nb-wind"') && html.indexOf('id="nb-wind"') < html.indexOf('class="nbt"'));
+  // mock 114's order: the headline, the map and its key (the wind first), one line per road, the neighbors' line, the table
+  const at = k => html.indexOf(k);
+  assert.ok(at('id="nb-headline"') < at('id="nb-map"') && at('id="nb-map"') < at('id="nb-key-wind"') && at('id="nb-key-wind"') < at('lg-you')
+    && at('lg-you') < at('id="nb-roads"') && at('id="nb-roads"') < at('id="nb-find"') && at('id="nb-find"') < at('class="nbt"'));
+  assert.doesNotMatch(html, /nb-wind|roads-map-legend|data-app="road-why"/);
   assert.match(html, /PM2\.5<span class="nb-unit">µg\/m³<\/span>/);   // the unit moved from the header to the column
-  // the road's distance is the legend's ⓘ (the page's data-tip), only with a road
-  assert.match(html, /class="lg-info"[^>]*data-app="road-why"[^>]*tabindex="0"/);
-  assert.match(app, /'road-why': el => \{ if \(!road\) return;/);
   // nearby off: the one-line note sits outside the hidden card
   assert.match(app, /\$?.*getElementById\('nb-off'\)/);
-  assert.match(app, /\$\('nb-find'\)\.hidden = lead\.hidden && wind\.hidden/);
+  assert.match(app, /\$\('nb-find'\)\.hidden = lead\.hidden/);
   assert.match(app, /nbMoreText\(extra, state\.nbCount\)/);
 });
 
@@ -2291,4 +2369,34 @@ test('the Air switch alone turns the air effects on and off, and a saved Haze ch
   assert.deepEqual(shown({ sky: true, wind: true, haze: true }), { enabled: true, air: true });
   const html = readFileSync(new URL('index.html', root), 'utf8');
   assert.match(html, /<b>Air<\/b>/); assert.doesNotMatch(html, /fx-on-haze|sky-haze/);
+});
+
+test('the map\'s road words: headline, one line per road, the key (mock 114)', () => {
+  const h = createRequire(import.meta.url)('../static/home.js'), tz = 'America/New_York';
+  const bqe = { name: 'the BQE', short: 'BQE', reaching: true, why: 'slow', until: '2026-04-21T11:00:00-04:00', until_why: 'wind',
+    wind_after: 290, toward_home: true, light_wind: false, band: 'within 500 m' };
+  const se = { from: 135, kmh: 9.4 };
+  assert.equal(h.roadsHeadline([bqe], se, tz), 'The BQE’s exhaust is likely to reach you until 11 AM.');
+  assert.equal(h.roadLine(bqe, se, tz), 'its exhaust blows north-west, toward your home. At 11 AM the wind turns and carries it east, away from you.');
+  assert.equal(h.roadsHeadline([{ ...bqe, reaching: false }], se, tz), 'Road exhaust is unlikely to reach you now.');
+  assert.equal(h.roadsHeadline([bqe], null, tz), '');   // no wind: no claim either way
+  assert.equal(h.roadsHeadline([{ ...bqe, why: 'calm', until: '2026-04-21T06:38:00-04:00', until_why: 'sunrise' }], { from: 180, kmh: 4 }, tz),
+    'The BQE’s exhaust is likely to reach you until sunrise, about 6:45 AM.');
+  assert.equal(h.roadLine({ ...bqe, until: '2026-04-21T20:00:00-04:00', until_why: 'busy_end' }, se, tz), 'its exhaust blows north-west, toward your home. After 8 PM the road is no longer busy.');
+  assert.equal(h.roadLine({ ...bqe, reaching: false, busy_source: 'slow' }, se, tz), 'its exhaust blows north-west, toward your home, but there is no traffic jam on it now.');
+  assert.equal(h.roadLine({ ...bqe, reaching: false, busy_source: 'busy' }, se, tz), 'its exhaust blows north-west, toward your home, but it’s outside its busy hours now.');
+  assert.equal(h.roadLine({ ...bqe, reaching: false, toward_home: false, far_toward: true, band: '500 m to 1 km' }, se, tz),
+    'its exhaust blows north-west. It is 500 m to 1 km away, so its exhaust thins out before it reaches you.');
+  assert.equal(h.roadsHeadline([{ ...bqe, until: null, until_why: 'steady', horizon_h: 12 }], se, tz), 'The BQE’s exhaust is likely to reach you for the next 12 hours or more.');
+  // a plume only where the words say the exhaust reaches, or goes away from home
+  assert.equal(h.plumeKind(bqe), 'reach');
+  assert.equal(h.plumeKind({ ...bqe, reaching: false, toward_home: false }), 'away');
+  assert.equal(h.plumeKind({ ...bqe, reaching: false }), null);
+  assert.equal(h.plumeKind({ ...bqe, reaching: false, toward_home: false, far_toward: true }), 'far');
+  assert.equal(h.plumeKind({ ...bqe, reaching: false, light_wind: true }), 'near');
+  assert.equal(h.roadLine({ ...bqe, reaching: false, light_wind: true }, se, tz), 'the wind is light, so its exhaust stays near the road.');
+  assert.equal(h.roadLine({ ...bqe, reaching: false, toward_home: false }, { from: 290, kmh: 17 }, tz), 'its exhaust blows east, away from you.');
+  assert.equal(h.clockAt('2026-04-21T12:00:00-04:00', tz), 'noon');
+  assert.equal(h.roadKeyNames([{ short: 'McGuinness Boulevard' }, bqe, { short: 'FDR Drive' }]), 'McGuinness Blvd, BQE +1');
+  assert.equal(h.windKey(se), 'Wind from the south-east · 9 km/h');
 });

@@ -22,7 +22,7 @@ Home Air commands, run in the Home Air folder:
   ./homeair connect --wait             Wait up to 90 s for the token to be saved, then list the account's monitors
   ./homeair start-at-login on|off      Start Home Air each time you log in, or stop doing that
   ./homeair skill add|remove|status    Add the Home Air skill to your coding agents (never over another skill), remove it, or show the links
-  ./homeair skill add --url <address>  Make the skill read Home Air at that address (online or a home server)
+  ./homeair skill add --url <address>  Make the skill read Home Air on another computer (a home server, or one with remote access)
   ./homeair monitors                   List the monitors on your Wi-Fi and which ones Home Air reads (changes nothing)
   ./homeair monitors use <serial>      Read this monitor instead of the other one of its kind
   ./homeair settings show|backup|restore|list
