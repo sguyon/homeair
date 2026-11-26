@@ -30,7 +30,7 @@ The agent finds your monitors and opens your page, then asks a few questions abo
 ## Features
 
 - **Actions** for CO₂ and humidity inside, PM2.5 and pollen outside: "Open a window for 10 min", "Keep windows shut", each with its reason.
-- **Timing:** "Windows shut until 11 AM", "Run after 11 AM", from a PM2.5 forecast fitted to your outdoor monitor, or to the public ones nearby when there are some.
+- **Timing:** "Keep windows shut until 11 AM", "Run after 11 AM", from a PM2.5 forecast fitted to your outdoor monitor, or to the public ones nearby when there are some.
 - Charts of today and of each monitor's history
 - **Profiles:** pick the ones that match your home (a toddler, someone with sinus allergies, a runner); the page says whether the air suits each of them.
 - **More sources:** weather, pollen, wildfire smoke, nearby public monitors (is bad air regional or just around your home?), and a highway's exhaust when the wind blows it your way
