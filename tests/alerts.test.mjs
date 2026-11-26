@@ -42,3 +42,23 @@ test('a phone shows its day, and its time too when another phone has the same na
   assert.equal(plain({ ...a, time: undefined }, all), '25 Nov');   // no time from the server: the day alone
   assert.equal(plain({ id: 'e', device: 'Phone', since: '2026-01-01', time: '00:00' }, [{ id: 'f', device: 'Phone', since: '2026-01-01', time: '12:00' }]), '1 Jan, 12:00 AM');
 });
+
+// Where alerts can't run, the bell and the panel say why in one line (static/alerts.js disabledWhy); online says nothing.
+test('the line on why alerts are disabled', () => {
+  const { disabledWhy } = require('../static/alerts.js');
+  assert.equal(disabledWhy('online'), '');
+  assert.equal(disabledWhy('demo'), 'Install Home Air for your own home first. This page is a demo.');
+  assert.equal(disabledWhy('setup'), 'Set up alerts first: the alert keys are missing.');   // HTTPS, no push keys
+  const local = 'Set up Home Air on a server with HTTPS first: phones get alerts only from an HTTPS address.';
+  assert.equal(disabledWhy('local'), local);
+  assert.equal(disabledWhy(undefined), local);   // an unknown state counts as "local", as the panel's does
+});
+
+// While Allow Alerts is off, every action's switch shows off; the saved choices show again once it is on (itemOn).
+test('the actions\' switches are off while Allow Alerts is off', () => {
+  const { itemOn } = require('../static/alerts.js');
+  assert.equal(itemOn(false, [], 'co2'), false);
+  assert.equal(itemOn(true, [], 'co2'), true);
+  assert.equal(itemOn(true, ['co2'], 'co2'), false);
+  assert.equal(itemOn(true, ['co2'], 'rh'), true);
+});

@@ -124,7 +124,9 @@ def test_available_states(monkeypatch):
     assert alerts.available(req("https://homeair.up.railway.app/"), demo=True) == "demo"
     assert alerts.available(req("https://homeair.up.railway.app/"), reading=False) == "local"   # nothing to read: no checker
     monkeypatch.delenv("VAPID_PRIVATE_KEY")
-    assert alerts.available(req("https://homeair.up.railway.app/")) == "local"
+    assert alerts.available(req("https://homeair.up.railway.app/")) == "setup"   # online, no push keys
+    assert alerts.available(req("http://localhost:5555/")) == "local"
+    assert alerts.available(req("https://homeair.up.railway.app/"), reading=False) == "local"
 
 
 def test_gone_phone_next_to_a_sent_phone_keeps_what_was_sent(tmp_path):
@@ -281,6 +283,14 @@ def test_local_and_demo_refuse_writes(tmp_path, monkeypatch):
         "state": "local", "key": None, "phones": [], "max": store_module.MAX_PHONES}
     assert rt.store.listing() == [] and rt.pushed == []
 
+
+
+def test_online_without_push_keys_is_setup(tmp_path, monkeypatch):
+    rt = Routes(tmp_path, monkeypatch)
+    monkeypatch.delenv("VAPID_PRIVATE_KEY")   # online over HTTPS, a reading source, no push keys: the page says alerts aren't set up
+    assert rt.call("get", "/api/alerts").get_json() == {"state": "setup", "key": None, "phones": [], "max": store_module.MAX_PHONES}
+    assert rt.add().status_code == 403
+    assert rt.store.listing() == [] and rt.pushed == []
 
 def test_cross_origin_refused(rt):
     assert rt.add(Origin="https://evil.example").status_code == 403

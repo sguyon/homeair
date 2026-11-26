@@ -48,7 +48,8 @@ def _private_host(host):
 
 def available(request, demo=False, reading=True):
     """"online" (HTTPS on a public address, push keys set: phones can be added), "local" (this computer or the home
-    network: the page says to put Home Air online) or "demo". X-Forwarded-Proto is trusted for the HTTPS part only: a
+    network: the page says to put Home Air online), "setup" (HTTPS on a public address without push keys: the page says
+    alerts aren't set up) or "demo". X-Forwarded-Proto is trusted for the HTTPS part only: a
     forged header can't make a private address online, and it adds no phone by itself. Home Air with no reading source
     (`reading` False: no token and no monitor read on the Wi-Fi, so no checker runs) is "local" too: a phone added
     there would never get an alert."""
@@ -57,8 +58,8 @@ def available(request, demo=False, reading=True):
     if not reading:
         return "local"
     secure = request.is_secure or request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower() == "https"
-    if secure and not _private_host(request.host) and push_keys_set():
-        return "online"
+    if secure and not _private_host(request.host):
+        return "online" if push_keys_set() else "setup"
     return "local"
 
 

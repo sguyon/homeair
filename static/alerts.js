@@ -160,7 +160,20 @@
     return t ? `${day(p.since)}, ${t}` : day(p.since);
   }
 
-  const api = { qrMatrix, addedText };
+  // Where alerts can't run, the one line that says why: on the bell (for a screen reader) and at the top of the panel,
+  // whose rows are then all disabled. "local" is Home Air on this computer or the home network, "setup" online without
+  // push keys (alerts.available); any other value counts as "local", as the panel's state does.
+  const STATES = ['online', 'setup', 'local', 'demo'];
+  const WHY = { demo: 'Install Home Air for your own home first. This page is a demo.',
+    local: 'Set up Home Air on a server with HTTPS first: phones get alerts only from an HTTPS address.',
+    setup: 'Set up alerts first: the alert keys are missing.' };
+  const disabledWhy = st => (st === 'online' ? '' : WHY[st] || WHY.local);
+
+  // An action's switch shows on only while Allow Alerts is on (its switch, as drawn) and the action isn't muted. Display
+  // only: the saved choices stay as they are and show again once Allow Alerts is on.
+  const itemOn = (allowOn, muted, k) => !!allowOn && !muted.includes(k);
+
+  const api = { qrMatrix, addedText, disabledWhy, itemOn };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   Object.assign(root, { AlertsQR: api });
   if (typeof document === 'undefined') return;
@@ -247,6 +260,7 @@
   // The texts the panel shows.
   const T = {
     main: 'Allow Alerts', mainSub: 'On this phone only. Each phone has its own settings.',   // the iOS Settings label
+    mainSubComputer: 'On each phone, from Home Air on its Home Screen.',   // the disabled panel on a computer
     lead: 'Sent when it’s time to act: what to do, when and why.',
     stepsHead: 'First, add Home Air to the Home Screen',
     stepShare: 'Share', stepShareSub: 'In Safari’s bar, or under ··· if the bar is small',
@@ -271,23 +285,19 @@
     stop: 'A phone you remove gets one notification saying its alerts are off.',   // remove from any device
     remove: 'Remove', cancel: 'Cancel',
     removeLabel: (d, w) => `Remove ${d}, since ${w}`,   // the button's name for a screen reader
-    removeFailed: 'Home Air online did not answer. Tap Remove again.',
+    removeFailed: 'Home Air did not answer. Tap Remove again.',
     none: 'No phone has alerts on yet.',
-    count: k => (k === 1 ? '1 phone' : `${k} phones`),   // not in the review
+    count: k => (k === 1 ? '1 phone' : `${k} phones`),
     limit: k => `${k} phones have alerts, the most Home Air allows. Remove one below.`,
-    demo: 'Alerts need your own Home Air online. This page is a demo.',
-    localPhone: 'Alerts need Home Air online. Tell your coding agent: <b>“Put Home Air online.”</b>',
     old: 'Needs iOS 16.4 or later: Settings › General › Software Update.',
-    failed: 'Home Air online did not answer. Tap the switch again.',
+    failed: 'Home Air did not answer. Tap the switch again.',
     browser: 'Home Air can’t send alerts to this browser. On iPhone, open Home Air from its Home Screen icon; on Android, use Chrome.',   // a 400 "push service"
     tooMany: 'Too many tries. Try again in a minute.',   // a 429
     offFailed: 'Alerts are still on. Tap the switch again to turn them off.',
-    localTitle: 'Alerts need Home Air online',
-    localBody: 'Tell your coding agent: <b>“Put Home Air online.”</b> Then you can open Home Air on your phone from anywhere and turn on alerts there.',
     onlineTitle: 'Alerts go to your phone',
     scan: "Scan this code with your phone's camera. Add the page to the Home Screen, open it from there, then tap the bell and turn on alerts.",
     on1: 'Turned on', off1: 'Not turned on',
-    have: k => (k ? (k === 1 ? '1 phone has alerts' : `${k} phones have alerts`) : 'No phone has alerts'),   // not in the review
+    have: k => (k ? (k === 1 ? '1 phone has alerts' : `${k} phones have alerts`) : 'No phone has alerts'),
   };
 
   function load() {
@@ -301,7 +311,7 @@
   }
 
   const S = {
-    st: ['online', 'local', 'demo'].includes(APP.alerts) ? APP.alerts : 'local',
+    st: STATES.includes(APP.alerts) ? APP.alerts : 'local',
     key: null, phones: [], max: null, loaded: false,
     reg: load(),          // this phone's id and secret, and its choices
     view: 'main',         // or 'quiet'
@@ -317,6 +327,7 @@
   const quietOf = () => (shown() && Array.isArray(shown().quiet) ? shown().quiet : QUIET);
   const mutedOf = () => (shown() && Array.isArray(shown().muted) ? shown().muted : []);
   const registered = () => !!S.reg && (!S.loaded || S.phones.some(p => p.id === S.reg.id));
+  const shut = () => S.st !== 'online';   // the demo, "setup" or "local": the bell and the panel are drawn disabled
   const alertsOn = () => S.st === 'online' && registered() && perm() === 'granted';
   const full = () => S.limitHit || (S.max !== null && S.phones.length >= S.max);
 
@@ -329,7 +340,7 @@
       const r = await call('GET', '/api/alerts');
       if (!r.ok) return;
       const d = await r.json();
-      if (['online', 'local', 'demo'].includes(d.state)) S.st = d.state;
+      if (STATES.includes(d.state)) S.st = d.state;
       S.key = d.key || null; S.phones = Array.isArray(d.phones) ? d.phones : []; S.max = typeof d.max === 'number' ? d.max : null; S.loaded = true;
       if (S.reg && S.st === 'online' && !S.phones.some(p => p.id === S.reg.id)) { S.reg = null; S.want = null; save(); }   // removed on the server
       if (S.confirm && !S.phones.some(p => p.id === S.confirm)) S.confirm = null;
@@ -339,10 +350,12 @@
   // ---- the bell: its own round button, left of the Home menu ----
 
   function paintButton() {
-    const state = computer() ? 'neutral' : alertsOn() ? 'on' : 'off';   // a computer never gets alerts: the plain outline
+    // where alerts can't run: the crossed bell, as when alerts are off (it still opens the panel, which says why); a
+    // computer never gets alerts: the plain outline
+    const state = shut() ? 'dis' : computer() ? 'neutral' : alertsOn() ? 'on' : 'off';
     btn.className = `al-bell ${state}`;
-    btn.querySelector('svg').innerHTML = ICON[{ on: 'bellFill', off: 'bellOff', neutral: 'bell' }[state]];
-    btnState.textContent = computer() ? T.have(S.st === 'online' ? S.phones.length : 0) : alertsOn() ? T.on1 : T.off1;
+    btn.querySelector('svg').innerHTML = ICON[{ on: 'bellFill', off: 'bellOff', neutral: 'bell', dis: 'bellOff' }[state]];
+    btnState.textContent = shut() ? disabledWhy(S.st) : computer() ? T.have(S.st === 'online' ? S.phones.length : 0) : alertsOn() ? T.on1 : T.off1;
     btn.setAttribute('aria-expanded', dlg.open ? 'true' : 'false');
   }
 
@@ -371,9 +384,7 @@
     const showSteps = S.st === 'online' && !oldIos() && !installed();
     // why the switch can't be used: one line under it
     let block = '';
-    if (S.st === 'demo') block = T.demo;
-    else if (S.st === 'local') block = T.localPhone;
-    else if (oldIos()) block = T.old;
+    if (oldIos()) block = T.old;
     else if (!installed()) block = T.notYet;
     else if (perm() === 'denied') block = ANDROID ? T.refusedAndroid : T.refused;
     else if (!registered() && full() && !S.hasSub) block = T.limit(S.max || S.phones.length);   // a phone that had alerts takes its own place back
@@ -391,12 +402,28 @@
       const off = reg ? '' : ' off" inert="';
       const muted = mutedOf(), [a, b] = quietOf();
       const testLine = S.testFailed ? (S.testFailed === 'many' ? T.tooMany : T.testFailed) : IOS ? T.focus : '';
-      h += `<h3 class="al-gh">${T.sendFor}</h3><div class="al-grp${off}">${ITEMS.map(([k, n]) => row({ ic: k, label: n, act: 'item:' + k, sw: !muted.includes(k) })).join('')}</div>`
+      h += `<h3 class="al-gh">${T.sendFor}</h3><div class="al-grp${off}">${ITEMS.map(([k, n]) => row({ ic: k, label: n, act: 'item:' + k, sw: itemOn(on, muted, k) })).join('')}</div>`
         + `<div class="al-grp al-sep${off}">${row({ ic: 'moon', label: T.quiet, act: 'quiet', right: `<span class="al-val">${hour(a)}–${hour(b)}${I('r')}</span>` })}`
         + `${row({ ic: 'send', label: T.test, act: 'test', cls: 'act', dis: S.busy === 'test', busy: S.busy === 'test' })}</div>`
         + (testLine ? foot(testLine) : '');
     }
     return h + phonesGroup(reg);
+  }
+
+  // Where alerts can't run (the demo, "setup", "local"): the same panel on a phone and a computer, every row disabled and greyed,
+  // with one line on why at the top (DESIGN.md, "A missing or disabled part"). The phones Home Air lists, without
+  // Remove; none: the empty list's text.
+  function shutMain() {
+    const [a, b] = quietOf();
+    const phones = S.phones.length
+      ? S.phones.map(p => row({ ic: 'phone', label: esc(p.device), sub: T.since(addedText(p, S.phones)) })).join('')
+      : row({ label: T.none, cls: 'noic' });
+    return `<p class="al-why">${disabledWhy(S.st)}</p><div class="al-dis">`
+      + `<div class="al-grp">${row({ ic: 'bellOff', label: T.main, sub: computer() ? T.mainSubComputer : T.mainSub, act: 'toggle', sw: false, cls: 'main', dis: true })}</div>${foot(T.lead)}`
+      + `<h3 class="al-gh">${T.sendFor}</h3><div class="al-grp">${ITEMS.map(([k, n]) => row({ ic: k, label: n, act: 'item:' + k, sw: itemOn(false, [], k), dis: true })).join('')}</div>`
+      + `<div class="al-grp al-sep">${row({ ic: 'moon', label: T.quiet, act: 'quiet', right: `<span class="al-val">${hour(a)}–${hour(b)}${I('r')}</span>`, dis: true })}`
+      + `${row({ ic: 'send', label: T.test, act: 'test', cls: 'act', dis: true })}</div>`
+      + `<h3 class="al-gh">${T.phones}</h3><div class="al-grp">${phones}</div></div>`;
   }
 
   // A phone's Remove: red text that asks once, on its own row (Cancel or Remove), before anything is sent. Only these
@@ -444,10 +471,10 @@
     m.forEach((r, y) => r.forEach((on, x) => { if (on) d += `M${x + q} ${y + q}h1v1h-1z`; }));
     return `<svg class="al-qr" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="QR code for ${esc(location.host)}"><rect width="${n}" height="${n}" class="al-qr-bg"/><path d="${d}" class="al-qr-ink"/></svg>`;
   }
+  const closeX = () => `<button type="button" class="al-px" data-act="close" aria-label="Close">${I('x')}</button>`;
   function computerBody() {
-    const x = `<button type="button" class="al-px" data-act="close" aria-label="Close">${I('x')}</button>`;
-    if (S.st === 'local') return `<div class="al-ph"><h2 class="al-t" id="alerts-title">${T.localTitle}</h2>${x}</div><p class="al-p">${T.localBody}</p>`;
-    if (S.st === 'demo') return `<div class="al-ph"><h2 class="al-t" id="alerts-title">Alerts</h2>${x}</div><p class="al-p">${T.demo}</p>`;
+    const x = closeX();
+    if (shut()) return `<div class="al-ph"><h2 class="al-t" id="alerts-title">Alerts</h2>${x}</div>${shutMain()}`;   // the phone's panel, disabled
     const url = location.origin + '/';
     const list = S.phones.length
       ? S.phones.map(p => `<div class="al-ln"><span class="al-who">${esc(p.device)}<small>${T.since(addedText(p, S.phones))}</small></span>${removeButtons(p)}</div>`).join('')
@@ -472,12 +499,13 @@
   function render(anim) {
     const focused = dlg.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement.dataset.act || document.activeElement.dataset.q : null;
     if (computer()) {
+      dlg.classList.toggle('dis', shut());
       dlg.innerHTML = computerBody();
       place();
     } else {
       const keep = sc.scrollTop;
       nav.innerHTML = navHTML();
-      sc.innerHTML = S.view === 'quiet' ? quietBody() : phoneMain();
+      sc.innerHTML = S.view === 'quiet' ? quietBody() : shut() ? shutMain() : phoneMain();
       sc.scrollTop = anim ? 0 : keep;
       sc.classList.remove('in', 'out');
       if (anim && !reduced()) { void sc.offsetWidth; sc.classList.add(anim); }
