@@ -2,11 +2,20 @@
 import dataclasses
 import re
 
+import pytest
+
 import server
 
 
 def page(client, host="localhost"):
     return client.get("/", headers={"Host": host})
+
+
+@pytest.fixture(autouse=True)
+def answers_any_name(monkeypatch):
+    """These tests are about labels, not about which names a copy answers (test_serving.py): let a home copy answer
+    the public names used here."""
+    monkeypatch.setenv("HOME_AIR_HOSTS", "someone.up.railway.app,someone-dev.up.railway.app,x.example.com,example.com")
 
 
 def app_env(html):

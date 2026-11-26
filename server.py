@@ -4,6 +4,7 @@ import base64
 import gzip
 import hashlib
 import importlib
+import ipaddress
 import json
 import os
 import re
@@ -207,6 +208,49 @@ def version_assets(html):
     """Add ?v=<hash> to the page's CSS, JS, icons and manifest, so a changed file gets a new URL. Safari keeps
     home-screen icons per URL, so a new icon needs a new URL to show."""
     return re.sub(r'"(/static/[\w./-]+\.(?:css|js|png|svg)|/manifest\.json)"', lambda m: f'"{m.group(1)}?v={asset_version(m.group(1))}"', html)
+
+
+# Names a copy on a home network answers besides LOCAL_HOST's: the ones home routers hand out (.lan, .home.arpa,
+# .internal). None of them can be registered by an outside site.
+HOME_NETWORK_SUFFIXES = (".lan", ".home.arpa", ".internal")
+FOREIGN_HOST_MESSAGE = ("Home Air answers only its own addresses on this network. To reach it at {host}, add that name "
+                        "to HOME_AIR_HOSTS (a comma-separated list) in .env, then start Home Air again.\n")
+
+
+def _host_name():
+    """The Host header without its port, lowercased: "[::1]:5555" -> "::1", "Mac.local:5555" -> "mac.local"."""
+    host = (request.host or "").strip().lower()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _own_host(name):
+    """A name a web page on another site can't make the browser send. Such a page can point its own domain at this
+    computer (DNS rebinding) and read the answers, since the browser then treats them as that page's own. An address
+    typed as digits, a bare machine name, Bonjour's .local, Tailscale's ts.net and the home routers' names never
+    belong to an outside site; any other name must be listed in HOME_AIR_HOSTS."""
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    if LOCAL_HOST.match(name) or name.endswith(HOME_NETWORK_SUFFIXES):
+        return True
+    extra = {h.strip().lower() for h in os.environ.get("HOME_AIR_HOSTS", "").split(",") if h.strip()}
+    return name in extra
+
+
+@app.before_request
+def refuse_foreign_host():
+    """A copy on a home network refuses a name from another site (421, "sent to the wrong server"). A hosted copy
+    (Railway, Vercel) is on the internet already: its public name is the way in, so it answers any name."""
+    if token_setup.hosted():
+        return None
+    name = _host_name()
+    if _own_host(name):
+        return None
+    return Response(FOREIGN_HOST_MESSAGE.format(host=name), status=421, mimetype="text/plain")
 
 
 # Responses a browser gets gzipped when it asks: the page, CSS, JS, JSON, SVG and the manifest. Images are compressed already.
