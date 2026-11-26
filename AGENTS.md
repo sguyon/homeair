@@ -106,6 +106,16 @@ pytest -q -n auto --dist loadgroup && node --test tests/*.test.mjs
 
 Both must pass before a commit. While iterating, run only the tests the change touches (`pytest tests/test_x.py -x -q`). `-n auto` needs `pytest-xdist` (in `requirements-dev.txt`). A bare `pytest` runs `tests/` only (`pytest.ini`).
 
+## Commits
+
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `type(scope): summary`.
+
+- `type`: `feat` (something new for the owner), `fix`, `docs`, `refactor`, `test`, `chore` (build, tools, dependencies).
+- `scope`: the part of Home Air (`alerts`, `summary`, `setup`, `sky`, `agent`, `readme`).
+- `summary`: lowercase, no full stop, under 72 characters, what changes for the owner.
+- Body, when needed: at most 3 short lines on why. No list of every change: the diff, the docs and the tests have them.
+- A change that breaks an existing install (a setting renamed, a command removed) gets `!` after the scope and a `BREAKING CHANGE:` line.
+
 ## The demo moments are the test fixtures
 
 The demo's three moments (`demo/moments.py`: `rush`, `clear`, `humid`, at `?moment=`) are made-up data tuned so the rules tell each story, and `tests/test_demo.py` pins what each one says. A change to the page or the rules that changes a story updates the moments and their tests in the same commit, so the demo keeps showing what the app does. Three hidden moments (`indoor-near`, `indoor-model`, `outdoor-only`) cover homes with one monitor and are pinned the same way; they're reachable only at `?moment=`, not in the top area's samples. `scripts/screenshot.sh` takes the README's images from the demo.
