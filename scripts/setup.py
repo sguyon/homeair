@@ -6,6 +6,7 @@ The railway command transfers saved settings through stdin. --live checks a runn
 --agent on links the Home Air skill into the agent's skills folders; off removes only those links.
 """
 import argparse
+import base64
 import contextlib
 import io
 import json
@@ -23,6 +24,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -56,7 +59,7 @@ CITY_KEYS = ("city", "town", "village", "hamlet")
 NORTHEAST = {"CT": "Connecticut", "ME": "Maine", "MA": "Massachusetts", "NH": "New Hampshire", "RI": "Rhode Island",
              "VT": "Vermont", "NY": "New York", "NJ": "New Jersey", "PA": "Pennsylvania"}  # normalize known state codes.
 NOT_FOUND = "Couldn't find that address. Try a nearby landmark with its city, or pass --lat and --lon from a map app."
-KEY_NAMES = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY")  # the only keys transferred to Railway.
+KEY_NAMES = ("AIRGRADIENT_TOKEN", "GOOGLE_POLLEN_API_KEY", "VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY")  # the only keys transferred to Railway.
 STATUS_TIMEOUT = 15  # seconds for --status's one readings request: AirGradient took 7 s to connect on 2026-11-13, and 5 s read that as a refused token.
 RUN = "scripts/run.sh"  # how ./homeair runs every script: uv, else installing uv, else Python 3.11+ (the uv ladder).
 SERVER_CMD = f"{RUN} server.py"
@@ -309,6 +312,24 @@ def prepare_env(root):
     if not any(defines(line, "AIRGRADIENT_TOKEN") for line in text.splitlines()):
         write_env_key(path, "AIRGRADIENT_TOKEN", "")
     path.chmod(ENV_FILE_MODE)
+    ensure_push_keys(root)
+
+
+def ensure_push_keys(root):
+    """Make the phone alerts' VAPID pair once. The private key is its 32 raw bytes and the public key the uncompressed
+    point, both base64url on one line: the forms pywebpush and the browser's applicationServerKey take directly."""
+    path = root / ".env"
+    keys = saved_keys(root)
+    if env_key("VAPID_PRIVATE_KEY", keys) and env_key("VAPID_PUBLIC_KEY", keys):
+        return
+    key = ec.generate_private_key(ec.SECP256R1())
+    private = key.private_numbers().private_value.to_bytes(32, "big")
+    public = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+    write_env_key(path, "VAPID_PRIVATE_KEY", b64(private))
+    write_env_key(path, "VAPID_PUBLIC_KEY", b64(public))
+    path.chmod(ENV_FILE_MODE)
+    print("Alert keys ready")
 
 
 class AirGradientSlow(SetupError):

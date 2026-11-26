@@ -5,7 +5,7 @@ For access away from home, use Railway. For a home server or NAS, use Docker Com
 ## What each host reads
 
 - **This computer, and a home server with Docker:** the monitors on your Wi-Fi, directly, one reading a minute, with no AirGradient API token. They keep their own history of the readings (`history.sqlite`). A token is optional there: it adds the monitors' cloud ids, fills the last 7 days of history, and is the fallback if a monitor stops answering.
-- **Railway, or any host online:** AirGradient's cloud only. Home Air online can't read the monitors on your Wi-Fi, so it needs the AirGradient API token, shows readings up to 5 minutes old, and keeps no history of its own (charts come from AirGradient's cloud). A home without a token adds one first, on its computer's page ([SETUP.md](SETUP.md)); `./homeair railway` refuses to send a home that has none, and leaves the monitors' Wi-Fi addresses out of what it sends.
+- **Railway, or any host online:** AirGradient's cloud only. Home Air online can't read the monitors on your Wi-Fi, so it needs the AirGradient API token, shows readings up to 5 minutes old, and keeps no history of its own (charts come from AirGradient's cloud). Alerts on a phone ([docs/optional.md](docs/optional.md#alerts-on-your-phone)) keep each phone's settings in a small file (`alerts.sqlite`) in `/data`: on Railway that needs a volume, added below. A home without a token adds one first, on its computer's page ([SETUP.md](SETUP.md)); `./homeair railway` refuses to send a home that has none, and leaves the monitors' Wi-Fi addresses out of what it sends.
 
 ## Railway
 
@@ -15,9 +15,9 @@ Prepare `config.toml` with [SETUP.md](SETUP.md). The helper below, `./homeair ra
 
 `railway init` links the current folder to the new project, and every later `railway` command here uses that link. Run from a folder that has no link yet: `railway status` should say there is no linked project. A folder already linked to another project (a copy of this repo you deploy elsewhere) would send the code to the wrong one; use a fresh clone. With several workspaces, `init` asks which one, or pass `--workspace <name>`. Before the first command that changes Railway, ask once and wait for the yes, with a question tool if you have one (two answers: “Yes, deploy to Railway” and “No, cancel”), and add nothing else around it:
 
-> Deploying to Railway bills your account, and anyone with the link will be able to see your readings and your home's rounded location.
+> Deploying to Railway bills your account (the volume that keeps your phones' alert settings is billed by Railway too), and anyone with the link will be able to see your readings and your home's rounded location.
 >
-> Confirm: create a project and service called homeair in your Railway account, send it your settings and AirGradient API token, deploy the app and create its public address.
+> Confirm: create a project and service called homeair in your Railway account, add a volume at `/data`, send it your settings, AirGradient API token and alert keys, deploy the app and create its public address.
 >
 > 1. Yes, deploy to Railway
 > 2. No, cancel
@@ -27,7 +27,12 @@ After that yes, run every step below without asking again; only removing it is a
 ```bash
 railway init --name homeair
 railway add --service homeair
+railway service link homeair
+railway volume add --mount-path /data
+railway variable set RAILWAY_RUN_UID=0 --service homeair --skip-deploys
 ```
+
+The volume keeps `alerts.sqlite` (each phone's alerts, and what was sent to it) across deploys; without it, every deploy turns the alerts off on every phone. The image already sets `HISTORY_FILE=/data/history.sqlite`, and the alerts' file sits in the same folder. Railway creates volumes owned by root. `RAILWAY_RUN_UID=0` lets Home Air write to `/data` ([Railway's volumes reference](https://docs.railway.com/volumes/reference)). Home Air online reads history from AirGradient's cloud; the volume stores the alert database. Keep app sleeping off: alerts need the app running to check every 2 minutes.
 
 `railway list` should show the project once; if the name appears twice, delete only the one you made, by its ID (see removing it below).
 
@@ -39,7 +44,7 @@ Send settings using the helper:
 ./homeair railway --service homeair
 ```
 
-It sends `CONFIG_TOML` from `config.toml` and each set key from `.env` through stdin, and prints only the names sent. Neither private file is uploaded with the code. It sets them without starting a deploy (`--skip-deploys`), so no empty or failing deploy starts before the code is up; the next step deploys with all of them. To set one variable yourself the same way, add `--skip-deploys` to `railway variable set`.
+It sends `CONFIG_TOML` from `config.toml` and each set key from `.env` (the AirGradient token, the pollen key and the two alert keys) through stdin, and prints only the names sent. Neither private file is uploaded with the code. It sets them without starting a deploy (`--skip-deploys`), so no empty or failing deploy starts before the code is up; the next step deploys with all of them. To set one variable yourself the same way, add `--skip-deploys` to `railway variable set`.
 
 Deploy:
 
@@ -89,6 +94,6 @@ To open it from a phone on the same network, change the Compose port line to `"8
 
 Home Air at home answers only names that no website can own: an address typed as digits, the server's own name (`nas`, `nas.local`, `nas.lan`, `nas.home`, `nas.fritz.box`) and a Tailscale name (`….ts.net`). Any other name gets "421": this stops a website from pointing its own name at your server and reading the page. To open it under your own domain name (behind a reverse proxy), add that name to `.env`, for example `HOME_AIR_HOSTS=air.example.com` (several names: separated by commas), then run `docker compose up -d --force-recreate`.
 
-The history of the readings (`history.sqlite`) and the monitors' last known addresses (`local-addresses.json`) are kept in the Docker volume `homeair-history`, mounted at `/data`: they survive `--force-recreate` and a new image. `docker compose down -v` deletes them. With a token, the container fills the last 7 days from the cloud when it starts.
+The history of the readings (`history.sqlite`) and the monitors' last known addresses (`local-addresses.json`) are kept in the Docker volume `homeair-history`, mounted at `/data`: they survive `--force-recreate` and a new image. `docker compose down -v` deletes them. With a token, the container fills the last 7 days from the cloud when it starts. The same volume keeps `alerts.sqlite`, the phones' alert settings. For phone alerts, make Home Air on your home server available at an HTTPS address.
 
 After config or `.env` changes: `docker compose up -d --force-recreate` (recreation reloads environment variables). After pulling code: `docker compose up -d --build`. These restart your own container: say so, no extra OK.

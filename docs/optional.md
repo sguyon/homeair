@@ -53,6 +53,17 @@ Also create a billing budget alert in the project's Billing → Budgets & alerts
 
 The optional `[[pollen_seasons]]` blocks in `config.example.toml` show typical northeastern US dates. Copy them only if they fit the home; elsewhere use local typical dates and say where they came from. They are a calendar, not a forecast.
 
+## Alerts on your phone
+
+Phone alerts use Web Push, which needs Home Air at an HTTPS address: online on Railway ([DEPLOYMENT.md](../DEPLOYMENT.md#railway)) or on a home server behind HTTPS. Without the push keys (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` in `.env`), the Alerts panel says alerts need Home Air online, and nothing is sent.
+
+- Keys: `./homeair setup` writes them to `.env`; `./homeair railway --service <name>` transfers them after approval.
+- Railway: a volume at `/data` keeps `alerts.sqlite` (each phone's subscription and choices) across deploys ([DEPLOYMENT.md](../DEPLOYMENT.md#railway)).
+- iPhone: iOS 16.4 or later, with Home Air added to the Home Screen from Safari and opened from that icon (Web Push works only for Home Screen web apps). Android: Chrome.
+- Checks run every 2 minutes through the page's caches: with a token, Home Air reads the cloud as if the page were open all day ([api-usage.md](api-usage.md)).
+
+Privacy: alerts reach the phone through its push service, encrypted so the service can't read them ([how](https://web.dev/articles/push-notifications-web-push-protocol)). `alerts.sqlite` keeps each phone's push address and choices, and no readings.
+
 ## The road
 
 In this version the road is off for new homes: `./homeair setup` leaves the `[road]` section out. The page then has no road, no rush-hour rule and no exhaust on the map.

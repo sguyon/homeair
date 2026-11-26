@@ -46,9 +46,11 @@ A home read on the Wi-Fi makes none of these: its two monitors make 2,880 reads 
 
 | Use | Token calls | Map calls with Nearby on |
 |---|---|---|
-| Nobody has it open | 0 | 0 |
+| Nobody has it open (with no phone's alerts on) | 0 | 0 |
 | Opened about 10 times | about 50 | at most 10 area searches (about 60 KB) |
 | On screen all day | at most about 900 | at most 96 area searches (about 560 KB) |
+
+With phone alerts on, Home Air reads the cloud as if the page were on screen all day, even when nobody opens it: it checks every 2 minutes, through the same 5-minute cache.
 
 A thousand homes that each open the app 10 times a day make about 35 token calls a minute, plus about 7 area searches a minute with Nearby on.
 

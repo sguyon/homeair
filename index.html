@@ -72,6 +72,7 @@
     </details><span class="wx-mode" id="wx-mode" hidden><button type="button" class="wx-b" id="wx-fs" aria-pressed="false" aria-label="Full screen" title="Full screen"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button type="button" class="wx-b wx-exit" id="wx-exit" title="Show the page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg><span>Show page</span></button></span></div>
     </div>
     <div class="bar">
+      <button type="button" class="al-bell off" id="alerts-btn" aria-label="Alerts" aria-haspopup="dialog" aria-expanded="false" aria-describedby="alerts-btn-state"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 9.5-4.9M18 9c0 6 2.5 7.5 2.5 7.5h-13"/><path d="M10 20a2 2 0 0 0 4 0"/><path d="M3 3l18 18"/></svg></button><span id="alerts-btn-state" hidden></span>   <!-- the Alerts bell, its own button left of the Home menu (static/alerts.js) -->
       <details class="custom">
       <summary class="custom-top">
         <span class="who"><span class="avatar" id="avatar" role="img" aria-label="Home · 2 monitors live · 5 sources" data-tip="2 monitors live · 5 sources"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><i class="av-dot good" id="dot-sum"></i></span><span class="home" id="home-place"><b data-app="home-name">Home</b><em data-app="place"></em></span><svg class="i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
@@ -171,9 +172,12 @@
   <p class="devbar" id="devbar" hidden><span id="build"></span> · <button type="button" id="clear-cache">Clear cache</button></p>
 </div>
 
+<dialog class="al-panel" id="alerts-panel" aria-labelledby="alerts-title"></dialog>   <!-- the Alerts panel: static/alerts.js fills it -->
+
 <script src="/static/summary.js"></script>
 <script src="/static/home.js"></script>
 <script src="/static/picker.js"></script>
+<script src="/static/alerts.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/sky-glass.js"></script>
 <script src="/static/sky-wet.js"></script>

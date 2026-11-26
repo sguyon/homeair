@@ -1281,7 +1281,13 @@ if ('serviceWorker' in navigator) {
     // Local development: drop any old worker so edits show up on refresh.
     navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
   } else {
-    navigator.serviceWorker.register('/sw.js').then(reg => setInterval(() => reg.update(), 60 * 60 * 1000))
+    // Check for a new worker at once and whenever the page comes back, not only hourly: a Home Screen app can stay open
+    // for days, and a phone kept an old worker (alerts debugging, 25 Nov).
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+      setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    })
       .catch(err => console.error('Service worker registration failed:', err));
   }
 }

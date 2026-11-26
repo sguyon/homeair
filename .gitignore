@@ -56,4 +56,6 @@ PRODUCT.md
 
 # the home's own history of local readings (history_store.py)
 /history.sqlite*
+# the phones that get alerts, and what was sent to them (alert_store.py)
+/alerts.sqlite*
 /local-addresses.json
