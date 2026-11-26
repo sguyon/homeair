@@ -131,10 +131,12 @@ html.sky-wet-dragging body { -webkit-user-select: none; user-select: none; }
 }
 /* End outdoor air (smoke, exhaust, fine particles, pollen). */
 
-/* Let the header escape the page's stacking context, above foreground air and lightning (20).
-   Cards retain their own contexts below those effects; opaque controls keep their token contrast. */
+/* The header (the sky line's words, the wind, the display and Home controls, the bell) escapes the page's stacking
+   context just under the foreground air and lightning (20), so the opening's specks cross it as they cross the cards
+   (Sacha, 26 Nov: "still some elements on top of the animations like the bqe exhaust and wind and alert buttons"). It
+   stays above the cards, so its menus open over them; the effects never take a tap (pointer-events: none). */
 html.sky-glass .page { z-index: auto; }
-html.sky-glass .now-bar { z-index: 21; }
+html.sky-glass .now-bar { z-index: 19; }
 
 /* Controller and sky-line controls. These are opaque controls with their own material,
    above the effects; no glyph masks or rectangles removed from a renderer. */
@@ -148,6 +150,17 @@ html.sky-glass[data-theme] .now-bar #sky-cap :is(.cap-i, .cap-tag) {
   background: rgb(var(--glass-rgb)) !important; color: var(--glass-ink) !important;
   text-shadow: none !important; -webkit-text-stroke: 0; transition: none;
 }
+/* In the opening the chips and the Alerts bell take the air's colour like the glass cards (sky-glass.js castChips). */
+html.sky-glass.sky-air-cast[data-theme] .now-bar #sky-cap :is(.cap-i, .cap-tag) { background: rgb(var(--glass-air-rgb)) !important; border-color: var(--glass-air-edge); }
+html.sky-glass.sky-air-cast .now-line .dsp-top .sky-quick:not(.off) { background: rgb(var(--glass-air-rgb)) !important; }
+/* The drawings take the air too: the monitor scenes and the device drawings, multiplied by its colour (an SVG filter
+   sky-glass.js keeps up to date), so whites turn the glass's tan and lines stay dark. The status dots and the PM2.5
+   ring keep their colours: those colours carry meaning. */
+html.sky-glass.sky-air-cast :is(.mc-head > svg, .mc-hw svg, .vhw:not(.off) svg) { filter: url(#sky-air-veil) !important; }   /* over app.css's filter: none !important on the device drawings */
+/* The Home pill's status dots are ringed in the pill's own glass colour (it follows the opening's tint), not the page's
+   white card colour (Sacha, 26 Nov: "the border around the green dots here still are not under the effect"). */
+html.sky-glass .bar .custom-top :is(.av-dot, .vhw i) { box-shadow: 0 0 0 2px var(--glass-surface); }
+html.sky-glass.sky-air-cast .now-bar .al-bell { background: rgb(var(--glass-air-rgb)); border-color: var(--glass-air-edge); transition: none; }   /* the colour follows each frame of the opening */
 .now-bar #sky-cap .cap-air {
   font: inherit; line-height: inherit; text-align: start; white-space: normal;
   border: 1px solid var(--glass-edge); cursor: pointer; min-block-size: 28px;

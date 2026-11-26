@@ -10,7 +10,12 @@ var SkyGlass = (() => {
   const SURFACES = '.sum-card, .card:not(.off, .mc-ghost, .hist-off, .no-token-card), .bar .custom-top, .now-line .dsp-top';
   const TRANSIENT = '.sx-tip, .sx-hv, [data-chart-scrub]';
   const SCRUB_READOUT = '[data-chart-scrub="readout"]';
-  const MATERIAL_PROPERTIES = ['--glass-tint', '--glass-alpha', '--glass-surface', '--glass-backdrop'];
+  const MATERIAL_PROPERTIES = ['--glass-tint', '--glass-alpha', '--glass-surface', '--glass-backdrop', '--glass-edge', '--glass-sheen'];
+  // The cards' rim and top highlight in the pass: they take this share of the air's glass colour, at the theme's own opacities
+  // [light, dark] (app.css --glass-edge, --glass-sheen), so no white line rings tinted glass (Sacha, 26 Nov: "the border/bevel
+  // around the cards should also have the tint").
+  const EDGE_AIR_SHARE = .85, EDGE_ALPHA = [.55, .10], SHEEN_ALPHA = [.55, .07];
+  const VEIL_DARK_MAX = 225; // sRGB channel: a dark theme's air tint is scaled so its brightest channel is this, for the drawings' veil.
   const FILM_ROLES = ['row', 'open', 'highlight', 'meter', 'past']; // CSS token suffixes; bound inner films drawn behind card text, including SVG past-area fill.
   // Outdoor air (smoke, exhaust, pollen): all animation tuning is in CSS px, milliseconds or unitless shares.
   // The pass follows the picked prototype's timeline (mock 109 round 3, glass3.js): over the words for about a second, then a slow fade.
@@ -54,6 +59,9 @@ var SkyGlass = (() => {
   const EXHAUST_FRONT_ALPHA = .5; // share of the plume over the words in the opening: soft enough to read through.
   const EXHAUST_SKY_HOLD = .45; // opacity share of the plume behind the glass once settled.
   const EXHAUST_MAP_EDGE = .3; // share of the sunlit edge in the map plume's colour (the body, a little lighter).
+  // The plume's colour over the whole sky, behind the glass: this opacity share at the road's side and at the far side, so the
+  // sky around the cards takes the exhaust too (Sacha, 26 Nov: "the effect/colors only shows in the cards not the background").
+  const PLUME_WASH = [.62, .28];
   const PLUME_PUFFS = 16, PLUME_GLOW = [1, .65, .9]; // billows riding the wind; the glow's opacity at the road's edge and midway, and its reach (share of the diagonal).
   const SOOT_COUNT = [1, 200, 700], SOOT_NEAR = .18; // specks per CSS px of width, min, max; share near (soft and larger).
   const SOOT_FRONT = [250, 2600, 1400], SOOT_WORD_DIM = .5; // ms: in front of the cards they fade in, stay until 2.6 s, then fade over 1.4 s; half strength over words.
@@ -473,6 +481,10 @@ var SkyGlass = (() => {
       if (alpha < .003 || !plume) return;
       const a = alpha * plume.k, reach = ease(t / (isFront ? 900 : 1200)), { origin: o, dx, dy, L, speed } = plume, sec = t / 1000, m = Math.min(W, H);
       if (!isFront) {
+        const wash = ctx.createLinearGradient(o.x, o.y, W - o.x, H - o.y);   // from the road's side to the opposite edge
+        wash.addColorStop(0, rgba(colour('exhaust', 'body'), a * PLUME_WASH[0] * (.4 + .6 * reach)));
+        wash.addColorStop(1, rgba(colour('exhaust', 'edge'), a * PLUME_WASH[1] * reach));
+        ctx.fillStyle = wash; ctx.fillRect(0, 0, W, H);
         const rg = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, L * PLUME_GLOW[2] * (.3 + .7 * reach));
         rg.addColorStop(0, rgba(colour('exhaust', 'foot'), a * PLUME_GLOW[0])); rg.addColorStop(.4, rgba(colour('exhaust', 'body'), a * PLUME_GLOW[1]));
         rg.addColorStop(1, rgba(colour('exhaust', 'edge'), 0)); ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
@@ -909,6 +921,8 @@ var SkyGlass = (() => {
       airAlphaMax() { const theme = dark() ? 1 : 0; return Math.max(0, ...conditions.map(c => AIR_GLASS_ALPHA[c.kind][theme])); },
       // How far the pass has taken the cards from the everyday glass toward their verified air material: 0 once settled.
       glassCast() { return glassRun() ? cast : 0; },
+      // The pass's air colour for the glass (the shown kind's tint), or null when no pass lends one.
+      airTint() { const shown = glassRun(); return shown ? palette[shown.kind].tint : null; },
       materialColor(base) {
         const shown = glassRun();
         return shown ? over(base, palette[shown.kind].tint, cast) : base;
@@ -1120,6 +1134,45 @@ var SkyGlass = (() => {
     }
     // A card's colour now: its everyday glass, with its verified share of what the pass lends (none once settled).
     const lent = material => outdoor && material.airShare ? over(material.rgb, outdoor.materialColor(material.rgb), material.airShare) : material.rgb;
+    // The sky line's chips and the Alerts bell are opaque, not glass: in the pass they take the same air colour over the
+    // theme's glass (html.sky-air-cast, --glass-air-rgb, --glass-air-edge in sky-air.css), so none stays white among tinted cards.
+    let chipBase = null, veilMatrix = null;
+    function veilFilter(rgb) {
+      if (!veilMatrix) {
+        if (typeof document.createElementNS !== 'function' || !document.body) return;
+        const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), filter = document.createElementNS(ns, 'filter');
+        svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
+        svg.style.position = 'absolute'; svg.style.pointerEvents = 'none';
+        filter.setAttribute('id', 'sky-air-veil'); filter.setAttribute('color-interpolation-filters', 'sRGB');
+        veilMatrix = document.createElementNS(ns, 'feColorMatrix'); veilMatrix.setAttribute('type', 'matrix');
+        filter.appendChild(veilMatrix); svg.appendChild(filter); document.body.appendChild(svg);
+      }
+      const [r, g, b] = rgb.map(v => Math.round(v / 255 * 1000) / 1000);
+      const values = `${r} 0 0 0 0 0 ${g} 0 0 0 0 0 ${b} 0 0 0 0 0 1 0`;
+      if (veilMatrix.getAttribute('values') !== values) veilMatrix.setAttribute('values', values);
+    }
+    function castChips(cast) {
+      const root = document.documentElement, on = cast > .001 && !!outdoor && !!outdoor.airTint();
+      if (!on) {
+        if (root.classList.contains('sky-air-cast')) {
+          root.classList.remove('sky-air-cast');
+          for (const key of ['--glass-air-rgb', '--glass-air-edge']) root.style.removeProperty(key);
+        }
+        return;
+      }
+      const theme = api.dark && api.dark() ? 1 : 0;
+      if (!chipBase || chipBase.theme !== theme) chipBase = { theme, rgb: parse(getComputedStyle(root).getPropertyValue('--glass-rgb') || '255 255 255') || [255, 255, 255] };
+      const tint = outdoor.materialColor(chipBase.rgb.slice(0, 3)).map(Math.round), edge = over([255, 255, 255], tint, cast * EDGE_AIR_SHARE).map(Math.round);
+      root.style.setProperty('--glass-air-rgb', tint.join(' '));
+      root.style.setProperty('--glass-air-edge', `rgb(${edge.join(' ')} / ${EDGE_ALPHA[theme]})`);
+      // The drawings (monitor scenes and devices) are multiplied by the air's colour through an SVG filter (#sky-air-veil):
+      // whites turn the glass's tan, lines stay dark, and nothing around them changes. A dark theme's tint is scaled up
+      // first, so the drawings warm without blackening.
+      const air = outdoor.airTint(), lift = theme ? VEIL_DARK_MAX / Math.max(1, ...air) : 1;
+      const veil = over([255, 255, 255], air.map(v => Math.min(255, v * lift)), cast);
+      veilFilter(veil);
+      root.classList.add('sky-air-cast');
+    }
     // Cached, verified tint/alpha pairs only: animation never scans text or runs the contrast solver.
     function applyAirMaterial() {
       const sky = api.sky(), { H } = api.size(), cast = outdoor ? outdoor.glassCast() : 0;
@@ -1133,7 +1186,14 @@ var SkyGlass = (() => {
         el.style.setProperty('--glass-alpha', String(Math.round(alpha * 1000) / 1000));
         el.style.setProperty('--glass-tint', rgb.map(Math.round).join(' '));
         el.style.setProperty('--glass-surface', `rgb(${apparent.join(' ')})`);
+        if (cast > .001) {
+          const edge = over([255, 255, 255], rgb, cast * EDGE_AIR_SHARE).map(Math.round);
+          const theme = api.dark && api.dark() ? 1 : 0;
+          el.style.setProperty('--glass-edge', `rgb(${edge.join(' ')} / ${EDGE_ALPHA[theme]})`);
+          el.style.setProperty('--glass-sheen', `rgb(${edge.join(' ')} / ${SHEEN_ALPHA[theme]})`);
+        } else if (el.style.getPropertyValue('--glass-edge')) { el.style.removeProperty('--glass-edge'); el.style.removeProperty('--glass-sheen'); }
       }
+      castChips(cast);
     }
     function schedule() { if (!destroyed && !paused && !frame) frame = requestAnimationFrame(render); }
     function redraw() { materialDirty = true; if (outdoor) outdoor.redraw(); schedule(); }
