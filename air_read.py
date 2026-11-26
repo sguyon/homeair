@@ -3,6 +3,7 @@
 import math
 from datetime import timedelta
 
+import road_timing
 import sources
 import summary as summary_rules
 from config import bearing_in
@@ -106,6 +107,75 @@ def active_road():
     return runtime.ROAD
 
 
+def home_roads():
+    """The home's roads, the hand-set [road] first, then [[roads]] in file order (on or off). A seam demo/data.py
+    replaces: a public monitor's page has none."""
+    return runtime.CFG.roads if runtime.CFG else ()
+
+
+def _wind_hours(at, weather):
+    """Current wind at `at` and Open-Meteo's hourly wind ({"time", "wind_dir", "wind_kmh"}, in at's timezone),
+    plus real sunrises by local date, excluding polar placeholders."""
+    tz = at.tzinfo
+    hw, daily = weather.get("hourly") or {}, weather.get("daily") or {}
+    col = lambda name, k: (hw.get(name) or [])[k] if k < len(hw.get(name) or []) else None
+    hourly = [{"time": sources._local(t, tz), "wind_dir": col("wind_direction_10m", k), "wind_kmh": col("wind_speed_10m", k)}
+              for k, t in enumerate(hw.get("time") or [])]
+    rises, sets = ([sources._local(t, tz) if t else None for t in daily.get(key) or []]
+                   for key in ("sunrise", "sunset"))
+    sunrises = {s.date(): s for s in road_timing.real_sunrises(rises, sets)}
+    current = weather.get("current") or {}
+    if current.get("wind_direction_10m") is not None and current.get("wind_speed_10m") is not None:
+        hourly.append({"time": at, "wind_dir": current["wind_direction_10m"], "wind_kmh": current["wind_speed_10m"]})
+    return hourly, sunrises
+
+
+def roads_now(at, weather, roads=None):
+    """For each road with `on`, in selection order: {"road": RoadEntry, "reaching", "strength", "why", "until"} at the
+    local time `at`, from Open-Meteo's answer (current wind, hourly wind, daily sunrise). The one flag behind the traffic
+    action, the run action, /api/context and the live sky. `until` only for a road reaching now. `roads`: the config's
+    roads (Config.roads); home_roads() by default."""
+    roads = [r for r in (home_roads() if roads is None else roads) if r.on]
+    current = weather.get("current") or {}
+    hourly, sunrises = _wind_hours(at, weather)
+    out = []
+    for road in roads:
+        row = road_timing.road_now(road, at, current.get("wind_direction_10m"), current.get("wind_speed_10m"),
+                                   road_timing.sunrise_for(at, sunrises.values()))
+        out.append({"road": road, **row, "until": road_timing.road_until(road, at, hourly, sunrises) if row["reaching"] else None})
+    return out
+
+
+STRENGTH_ORDER = {"peak": 0, "high": 1, "low": 2}   # the live sky reads the road that matters most first
+
+
+def sky_order(rows):
+    """roads_now's rows for the live sky: roads reaching now first, then peak, high, low; selection order within a tie."""
+    return sorted(rows, key=lambda row: (not row["reaching"], STRENGTH_ORDER[row["strength"]]))
+
+
+def reaching_until(at, weather, rows):
+    """While a road reaches the home now (roads_now's rows): the first wind change, busy-hour end or sunrise when no road that is on reaches,
+    one that starts reaching later included; None when none reaches now, or as road_timing.all_until."""
+    if not any(row["reaching"] for row in rows):
+        return None
+    hourly, sunrises = _wind_hours(at, weather)
+    return road_timing.all_until([row["road"] for row in rows], at, hourly, sunrises)
+
+
+def run_road(rows, at):
+    """The first road reaching the home now inside its slow or busy hours (a road without a hand-set rush, which
+    rush_state times): {"name", "why", "end"}, `end` the hour that window ends; None without one."""
+    h = at.hour + at.minute / 60
+    for row in rows:
+        if row["reaching"] and row["why"] in ("slow", "busy"):
+            windows, _ = road_timing.busy_windows(row["road"], at.weekday() < 5)
+            end = next((b for a, b in windows if a <= h < b), None)
+            if end is not None:
+                return {"name": row["road"].name, "why": row["why"], "end": end}
+    return None
+
+
 def road_traffic(hour, wind_direction):
     """How much the road's traffic weighs on home at this hour: its rush, and whether the wind carries its exhaust here.
 
@@ -192,12 +262,14 @@ def rush_state(hour):
     return {"in_rush": False, "name": name, "start": start, "end": end, "tomorrow": not later}
 
 
-def verdict(word, tone, text, action=None):
-    """action is the short imperative used in the lead when this verdict needs doing."""
-    return {"word": word, "tone": tone, "text": text, "action": action}
+def verdict(word, tone, text, action=None, why=None):
+    """action is the short imperative used in the lead when this verdict needs doing; why, the run action's reason."""
+    return {"word": word, "tone": tone, "text": text, "action": action, "why": why}
 
 
-def rule_run(outdoor_pm, smoke, rush, wind_toward, hour):
+def rule_run(outdoor_pm, smoke, rush, wind_toward, hour, road_run=None):
+    """The run verdict. `rush` and `wind_toward` are the hand-set road's (rush_state, road_traffic); `road_run` the first
+    road written at setup reaching now in its busy hours (run_road), used when the hand-set road says nothing."""
     if outdoor_pm is None:
         return verdict("No reading", "muted", "The outdoor monitor has not reported, so there is no run answer.")
     pm = fmt_num(outdoor_pm)
@@ -209,7 +281,13 @@ def rule_run(outdoor_pm, smoke, rush, wind_toward, hour):
     base = f"Outdoor PM2.5 is {pm} µg/m³, under {runtime.PM_FINE}."
     if rush["in_rush"] and wind_toward:
         return verdict(f"After {fmt_hour(rush['end'])}", "warn",
-                       f"{base} The {runtime.ROAD.name} {rush['name']} rush runs until {fmt_hour(rush['end'])} with the wind toward {home_name()}, so run after that.")
+                       f"{base} The {runtime.ROAD.name} {rush['name']} rush runs until {fmt_hour(rush['end'])} with the wind toward {home_name()}, so run after that.",
+                       why=f"The {runtime.ROAD.name} rush runs until {fmt_hour(rush['end'])}, with the wind toward {home_name()}.")
+    if road_run:
+        end, name = fmt_hour(road_run["end"]), road_run["name"][:1].upper() + road_run["name"][1:]
+        why = (f"{name} is slow until {end}, with the wind toward {home_name()}." if road_run["why"] == "slow" else
+               f"{name}’s traffic is busy until {end}, with the wind toward {home_name()}.")
+        return verdict(f"After {end}", "warn", f"{base} {why[:-1]}, so run after that.", why=why)
     if hour >= RUN_NIGHT[0] or hour < RUN_NIGHT[1]:
         windows = rush_hours()
         return verdict("Fine", "good", f"{base} Tonight is fine, and so is the morning before the {fmt_hour(windows[0][0])} rush."
@@ -298,7 +376,8 @@ def summary_inputs(payload, co2, rh, rh_out, t_in, t_out, pm_out, pts_in, pts_ou
     col = lambda name, k: (hw.get(name) or [None] * (k + 1))[k] if k < len(hw.get(name) or []) else None
     hourly = [{"t": sources._local(t, tz), "temp": col("temperature_2m", k), "dew": col("dew_point_2m", k),
                "pop": col("precipitation_probability", k),
-               "mm": col("precipitation", k), "uv": col("uv_index", k), "wind_dir": col("wind_direction_10m", k)}
+               "mm": col("precipitation", k), "uv": col("uv_index", k), "wind_dir": col("wind_direction_10m", k),
+               "wind_kmh": col("wind_speed_10m", k)}
               for k, t in enumerate(hw.get("time") or [])]
     cams = sources.model_hours(now)
     pm_past = [(t, sources.pm_of(x)) for t, x in pts_out]
@@ -310,8 +389,13 @@ def summary_inputs(payload, co2, rh, rh_out, t_in, t_out, pm_out, pts_in, pts_ou
     if pm_past_model:
         pm_past = model_past
     road = active_road()
-    sun = [{"t": sources._local(t, tz), "kind": kind} for key, kind in (("sunrise", "Sunrise"), ("sunset", "Sunset"))
-           for t in daily.get(key) or [] if t]
+    road_rows = roads_now(now, weather)
+    rises, sets = ([sources._local(t, tz) if t else None for t in daily.get(key) or []]
+                   for key in ("sunrise", "sunset"))
+    # Keep each sunrise's own daily sunset when missing events are omitted from the chart.
+    sun = [{"t": t, "kind": "Sunrise", "sunset": sets[k] if k < len(sets) else None}
+           for k, t in enumerate(rises) if t is not None]
+    sun.extend({"t": t, "kind": "Sunset"} for t in sets if t is not None)
     days = sources.get_pollen_days() if sources.pollen_live() else {"today": [], "tomorrow": []}
     top = lambda types: max(types, key=lambda q: q.get("index") or 0) if types else None
     return {"r": {"co2": co2, "rh": rh, "rh_out": rh_out, "t_in": t_in, "t_out": t_out, "pm_now": pm_out},
@@ -320,6 +404,9 @@ def summary_inputs(payload, co2, rh, rh_out, t_in, t_out, pm_out, pts_in, pts_ou
             "pm_past": pm_past, "smoke": sources.get_smoke_data() if not sources.source_state("smoke") else False,
             "pollen_today": top(days.get("today")), "pollen_tomorrow": top(days.get("tomorrow")),
             "rush": rush_windows(hourly, now), "road": road.name if road else None, "sun": sun, "now": now,
+            "roads": road_rows, "roads_until": reaching_until(now, weather, road_rows),
+            "wind_now": (weather.get("current") or {}).get("wind_direction_10m"),
+            "wind_kmh_now": (weather.get("current") or {}).get("wind_speed_10m"),
             # whose reading the PM2.5 forecast is fitted to, in its sentence: a public monitor's page says "this monitor";
             # a home's own outdoor monitor is phrases.py's default, and a home without one names its source
             **({"monitor_label": "this monitor"} if outdoor_row() is not None else {}),
@@ -378,7 +465,8 @@ def build_air_read(payload):
     if not sources.outdoor_current(outdoor_row(), now):   # offline or stale: the model speaks for PM2.5 now, not an old reading
         pm_out = rh_out = t_out = None
 
-    weather = sources.get_open_meteo_data().get("current", {})
+    wx = sources.get_open_meteo_data()
+    weather = wx.get("current", {})
     source = sources.outdoor_source(now)   # None with an own outdoor monitor
     if source is not None:   # indoor-only: the server's source, not what the page posted for its outdoor entry
         row = source["row"] or {}
@@ -426,7 +514,7 @@ def build_air_read(payload):
     elif rh is not None and rh < runtime.RH_LOW:
         actions.append({"key": "humidity", "tone": "warn", "text": "Add moisture to the air",
                         "why": f"The air is dry ({rh:.0f}%), which irritates sinuses."})
-    run_v = rule_run(pm_out, smoke, rush, wind_toward, now.hour)
+    run_v = rule_run(pm_out, smoke, rush, wind_toward, now.hour, run_road(roads_now(now, wx), now))
     run_item = None
     w = run_v["word"]
     if w == "Skip it":
@@ -434,7 +522,7 @@ def build_air_read(payload):
     elif w == "Keep it short":
         actions.append({"key": "run", "tone": "warn", "text": "Keep a run short and easy", "why": run_v["text"].split(". ")[0] + "."})
     elif w.startswith("After"):
-        actions.append({"key": "run", "tone": "warn", "text": "Run " + w.lower(), "why": f"The {runtime.ROAD.name} rush runs until {w[6:]}, with the wind toward {home_name()}."})
+        actions.append({"key": "run", "tone": "warn", "text": "Run " + w.lower(), "why": run_v["why"]})
     elif w.startswith("Fine until"):
         run_item = {"key": "run", "tone": "good", "text": "Run before " + w[11:], "why": f"The air outside is clean; the {w[11:]} rush blows this way."}
     elif w == "Fine":

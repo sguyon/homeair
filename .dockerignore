@@ -52,6 +52,8 @@ docker-compose.yml
 .dockerignore
 history.sqlite*
 alerts.sqlite*
+# the road data downloaded on this computer (road_data.py): a container downloads its own
+road-data/
 # What setup.py --home-server prepares to copy to a server: a copy of the settings and keys
 home-server/
 local-addresses.json

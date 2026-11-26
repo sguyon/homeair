@@ -128,6 +128,25 @@ def _rows(fetch):
     return rows
 
 
+def _value(item):
+    """An action's reading as {"value": "800 ppm"}. An action with no number (traffic) says its roads' bands and sides
+    instead ("within 200 m, SE"); with neither, no value."""
+    if item.get("num") is not None:
+        return {"value": f"{item['num']} {item.get('unit') or ''}".strip()}
+    roads = ((item.get("facts") or {}).get("roads")) or []
+    text = "; ".join(", ".join(x for x in (r.get("band"), r.get("side")) if x) for r in roads)
+    return {"value": text} if text.strip("; ") else {}
+
+
+def _roads(item):
+    """The roads an action is about, on any action that carries them: name, band, side and whether it reaches (never an
+    arc or the place)."""
+    roads = ((item.get("facts") or {}).get("roads")) or []
+    return {"roads": [{"name": r.get("name"), "band": r.get("band"), "side": r.get("side"), "reaching": r.get("reaching", True)}
+                      for r in roads]} if roads else {}
+
+
+
 # Where a monitor's reading came from (sources.home_rows' "via"), in the words an assistant repeats.
 MONITOR_WORDS = {"local": "the monitor, on the Wi-Fi", "cloud": "the monitor, from AirGradient's cloud",
                  "stale": "the monitor's last stored reading"}
@@ -178,9 +197,9 @@ def now(fetch, settings):
     rows = _entries(got["rows"])
     i, o, read = got["indoor"], got["outdoor"], got["read"]
     summary = read.get("summary") or {}
-    items = [{"what": it.get("label"), "value": f"{it.get('num')} {it.get('unit')}", "vs_limit": it.get("ctx"),
+    items = [{"what": it.get("label"), **_value(it), "vs_limit": it.get("ctx"),
               "action": (it.get("action") or {}).get("text"), "when": (it.get("action") or {}).get("when"),
-              "why": it.get("why")} for it in summary.get("items") or []]
+              "why": it.get("why"), **_roads(it)} for it in summary.get("items") or []]
     profiles = [{k: p.get(k) for k in ("name", "state", "ok", "why")} for p in summary.get("profiles") or []]
     for r in (i, o) if settings.get("real_clock", True) else ():   # when each reading was taken, so an assistant
         if r and r.get("at"):                                       # without the skill sees a monitor gone quiet;

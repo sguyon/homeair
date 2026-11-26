@@ -1,5 +1,6 @@
 import server
 import sources
+from config import public_view
 from conftest import SAMPLE_PAYLOAD
 
 
@@ -124,3 +125,54 @@ def test_pollen_is_asked_once_a_day(monkeypatch):
     clock["t"] += 3 * 3600; day["d"] += timedelta(hours=3)     # 1 AM, the next day
     sources.get_pollen_days()
     assert calls == [1, 1]
+
+
+def test_context_roads_sorted_for_the_sky(client, tmp_path, monkeypatch):   # Done when 16, 12
+    from test_summary import AUTO_BQE, auto_config, tue, weather_at
+    queens = {**AUTO_BQE, "name": "Queens Boulevard", "kind": "main road", "key": "queens", "band": "within 200 m",
+              "side": "NE", "toward": [316, 134], "toward_calm": [315, 135], "slow": []}
+    cfg = auto_config(tmp_path, queens, AUTO_BQE)   # selection order: Queens Boulevard, then the BQE
+    monkeypatch.setattr(sources, "local_now", lambda *a, **k: tue(13))
+    monkeypatch.setattr(sources, "get_open_meteo_data", lambda *a, **k: weather_at(tue(13), (120, 15)))
+    before = server.CFG
+    server.use_config(cfg)
+    try:
+        rows = client.get("/api/context").get_json()["roads"]
+        assert [r["strength"] for r in rows if r["reaching"]] == ["peak", "high"]   # whatever the selection order
+        assert [r["name"] for r in rows] == ["the BQE", "Queens Boulevard"]
+        assert set(rows[0]) == {"name", "short", "side", "reaching", "strength", "why", "until"}
+        assert rows[0]["short"] == "BQE" and rows[0]["side"] == "E" and rows[0]["why"] == "slow"
+        assert all(r["until"] is None or r["until"].startswith("2026-12-01T") for r in rows)
+        assert [r["name"] for r in server.APP_VIEW["roads"]] == ["Queens Boulevard", "the BQE"]   # APP keeps the selection order
+        assert server.APP_VIEW["roads_status"] == "ok" and all(r["on"] for r in server.APP_VIEW["roads"])
+        assert not {"toward", "toward_calm", "route"} & set(server.APP_VIEW["roads"][0])   # no arc for an auto road
+        monkeypatch.setattr(sources, "get_open_meteo_data", lambda *a, **k: {"current": {}})   # no weather: none reaches
+        rows = client.get("/api/context").get_json()["roads"]
+        assert [r["reaching"] for r in rows] == [False, False] and all(r["until"] is None for r in rows)
+    finally:
+        server.use_config(before)
+
+
+def test_traffic_action_has_no_none_value_for_the_agent():
+    import agent_tools
+    item = {"label": "Traffic", "num": None, "unit": None, "ctx": "the BQE",
+            "facts": {"roads": [{"name": "the BQE", "band": "within 500 m", "side": "E"}]}, "action": {"text": "x"}}
+    assert agent_tools._value(item) == {"value": "within 500 m, E"}
+    assert agent_tools._value({"num": "1,310", "unit": "ppm"}) == {"value": "1,310 ppm"}
+    assert agent_tools._value({**item, "facts": {"roads": [{"name": "r", "band": None, "side": None}]}}) == {}
+
+
+def test_app_roads_keep_every_index_with_an_off_road_between(tmp_path):   # review round 1, finding 1
+    from test_summary import AUTO_BQE, auto_config
+    mid = {**AUTO_BQE, "name": "Kent Avenue", "key": "kent", "on": False}
+    cfg = auto_config(tmp_path, AUTO_BQE, mid, {**AUTO_BQE, "name": "Queens Boulevard", "key": "queens"})
+    rows = public_view(cfg)["roads"]
+    assert [(r["name"], r["on"]) for r in rows] == [("the BQE", True), ("Kent Avenue", False), ("Queens Boulevard", True)]
+    assert [r["name"] for r in rows] == [r.name for r in cfg.roads]   # row i is /api/road/route?i=i
+
+
+def test_agent_keeps_the_road_facts_on_any_action():
+    import agent_tools
+    item = {"facts": {"roads": [{"name": "the BQE", "band": "within 500 m", "side": "E", "arc": [74, 162], "lat": 40.7}]}}
+    assert agent_tools._roads(item) == {"roads": [{"name": "the BQE", "band": "within 500 m", "side": "E", "reaching": True}]}
+    assert agent_tools._roads({"facts": {}}) == {}

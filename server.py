@@ -21,13 +21,15 @@ from flask import Flask, Response, g, jsonify, request, send_file, make_response
 
 import budgets
 import phrases
+import road_data
+import roads as roads_mod
 import token_setup
 import upstream
 from alert_rules import OFFLINE_AFTER, QUIET_DEFAULT
 import summary as summary_rules
-from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ConfigError, add_key, backup_config, config_path, env_key,
+from config import (parse_dotenv, APPLIANCES, DEFAULT_LIMITS, ROAD_FOUND, ConfigError, add_key, backup_config, config_path, env_key,
                     load_config, public_view, monitors as config_monitors, real_value, replace_text, route_path,
-                    set_monitor_keys, write_env_key)
+                    set_monitor_keys, set_road_on, write_env_key)
 
 # Load .env file if it exists
 env_path = Path(__file__).parent / ".env"
@@ -77,6 +79,25 @@ app = Flask(__name__)
 token_state = token_setup.TokenState()
 
 
+def roads_status(cfg):
+    """Why "Around you" lists the roads it lists: "ok" (roads found at setup), "manual" (a hand-set road only), "failed"
+    (the road data wasn't fetched: the pending marker), "not_built" (no road data for the area yet) or "none" (no main
+    road within 1 km). Reads the data folder without making it."""
+    if any(r.found == ROAD_FOUND for r in cfg.roads):
+        return "ok"
+    folder = None
+    try:
+        folder = road_data.data_dir(config_path(cfg), create=False)
+        if (folder / road_data.PENDING_NAME).exists():
+            return "failed"
+    except OSError:
+        pass
+    if cfg.roads:
+        return "manual"
+    outcome = road_data.read_outcome(folder) if folder is not None else None   # what setup recorded; none: it hasn't looked
+    return outcome if outcome in ("none", "not_built") else "none"
+
+
 def use_config(cfg):
     """Point the server at a config (config.py): the home, its clock, the road and the limits. Runs once at import;
     tests run it again with another config. With None (no config) there is no home: Task 10 decides what happens then.
@@ -85,6 +106,8 @@ def use_config(cfg):
     global CFG, APP_VIEW, HOME_LAT, HOME_LON, HOME_TZ, ROAD, RUSH_WINDOWS, LIMITS, PM_FINE, PM_HIGH, CO2_OPEN, RH_LOW, RH_DAMP
     CFG = cfg
     APP_VIEW = public_view(cfg) if cfg else {}   # what the page gets as window.APP
+    if cfg:
+        APP_VIEW["roads_status"] = roads_status(cfg)
     place = cfg.place if cfg else None
     HOME_LAT, HOME_LON = (place.lat, place.lon) if place else (None, None)
     HOME_TZ = ZoneInfo(place.timezone) if place else None
@@ -586,6 +609,47 @@ def save_token():
         return response
 
 
+ROAD_SWITCH_REFUSED = ("Road switches work on the computer Home Air runs on. "
+                       "Ask your agent: \"Turn off the BQE in Home Air\".")
+ROAD_SWITCH_STALE = "This road is no longer in your config. Reload the page."
+ROAD_SWITCH_FULL = f"Home Air follows at most {roads_mod.ROADS_MAX} roads; turn another road off first."
+
+
+@app.route("/api/roads/switch", methods=["POST"])
+def switch_road():
+    """A road's switch on the page: set `on` of one [[roads]] entry in config.toml, a backup first, then use the new config
+    (APP.roads shows it at once). Only on the computer Home Air runs on, with the token form's guards; online it is read-only.
+    The file is read again under the lock, so a switch from a stale page (no such key now) answers 409 and writes nothing."""
+    path = config_path(CFG)
+    if (path is None or not token_setup.local_entry(request, path.parent) or not token_setup.same_origin(request)
+            or not request.is_json):
+        return jsonify({"error": ROAD_SWITCH_REFUSED}), 403
+    data = request.get_json(silent=True)
+    key, on = (data.get("key"), data.get("on")) if isinstance(data, dict) else (None, None)
+    if not isinstance(key, str) or not key or not isinstance(on, bool):
+        return jsonify({"error": 'POST {"key": "<road key>", "on": true|false}'}), 400
+    with token_state.lock:
+        try:
+            text = path.read_text(encoding="utf-8")
+            new = set_road_on(text, key, on)
+            cfg = load_config({"CONFIG_TOML": new})   # never write a file the app can't start with
+        except KeyError:
+            return jsonify({"error": ROAD_SWITCH_STALE}), 409
+        except (OSError, UnicodeError, ConfigError):
+            return jsonify({"error": "Couldn't change config.toml. Run ./homeair check --config to see the problem."}), 500
+        if on and sum(r.on for r in cfg.roads) > roads_mod.ROADS_MAX:
+            return jsonify({"error": ROAD_SWITCH_FULL}), 409
+        try:
+            if new != text:
+                backup_config(path)
+                replace_text(path, new)
+            cfg = load_config(os.environ)   # from the file (the check's config came from text: its source isn't the file's)
+        except (OSError, UnicodeError, ConfigError):
+            return jsonify({"error": "Couldn't change config.toml. Check that the app's folder is writable."}), 500
+        use_config(cfg)
+    return jsonify({"roads": APP_VIEW["roads"], "roads_status": APP_VIEW["roads_status"]})
+
+
 def take_account(rows):
     """After a token is saved: the home's monitors matched to the account's (sources.match_account) are written to the
     config file, a backup first, and the app switches to it with no restart: the new mode, the poller's monitors, then
@@ -676,15 +740,77 @@ def setup_state():
     return jsonify({"setup": setup_mode()})
 
 
-@app.route("/api/road/route")
-def road_route():
-    """The road's route ([lon, lat] points) for the map. 404 without a road."""
-    if not ROAD:
-        return jsonify({"error": "no road"}), 404
+ROAD_INDEX_MAX_DIGITS = 3   # digits of ?i= read as an index into the config's roads (a home has a handful)
+
+
+def hand_route(route):
     try:
-        return jsonify(json.loads(route_path(ROAD.route).read_text(encoding="utf-8")))
+        return jsonify(json.loads(route_path(route).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return jsonify({"error": "road route unreadable"}), 404
+
+
+@app.route("/api/road/route")
+def road_route():
+    """The hand-set road's route ([lon, lat] points) for the map; 404 without one. With ?i=<index in the config's
+    roads>: a road found at setup gets its lines ([[lon, lat], ...] each) within road_data.ROUTE_CLIP_M of the rounded
+    place, from the cached road file; 404 when the file is missing or can't be read."""
+    if "i" not in request.args:
+        return hand_route(ROAD.route) if ROAD else (jsonify({"error": "no road"}), 404)
+    i, roads = request.args["i"], CFG.roads if CFG else ()
+    if not (i.isascii() and i.isdigit() and len(i) <= ROAD_INDEX_MAX_DIGITS and int(i) < len(roads)):
+        return jsonify({"error": "no such road"}), 404
+    road = roads[int(i)]
+    if road.route:   # the hand-set [road]
+        return hand_route(road.route)
+    lines = None
+    if road.found == ROAD_FOUND and HOME_LAT is not None and road.data and road.key:
+        if CFG.demo:
+            try:
+                from demo.roads import route_stretch
+                lines = route_stretch(road.data, road.key, HOME_LAT, HOME_LON)
+            except (OSError, RuntimeError, ValueError, KeyError):
+                pass   # a missing or damaged bundle is not replaced through the network
+        else:
+            lines = road_data.route_stretch(road_data.data_dir(config_path(CFG), create=False), road.data, road.key,
+                                            HOME_LAT, HOME_LON)
+    if lines is None:
+        return jsonify({"error": "road route unavailable" if CFG.demo else "road data not downloaded"}), 404
+    return jsonify(lines)
+
+
+def start_road_data(start=lambda fn: threading.Thread(target=fn, daemon=True, name="road-data").start()):
+    """At start, in the background: on this computer, when the road data couldn't be fetched at setup and a try is due
+    (road_data.retry_due: at most once a day), setup's road step again and the new config; on every copy, one GET for
+    each dated metro or block file named in the config that isn't cached (a restart on Railway or a removed file).
+    Failed setup uses the same core selection on retry; a saved road keeps its dated file, never today's replacement.
+    The start never waits on the data host."""
+    if MODE == "demo" or CFG is None:
+        return
+    path = config_path(CFG)
+
+    def run():
+        try:
+            if path is not None and token_setup.local_machine():
+                # the downloads run outside the lock; only the write of config.toml (and the switch to it) takes it
+                res = road_data.retry_at_start(path, datetime.now(timezone.utc), lock=token_state.lock)
+                if res is not None:
+                    print(" ".join(res.lines) or f"Roads: {res.status}", file=sys.stderr, flush=True)
+                    if res.status != "failed":
+                        with token_state.lock:
+                            cfg = load_config(os.environ)
+                            if cfg is not None and not cfg.demo:
+                                use_config(cfg)
+            failed = road_data.cache_files(road_data.data_dir(path, create=False), CFG.roads)
+            if failed:
+                print(f"Roads: couldn't get {', '.join(failed)}; the roads are named but not drawn until the next start",
+                      file=sys.stderr, flush=True)
+        except (OSError, ConfigError) as error:
+            print(f"Roads: the road data step stopped ({type(error).__name__})", file=sys.stderr, flush=True)
+    start(run)
+
+
+start_road_data()
 
 
 @app.route("/manifest.json")
@@ -875,6 +1001,10 @@ def context():
     current_hour = sources.local_now().hour
     road = air_read.road_traffic(current_hour, wind_direction)
     road_cfg = air_read.active_road()
+    rows = air_read.sky_order(air_read.roads_now(sources.local_now(), weather))
+    roads = [{"name": r["road"].name, "short": r["road"].name.removeprefix("the "), "side": r["road"].side,
+              "reaching": r["reaching"], "strength": r["strength"], "why": r["why"],
+              "until": r["until"].isoformat() if r["until"] else None} for r in rows]
     if road_cfg:   # "bqe" is the shape the page reads today; "road" carries the flag (the page moves to it later)
         extra = {"bqe": {"traffic": road["traffic"], "wind_impact": road["wind_impact"],
                          "pollution_pressure": road["pollution_pressure"], "current_hour": current_hour},
@@ -887,7 +1017,7 @@ def context():
     status = {
         "pollen": ("ok" if pollen else "error") if pollen_s == "ok" else pollen_s,
         "smoke": sources.source_state("smoke") or ("ok" if smoke.get("checked") else "error"),
-        "road": "ok" if road_cfg else "off",
+        "road": "ok" if road_cfg or any(r.on for r in air_read.home_roads()) else "off",
         "nearby": sources.source_state("nearby") or "ok",
     }
     if not sources.place_known():   # the weather and the air forecast wait for a place too (the others say so above)
@@ -909,6 +1039,7 @@ def context():
             "weather_code": cur.get("weather_code")
         },
         **extra,
+        "roads": roads,
         "smoke": smoke,
         "pollen": pollen,
         "pollen_tomorrow": pollen_tomorrow,

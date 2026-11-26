@@ -177,9 +177,11 @@ def situation(item):
         return "The air inside is too dry" if facts.get("dry") else "Humidity is high inside"
     if item["id"] == "pm":
         cause = facts.get("cause") or ""
-        what = ("Smoke outside" if cause == "smoke" else "Traffic exhaust outside" if cause.endswith(" rush")
-                else "PM2.5 is high outside")
+        what = ("Smoke outside" if cause == "smoke" else "Traffic exhaust outside" if cause.endswith((" rush", "’s traffic"))
+                else "PM2.5 is high outside")   # "<road> rush" from a hand-set road, "<road>’s traffic" from [[roads]]
         return what + (f" {when}" if "–" in when else "")   # a window still ahead: "Traffic exhaust outside 8–11 AM"
+    if item["id"] == "traffic":   # a road's exhaust toward the home, with PM2.5 under its limit
+        return "Traffic exhaust outside" + (f" {when}" if "–" in when else "")
     if item["id"] == "pollen":
         kind = facts.get("pollen_type")
         return f"{str(kind).capitalize()} pollen is high today" if kind else "Pollen is high today"
@@ -209,6 +211,8 @@ def notification_text(item, now=None, tz=None):
     if item["id"] == "pollen":   # the index is in the title's "high"; an airing beside it is the one exception
         return situation(item), f"{_do(item, now, tz)}." + (f" You can open a window briefly {AIRING_OK[facts['airing_when']]}."
                                                           if facts.get("airing_when") in AIRING_OK else "")
+    if item["id"] == "traffic":   # no reading: the roads it is about take the number's place
+        return situation(item), f"{_do(item, now, tz)}" + (f" ({item['ctx']})." if item.get("ctx") else ".")
     return situation(item), f"{_do(item, now, tz)} ({_number(item)})."   # the number after the action
 
 

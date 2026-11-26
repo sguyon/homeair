@@ -1,6 +1,8 @@
 """Setup uses invented keys, places and monitors. No network or listening ports."""
+import hashlib
 import json
 import os
+import re
 import stat
 import sys
 import threading
@@ -11,6 +13,8 @@ from pathlib import Path
 
 import pytest
 import requests
+
+import road_data
 
 from config import DEFAULT_LIMITS, load_config, monitors as config_monitors
 
@@ -62,6 +66,8 @@ def root(tmp_path, monkeypatch):
     def no_network(url, **k):
         if url.endswith("/health"):   # --status asks the running page; none is running here
             raise requests.ConnectionError("not running")
+        if url.startswith(road_data.ROADS_BASE):   # the data host: not reachable here (the roads tests serve it)
+            raise requests.ConnectionError("no data host in tests")
         pytest.fail("Unexpected network request")
     monkeypatch.setattr(setup.requests, "get", no_network)
 
@@ -159,12 +165,14 @@ def test_railway_gets_the_location_rounded(root, monkeypatch, capsys):
 def test_small_config_defaults_and_single_resolution(root, monkeypatch, capsys):
     seen = []
     real = setup.http_get_json
-    monkeypatch.setattr(setup, "http_get_json", lambda u, p: seen.append(u) or real(u, p))
+    monkeypatch.setattr(setup, "http_get_json", lambda u, p: seen.append((u, p)) or real(u, p))
     calls = []
     monkeypatch.setattr(setup, "account_rows", lambda token: calls.append(token) or [INDOOR])
     code, out = run(root, capsys, "--address", "Ogden Theatre, Denver", "--profiles", "sinus,runner")
     assert code == 0, out
-    assert seen == [setup.NOMINATIM_SEARCH, setup.OPEN_METEO_FORECAST]
+    assert [u for u, p in seen] == [setup.NOMINATIM_SEARCH, setup.OPEN_METEO_FORECAST]
+    assert seen[0][1]["q"] == "Ogden Theatre, Denver"
+    assert seen[1][1] == {"latitude": 39.74, "longitude": -104.98, "timezone": "auto", "forecast_days": 1}
     assert calls == [TOKEN]  # discovery and the live check share one account reading
     cfg = home(root)
     assert cfg.place.name == "Denver" and cfg.place.timezone == "America/Denver"
@@ -226,6 +234,56 @@ def test_accepts_public_source_suggestion(root, monkeypatch, capsys):
     code, out = run(root, capsys, "--address", "Denver")
     assert code == 0, out
     assert home(root).outdoor_from == 9001
+
+
+def test_public_source_requests_rounded_place_but_ranks_from_exact(monkeypatch):
+    # The exact home is east of the rounded centre: rounding the ranking would pick 9002 instead.
+    place = setup.Place(40.7049, -73.9951, "Test home", "test", "test")
+    monitors = [
+        {"locationId": 9001, "latitude": 40.7049, "longitude": -73.993, "measuredAt": NOW},
+        {"locationId": 9002, "latitude": 40.7, "longitude": -74.0, "measuredAt": NOW},
+        # Inside the old exact-centred 16 km box, outside an unpadded rounded-centred 16 km box.
+        {"locationId": 9003, "latitude": 40.8485, "longitude": -73.9951, "measuredAt": NOW},
+    ]
+    seen = []
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{**m, "dataSource": "AirGradient", "pm25": 4} for m in monitors
+                    if seen[-1]["ymin"] <= m["latitude"] <= seen[-1]["ymax"]
+                    and seen[-1]["xmin"] <= m["longitude"] <= seen[-1]["xmax"]]
+
+    def get(url, source, **kwargs):
+        assert url == setup.publicmap.AREA_URL and source == "ag_map_area"
+        seen.append(kwargs["params"])
+        return Resp()
+
+    monkeypatch.setattr(setup.publicmap.upstream, "get", get)
+    real_suggest = setup.publicmap.suggest
+
+    def suggest(world, lat, lon, now):
+        assert {m["locationId"] for m in world} == ({9001, 9002, 9003} if lat == 40.7049 else {9001, 9002})
+        return real_suggest(world, lat, lon, now)
+
+    monkeypatch.setattr(setup.publicmap, "suggest", suggest)
+    assert setup.outdoor_source(place) == 9001
+    params = seen[0]
+    assert (params["ymin"] + params["ymax"]) / 2 == pytest.approx(40.7)
+    assert (params["xmin"] + params["xmax"]) / 2 == pytest.approx(-74.0)
+    assert params["ymax"] >= 40.8485
+    # Radius must also depend only on the rounded centre, never the exact position within its cell.
+    assert setup.outdoor_source(setup.Place(40.7001, -73.9999, "Test home", "test", "test")) == 9002
+    assert seen[1] == params
+    # Near the pole, box()'s longitude floor puts a box-edge monitor within the 3 km source limit.
+    # It is inside the old exact box (east edge -59.62212), outside the rounded unpadded one (-59.62702).
+    monitors[:] = [{"locationId": 9003, "latitude": 89.9049, "longitude": -59.623, "measuredAt": NOW}]
+    monkeypatch.setattr(setup.publicmap, "suggest", real_suggest)
+    assert setup.outdoor_source(setup.Place(89.9049, -73.9951, "Test home", "test", "test")) == 9003
+    assert (seen[2]["xmin"] + seen[2]["xmax"]) / 2 == pytest.approx(-74.0)
+    assert seen[2]["xmax"] > -59.623
 
 
 def test_existing_config_is_copied_before_replacement(root, capsys):
@@ -362,7 +420,7 @@ def test_railway_sends_no_monitor_address_and_needs_the_token(root, monkeypatch,
 
 
 def test_railway_omits_empty_keys_and_suppresses_cli_errors(root, monkeypatch, capsys):
-    (root / "config.toml").write_text("private config")
+    (root / "config.toml").write_text("# private config\n")
     (root / ".env").write_text(f'AIRGRADIENT_TOKEN={TOKEN}\nGOOGLE_POLLEN_API_KEY=your_key_here\n')
     calls = []
     def fail(args, **kwargs):
@@ -1186,3 +1244,212 @@ def test_setup_writes_keys_once_without_printing(root, capsys, calls):
     root2 = root / "second"; root2.mkdir()
     code, out = run(root2, capsys, env={})
     assert "Alert keys ready" in out and parse_dotenv((root2 / ".env").read_text())["VAPID_PRIVATE_KEY"] not in out
+
+
+def test_railway_sends_nothing_when_a_road_arc_stays_in_degrees(root, monkeypatch, capsys):
+    (root / "config.toml").write_text('[place]\nname = "Ogden"\ntimezone = "America/Denver"\n\n[[roads]]\nname = "x"\nkey = "x"\n'
+                                      'toward = [\n  74,  # a comment inside the array\n  162,\n]\n')
+    (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
+    sent = []
+    monkeypatch.setattr(setup.subprocess, "run", lambda args, **k: sent.append(args))
+    code, out = run(root, capsys, "railway", "--service", "home-air")
+    assert code != 0 and sent == [] and "toward = [74, 162]" in out
+
+
+# ---- the roads ---------------------------------------------------------------------------------------------
+
+ROADS_FIXTURES = REPO / "tests" / "fixtures" / "roads"
+ROADS_CLIP = (ROADS_FIXTURES / "nyc-2026-11-21-clip.json.gz").read_bytes()
+ROADS_BASE = "https://data.example/roads"
+ROADS_NAME = "nyc-2026-11.json.gz"
+
+
+@pytest.mark.parametrize("lat,lon,want", [
+    (40.7, -74, "nyc"), (41.2, -74, "nyc-outer"),
+    (40.5, -75.5, "block"), (61, -149, "ak"), (21, -157, "hi"),
+    (45, -110, None), (44, -112, None),
+    (46, -110, "not_built"), (45, -108, "not_built"), (51.5, -0.12, "not_built"),
+])
+def test_setup_us_metros_blocks_and_empty_coverage(root, served_roads, monkeypatch, capsys, lat, lon, want):
+    import gzip
+    entries = [
+        {"id": "block", "kind": "block", "box": [-76, 40, -72, 42], "level": 2},
+        {"id": "nyc-outer", "kind": "metro", "box": [-75, 40, -73, 42], "level": "counted"},
+        {"id": "nyc", "box": [-74.4, 40.4, -73.6, 41], "level": 1},
+        {"id": "ak", "kind": "block", "box": [-150, 60, -148, 62], "level": "counted"},
+        {"id": "hi", "kind": "block", "box": [-158, 20, -156, 22], "level": "counted"},
+    ]
+    for e in entries:
+        doc = {"country": "US", "roads": {"main": {"name": e["id"]}},
+               "features": [{"type": "Feature", "properties": {"g": "main", "c": "motorway"},
+                             "geometry": {"type": "LineString", "coordinates": [
+                                 [lon + .001, lat - .002], [lon + .001, lat + .002]]}}]}
+        data = gzip.compress(json.dumps(doc).encode(), mtime=0)
+        e.update(country="US", file=e["id"] + "-2026-11.json.gz", bytes=len(data),
+                 sha256=hashlib.sha256(data).hexdigest())
+        served_roads[e["file"]] = data
+    served_roads["index.json"] = json.dumps({
+        "metros": entries, "coverage": {"US": [[-112, 44, -110, 46], [-110, 44, -108, 46]]},
+    }).encode()
+    calls = []
+    before = setup.requests.get
+
+    def get(url, **kwargs):
+        if url.startswith(ROADS_BASE + "/"):
+            calls.append(url.removeprefix(ROADS_BASE + "/"))
+        return before(url, **kwargs)
+
+    monkeypatch.setattr(setup.requests, "get", get)
+    assert run_setup(root, "--lat", str(lat), "--lon", str(lon)) == 0
+    output = capsys.readouterr().out
+    saved = tomllib.loads((root / "config.toml").read_text()).get("roads", [])
+    if want in (None, "not_built"):
+        assert saved == [] and calls == ["index.json"]
+        assert ("isn't built for your area yet" in output) == (want == "not_built")
+        assert (root / "road-data" / "outcome").read_text() == ("not_built" if want else "none")
+    else:
+        assert [(r["name"], r["country"], r.get("slow", [])) for r in saved] == [(want, "US", [])]
+        name = want + "-2026-11.json.gz"
+        assert calls == ["index.json", name]
+        assert (root / "road-data" / name).read_bytes() == served_roads[name]
+        before_config = (root / "config.toml").read_bytes()
+        assert run_setup(root, "--lat", str(lat), "--lon", str(lon)) == 0
+        assert (root / "config.toml").read_bytes() == before_config
+        assert calls == ["index.json", name]
+
+
+@pytest.fixture
+def served_roads(root, monkeypatch):
+    """The data host: index.json and the NYC clip. Everything else keeps the root fixture's refusals."""
+    index = {"version": 1, "metros": [{"id": "nyc", "name": "New York", "level": 1, "country": "US",
+                                       "box": [-74.359, 40.479, -73.671, 40.960], "file": ROADS_NAME,
+                                       "bytes": len(ROADS_CLIP), "sha256": hashlib.sha256(ROADS_CLIP).hexdigest()}]}
+    files = {"index.json": json.dumps(index).encode(), ROADS_NAME: ROADS_CLIP}
+    before = setup.requests.get
+    monkeypatch.setattr(road_data, "ROADS_BASE", ROADS_BASE)
+    monkeypatch.delenv("ROAD_DATA_DIR", raising=False)
+
+    class Reply:
+        def __init__(self, body):
+            self.status_code, self.body = (200 if body is not None else 404), body or b""
+        def close(self):
+            pass
+        def iter_content(self, n):
+            return (self.body[i:i + n] for i in range(0, len(self.body), n))
+
+    def get(url, **k):
+        if url.startswith(ROADS_BASE + "/"):
+            return Reply(files.get(url.removeprefix(ROADS_BASE + "/")))
+        return before(url, **k)
+    monkeypatch.setattr(setup.requests, "get", get)
+    return files
+
+
+def run_setup(root, *args):
+    return setup.main(list(args), {"AIRGRADIENT_TOKEN": TOKEN}, root)
+
+
+@pytest.mark.parametrize("lat,lon,expect", [
+    (40.7127, -73.9590, [("the BQE", "within 500 m", "E")]),
+    (40.6720, -73.9745, []),   # Park Slope: none
+    (39.95, -75.16, None),     # Philadelphia: not built
+])
+def test_setup_writes_the_roads_without_a_question(root, served_roads, capsys, lat, lon, expect):
+    assert run_setup(root, "--lat", str(lat), "--lon", str(lon)) == 0
+    roads = tomllib.loads((root / "config.toml").read_text()).get("roads", [])
+    assert [(r["name"], r["band"], r["side"]) for r in roads if r["on"]] == (expect or [])
+    assert all(r["found"] == "auto" for r in roads)
+    out = capsys.readouterr().out
+    assert "?" not in out.split("Roads:")[1].splitlines()[0]
+    assert ("isn't built for your area yet" in out) == (expect is None)
+
+
+def test_the_home_command_finds_the_roads_and_leaves_a_hand_set_road_alone(root, served_roads, monkeypatch, capsys):
+    road = f'[road]\nname = "my street"  # by hand\nroute = "{REPO / "static" / "bqe.json"}"\ntoward = [80, 200]\n'
+    (root / "config.toml").write_text(f'[place]\ntimezone = "America/Denver"\nindoor = "home"\nindoor_serial = "{IN_SERIAL}"\n\n{road}')
+    code, out = run(root, capsys, "--lat", "40.7127", "--lon", "-73.959", env={})
+    assert code == 0 and "Roads: the BQE (highway, within 500 m, to the east)" in out, out
+    text = (root / "config.toml").read_text()
+    assert road in text and any(r["name"] == "the BQE" for r in tomllib.loads(text)["roads"])
+
+
+def test_a_road_download_that_fails_changes_neither_the_exit_code_nor_the_file(root, capsys):
+    code, out = run(root, capsys, "--lat", "40.7127", "--lon", "-73.959")   # no data host: the root fixture refuses it
+    assert code == 0, out
+    assert "Roads: couldn't get the road data; Home Air on this computer tries again at its next start, at most once a day." in out
+    assert "roads" not in tomllib.loads((root / "config.toml").read_text())
+
+
+def test_railway_sends_sectors_not_degrees(root, monkeypatch, served_roads):
+    assert run_setup(root, "--lat", "40.7127", "--lon", "-73.959") == 0
+    (root / ".env").write_text(f"AIRGRADIENT_TOKEN={TOKEN}\n")
+    sent = {}
+    monkeypatch.setattr(setup.subprocess, "run", lambda args, **k: sent.update({args[3]: k["input"]}))
+    assert setup.main(["railway", "--service", "home-air"], {}, root) == 0
+    roads = tomllib.loads(sent["CONFIG_TOML"])["roads"]
+    assert roads and all(isinstance(s, str) for r in roads for k in ("toward", "toward_calm") for s in r.get(k, []))
+    assert not re.search(r"\d+\.\d{3,}", sent["CONFIG_TOML"])
+
+
+def test_a_token_backed_address_updates_config_in_place(root, served_roads, capsys):
+    # a saved token takes the account path: it must keep the hand-set [road], hand-written [[roads]], limits, profiles,
+    # home settings and comments byte for byte, and change only the place, the monitors and the auto roads
+    keep = (f'[road]\nname = "my street"  # by hand\nroute = "{REPO / "static" / "bqe.json"}"\ntoward = [80, 200]\n\n'
+            '[[roads]]\nname = "Kent Avenue"  # the truck route\nkind = "main road"\nside = "W"\n\n'
+            '[limits]\nco2 = 900  # stricter\n\n[profiles]\ntoddler = true\nsinus = false\nrunner = false\n\n'
+            '[home]\ntemp_unit = "C"  # my choice\n')
+    (root / "config.toml").write_text('# my home\n[place]\nname = "Old"\nlat = 39.74\nlon = -104.98\n'
+                                      f'timezone = "America/Denver"\n\n{keep}')
+    code, out = run(root, capsys, "--lat", "40.7127", "--lon", "-73.959")
+    assert code == 0, out
+    text = (root / "config.toml").read_text()
+    assert text.startswith("# my home\n[place]")
+    for block in (keep.split("[[roads]]")[0], '[[roads]]\nname = "Kent Avenue"  # the truck route\nkind = "main road"\nside = "W"\n',
+                  '[limits]\nco2 = 900  # stricter\n\n[profiles]\ntoddler = true\nsinus = false\nrunner = false\n\n[home]\ntemp_unit = "C"  # my choice\n'):
+        assert block in text
+    data = tomllib.loads(text)
+    assert data["place"]["lat"] == 40.7127 and data["profiles"]["toddler"] is True and data["limits"]["co2"] == 900
+    assert data["road"]["name"] == "my street" and any(r["name"] == "the BQE" for r in data["roads"])
+
+
+def test_widened_public_box_does_not_change_the_polar_pick(monkeypatch):
+    place = setup.Place(89.9, 0, 'Polar test', 'test', 'test')
+    monitors = [
+        {'locationId': 9001, 'latitude': 89.9, 'longitude': 15, 'measuredAt': NOW},  # 2.90 km, outside old box
+        {'locationId': 9002, 'latitude': 89.926, 'longitude': 0, 'measuredAt': NOW},  # 2.89 km, old pick
+    ]
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{**m, 'dataSource': 'AirGradient', 'pm25': 4} for m in monitors]
+
+    monkeypatch.setattr(setup.publicmap.upstream, 'get', lambda *a, **kw: Resp())
+    # Move the newly admitted candidate closer than the original while keeping it outside the old box.
+    monitors[0]['longitude'] = 14.6  # 2.83 km; old edge 14.373°
+    assert setup.outdoor_source(place) == 9002
+
+
+@pytest.mark.parametrize('lat,lon', [(0, 180.00125), (89.9, 0), (-89.9, -179.999)])
+def test_public_area_box_edges_are_valid(monkeypatch, lat, lon):
+    seen = []
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return []
+
+    def get(*args, **kwargs):
+        seen.append(kwargs['params'])
+        return Resp()
+
+    monkeypatch.setattr(setup.publicmap.upstream, 'get', get)
+    setup.publicmap.fetch_area(lat, lon, 17)
+    assert len(seen) == 1
+    p = seen[0]
+    assert -180 <= p['xmin'] <= p['xmax'] <= 180
+    assert -90 <= p['ymin'] <= p['ymax'] <= 90

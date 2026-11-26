@@ -30,6 +30,8 @@ def test_reference_output_unchanged(monkeypatch):
     # the one addition since the golden was taken: the road flag for the page, next to the old "bqe" text
     for o in out.values():
         assert o["context"].pop("road") == {"name": "BQE", "toward": True}
+        roads = o["context"].pop("roads")   # the road flag for the live sky: the hand-set road only
+        assert [(r["name"], r["short"], r["side"]) for r in roads] == [("BQE", "BQE", "SE")]
         assert o["context"].pop("status") == {"pollen": "ok", "smoke": "ok", "road": "ok", "nearby": "ok"}
         # the inputs for an assistant (24 Nov): every source answers for the reference home
         assert {k: v["status"] for k, v in o["read"].pop("inputs").items()} == {"weather": "ok", "pollen": "ok", "smoke": "ok", "road": "ok"}

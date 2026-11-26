@@ -93,6 +93,26 @@ nearby = true
 # # If you leave it out, it is computed from the route.
 # toward = [80, 200]
 
+# Roads found near your home: `./homeair setup` writes one [[roads]] block for each main road it finds (OpenStreetMap
+# data), after the other settings. `on` is the switch: true to follow the road, false to list it and not follow it.
+# `toward` (left out for a road farther than 500 m) and `toward_calm` are the bearings (degrees) to the road's points,
+# or sector names when the file is sent to Home Air online. `slow` (New York only) holds the weekday hours, [from, to),
+# when NYC DOT's measured speeds show the road slow. Change `on` only; setup writes the other values.
+# [[roads]]
+# name = "the BQE"
+# kind = "highway"
+# key = "bqe"
+# data = "nyc-2026-11.json.gz" # <metro>-<yyyy-mm>.json.gz, written by setup
+# country = "US"
+# band = "within 500 m"
+# side = "E"
+# toward_calm = [55, 202]
+# aadt = 119116
+# trucks_pct = 11
+# slow = [[7, 21]]
+# found = "auto"
+# on = true
+
 # Pollen seasons: typical calendar dates as [month, day]. Add or remove blocks freely.
 # These are the usual dates for the northeastern US, not a forecast.
 [[pollen_seasons]]

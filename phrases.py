@@ -1,9 +1,10 @@
 """The sentence library behind each (i) on the summary card. Written by hand, no model.
 
-Each item's explanation is up to three sentences, one per part:
+Each item's explanation is up to four sentences, one per part:
   effect: what the reading does to people (fixed knowledge)
   now:    why it's happening now (facts from the readings and forecasts)
   timing: why this time (from the action's time)
+  unseen: what the monitor doesn't measure (the traffic action only)
 For each part, the first template whose {slots} are all in the facts is used; a part with none that fits is
 skipped, so no sentence ever prints an empty slot. Every number comes from the facts or from the limits below.
 """
@@ -46,6 +47,7 @@ LIBRARY = {
     "pm": {
         "effect": ["Fine particles reach deep into the lungs. The line is {pm_limit}, WHO’s guideline for a 24-hour average, used here for any hour."],
         "now": ["The {rush_wind} wind carries {road} rush-hour fumes onto the block.",
+                "The {rush_wind} wind carries {traffic_road}’s exhaust onto the block.",
                 "{smoke_on}NOAA reports wildfire smoke over the region.",
                 "The forecast peaks at {pm} around {peak_at}, from {pm_now} now."],
         # how the forecast was fitted to the monitor (summary.build_summary): scaled by a day of its readings, or started
@@ -60,6 +62,17 @@ LIBRARY = {
                    "{public_anchored_on}The forecast is Open-Meteo’s prediction for the wider area, started from what {source_label} reads now.",
                    "{area_on}{fallback_lead}The forecast is Open-Meteo’s prediction for the wider area, scaled to what {area_count} public monitors near you measured over the last day.",
                    "{model_on}{fallback_lead}The forecast is Open-Meteo’s prediction for the wider area: an estimate, with no monitor outside to check it against."],
+    },
+    # the traffic action (summary.traffic_item): which road's exhaust the wind or calm air brings, then what the monitor
+    # can't see. {road_poss} is set for one road, {road_names} for any number; {wind}, the wind's own direction now
+    "traffic": {
+        "now": ["{calm_on}Calm air holds {road_poss} exhaust close before sunrise.",
+                "{calm_on}Calm air holds exhaust from {road_names} close before sunrise.",
+                "The {wind} wind carries {road_poss} exhaust here.",
+                "The {wind} wind carries exhaust from {road_names} here.",
+                "The wind carries {road_poss} exhaust here.",
+                "The wind carries exhaust from {road_names} here."],
+        "unseen": ["Your monitor counts PM2.5; traffic’s NO₂ and ultrafine particles don’t show on it."],
     },
     "pollen": {
         "effect": ["{pollen_type_cap} pollen sets off sneezing and a stuffy nose for allergic sinuses."],
@@ -114,11 +127,46 @@ SMOKE_CLEAN = "NOAA reports smoke in the region; the air here is clean (PM2.5 {p
 
 # compass(): the wind's direction in eight words, from north clockwise
 _POINTS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
+# a road's side (config's 8-point names) in the words home.js uses: "the east windows", "the north-east windows"
+SIDE_WORDS = {"N": "north", "NE": "north-east", "E": "east", "SE": "south-east", "S": "south", "SW": "south-west",
+              "W": "west", "NW": "north-west"}
+SIDES_NAMED = 2   # sides the traffic action names; with more, roads reach from most directions: "Keep the windows shut"
+ROADS_NAMED = 2   # roads named in a list; the rest are counted ("and 1 more road")
 
 
 def compass(deg):
     """The direction a wind comes from, in one of 8 words."""
     return _POINTS[round((deg % 360) / 45) % 8]
+
+
+def road_names(names):
+    """"the BQE", "the BQE and Queens Boulevard", "the BQE, Queens Boulevard and 1 more road"."""
+    if len(names) <= ROADS_NAMED:
+        return " and ".join(names)
+    rest = len(names) - ROADS_NAMED
+    return ", ".join(names[:ROADS_NAMED]) + f" and {rest} more road" + ("s" if rest > 1 else "")
+
+
+def traffic_text(sides):
+    """The traffic action's text from the roads' sides (8-point names, each once, in compass order)."""
+    if not sides:   # a road without a side (a hand-set road before the home has a place)
+        return "Keep the windows on the road’s side shut"
+    if len(sides) > SIDES_NAMED:   # roads on most sides: every window
+        return "Keep the windows shut"
+    return "Keep the " + " and ".join(SIDE_WORDS[s] for s in sides) + " windows shut"
+
+
+def wind_word(wind_dir):
+    """The direction a wind comes from in the traffic action's words ("south-east", as the sides are written); None
+    without one. The windows are named by the roads' sides, the wind by its own direction."""
+    return None if wind_dir is None else list(SIDE_WORDS.values())[round((wind_dir % 360) / 45) % 8]
+
+
+def traffic_while(wind, calm):
+    """The traffic action's time when the forecast can't say when it ends."""
+    if calm:
+        return "while the air stays calm before sunrise"
+    return f"while the {wind} wind lasts" if wind else "while the wind lasts"
 
 
 def _derived(facts):
@@ -127,8 +175,19 @@ def _derived(facts):
     if cause.endswith(" rush") and f.get("wind_dir") is not None:   # "<road> rush", from summary.build_summary
         f["road"] = cause[:-len(" rush")]
         f["rush_wind"] = compass(f["wind_dir"])
+    if cause.endswith("’s traffic") and f.get("wind_dir") is not None:   # "<road>’s traffic": a road written at setup
+        f["traffic_road"] = cause[:-len("’s traffic")]
+        f["rush_wind"] = compass(f["wind_dir"])
     if f.get("smoke"):
         f["smoke_on"] = ""
+    # the traffic action's roads ({"name", "band", "side"}, summary.traffic_item), and "calm" when calm air holds the exhaust
+    names = [r["name"] for r in f.get("roads") or ()]
+    if names:
+        f["road_names"] = road_names(names)
+        if len(names) == 1:
+            f["road_poss"] = names[0] + "’s"
+    if f.get("why") == "calm":
+        f["calm_on"] = ""
     # the PM2.5 forecast's fit, "calibrated", "anchored" or "area" (summary.build_summary), and whose readings it was
     # fitted to: the home's outdoor monitor unless the caller names another ("this monitor" for a public monitor's page),
     # or for a home without one, its source (source_kind "monitor", "area" or "model", from server.outdoor_source)
@@ -197,7 +256,7 @@ def why(item_id, facts):
         key = "rh_dry" if facts.get("dry") else "rh_damp"
     parts = LIBRARY[key]
     out = []
-    for kind in ("effect", "now", "timing"):
+    for kind in ("effect", "now", "timing", "unseen"):
         for t in parts.get(kind, []):
             s = fill(t, facts)
             if s:

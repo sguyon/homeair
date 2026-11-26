@@ -75,10 +75,11 @@ def from_map(entry, place=None):
 
 
 def box(lat, lon, km):
-    """The map's bounding box params around a point: km each way."""
+    """The map's bounding box params around a point: km each way, clamped to valid geographic ranges."""
     dlat = km / KM_PER_DEG
     dlon = km / (KM_PER_DEG * max(math.cos(math.radians(lat)), 0.01))
-    return {"xmin": round(lon - dlon, 5), "ymin": round(lat - dlat, 5), "xmax": round(lon + dlon, 5), "ymax": round(lat + dlat, 5)}
+    return {"xmin": round(max(-180, min(180, lon - dlon)), 5), "ymin": round(max(-90, min(90, lat - dlat)), 5),
+            "xmax": round(max(-180, min(180, lon + dlon)), 5), "ymax": round(max(-90, min(90, lat + dlat)), 5)}
 
 
 def fetch_area(lat, lon, km):

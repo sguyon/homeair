@@ -10,6 +10,7 @@ import base64
 import contextlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -36,11 +37,13 @@ import config
 import localnet
 import phrases
 import publicmap
+import road_data
 import sources  # installs the request-log filter that hides query credentials
 import token_setup
 from config import (ENV_FILE_MODE, PLACE_DECIMALS, PROFILES, ConfigError, defines,
                     env_key, load_config, parse_dotenv, public_view, write_env_key)
 
+from road_data import EXACT_DECIMALS
 from upstream import USER_AGENT  # Nominatim requires an identifying User-Agent: the app's, HomeAir/<version>.
 # HOMEAIR_LOOKUP_BASE (tests and rehearse only, like AIRGRADIENT_API_BASE): one local server answering both lookups.
 LOOKUP_BASE = os.environ.get("HOMEAIR_LOOKUP_BASE", "").rstrip("/")
@@ -50,6 +53,9 @@ OPEN_METEO_FORECAST = f"{LOOKUP_BASE}/v1/forecast" if LOOKUP_BASE else "https://
 LOOKUP_RESULTS = 3  # matches: enough to catch a name shared by different states.
 AMBIGUOUS_SHOWN = 3  # matches shown when a place needs its city or state.
 LOOKUP_TIMEOUT = 15  # seconds per place or timezone request.
+PLACE_HALF_CELL_DEG = 10 ** -PLACE_DECIMALS / 2  # degrees: half the rounded place's 0.01° cell, for its worst-case shift
+PUBLIC_AREA_MARGIN_KM = 1  # km: keep the existing public-map box margin beyond AREA_KM
+PUBLIC_ROUNDING_MARGIN_KM = 0.05  # km: extra beyond the half-cell diagonal for box precision and latitude variation
 LIVE_RETRY_SECONDS = 10  # --live keeps trying this long when the page doesn't answer yet: an app started a moment ago (a Codex run checked 5 times too early).
 LIVE_TIMEOUT = 30  # seconds: a running page may be waiting on its outside sources.
 DEFAULT_PORT = 5555  # server.py's local port without PORT.
@@ -82,7 +88,6 @@ FALLBACK_TRIES = 20  # ports tried from FALLBACK_PORT.
 STARTUP_WAIT = 30  # seconds for the page to answer after the system starts it at login (uv may install packages first).
 OPEN_TIMEOUT = 10  # seconds the browser opener gets: it returns at once, or something is wrong.
 WAIT_POLL_SECONDS = 2  # how often --wait-token looks for the saved token: the user sees the agent move on within 2 s.
-EXACT_DECIMALS = 4  # decimals config.toml keeps on this computer: about 10 m, for picking the nearest road; the app rounds to PLACE_DECIMALS when it loads
 URL_FILE = "agent-url"  # Home Air's address the skill reads instead of this computer's (skill add --url), in the repo folder (ignored by git)
 SKILL = "home-air-quality"  # the reading skill: its folder under skills/ here, and its name in each agent's skills folder
 AGENT_FILE = "agent-links.json"  # what --agent on linked, in the repo folder (ignored by git), so --agent off removes only those
@@ -245,7 +250,8 @@ def valid_timezone(name):
 def timezone_at(lat, lon, get=None):
     get = get or http_get_json
     try:
-        tz = get(OPEN_METEO_FORECAST, {"latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 1}).get("timezone")
+        tz = get(OPEN_METEO_FORECAST, {"latitude": round(lat, PLACE_DECIMALS), "longitude": round(lon, PLACE_DECIMALS),
+                                      "timezone": "auto", "forecast_days": 1}).get("timezone")
     except (requests.RequestException, ValueError, AttributeError):
         tz = None
     if not valid_timezone(tz):
@@ -390,9 +396,16 @@ def choose_monitors(rows, args):
 def outdoor_source(place):
     """An indoor-only home's outdoor source, chosen once: the nearest public monitor reporting within
     publicmap.NEARBY_SOURCE_KM (its id on AirGradient's map, saved as outdoor_from; the app then reads that one monitor
-    alone), "area" or "model". One area request on AirGradient's public map around the home."""
+    alone), "area" or "model". One request around the rounded place, widened by half a cell's diagonal (at most about
+    0.8 km) plus a margin. The exact place stays on this computer for distance ranking."""
     try:
-        world = publicmap.fetch_area(place.lat, place.lon, publicmap.AREA_KM + 1)
+        lat, lon = round(place.lat, PLACE_DECIMALS), round(place.lon, PLACE_DECIMALS)
+        rounding_km = publicmap.KM_PER_DEG * PLACE_HALF_CELL_DEG * math.hypot(1, math.cos(math.radians(lat)))
+        world = publicmap.fetch_area(lat, lon, publicmap.AREA_KM + PUBLIC_AREA_MARGIN_KM + rounding_km + PUBLIC_ROUNDING_MARGIN_KM)
+        # The extra fetch margin protects coverage, not eligibility: preserve the old exact-centred box locally.
+        bounds = publicmap.box(place.lat, place.lon, publicmap.AREA_KM + PUBLIC_AREA_MARGIN_KM)
+        world = [m for m in world if bounds["ymin"] <= m["latitude"] <= bounds["ymax"]
+                 and bounds["xmin"] <= m["longitude"] <= bounds["xmax"]]
         pick, _, _ = publicmap.suggest(world, place.lat, place.lon, datetime.now(timezone.utc))
         return pick
     except Exception:  # optional public discovery must never block household setup
@@ -425,6 +438,47 @@ def build_config(place, monitors, profiles, outdoor):
         if place.country != "US":
             lines.append("smoke = false")
     return "\n".join(lines) + "\n"
+
+
+def _reads(text):
+    try:
+        tomllib.loads(text)
+        return True
+    except tomllib.TOMLDecodeError:
+        return False
+
+
+def update_config(old, place, monitors, profiles, outdoor, profiles_asked):
+    """The config.toml text `old` with what a place with a token owns changed in place: the place, the chosen monitors
+    (and a home-server copy's serial and host when it is the same monitor), the outdoor source and the unit when none
+    is set, and the profiles only when asked for or absent. Every other line, the roads and the comments stay."""
+    raw = tomllib.loads(old)
+    values = {"name": place.name, "lat": place.lat, "lon": place.lon, "timezone": place.timezone}
+    for kind, row in monitors.items():
+        values[kind] = publicmap.plain_text(row.get("locationName") or kind)
+        values[kind + "_id"] = row["locationId"]
+    if place.country == "US" and place.zip:
+        values["pollen_zip"] = place.zip
+    if place.region:
+        values["region"] = place.region
+    text = config.set_keys(old, "place", values)
+    kept = kept_monitor_keys(old, monitors)
+    drop = {"place": {k: None for k in ("pollen_zip", "region") if k not in values}}
+    for kind in KINDS:
+        if kind in monitors:
+            drop[kind] = {f"{kind}_serial": None, f"{kind}_host": None, **kept.get(kind, {})}
+        else:
+            drop[kind] = {kind: None, f"{kind}_id": None, f"{kind}_serial": None, f"{kind}_host": None}
+    text = config.set_monitor_keys(text, drop)
+    if profiles_asked or "profiles" not in raw:
+        text = config.set_keys(text, "profiles", {key: key in profiles for key in PROFILES})
+    if "temp_unit" not in (raw.get("home") or {}):
+        text = config.set_keys(text, "home", {"temp_unit": temp_unit(place)})
+    if outdoor is not None:
+        text = config.set_keys(text, "sources", {"outdoor_from": outdoor})
+    if place.country and place.country != "US":
+        text = config.set_keys(text, "sources", {"smoke": False})
+    return text
 
 
 def kept_monitor_keys(old, monitors):
@@ -543,6 +597,24 @@ def write_found(root, chosen, unit_country):
             config.backup_config(path)
             config.replace_text(path, text)   # whole or not at all: an interrupted run never leaves half a home
     return path
+
+
+def exact_place(place):
+    """The (lat, lon) of a parsed [place] as config.toml keeps it, or None when it has none."""
+    try:
+        return round(float(place["lat"]), EXACT_DECIMALS), round(float(place["lon"]), EXACT_DECIMALS)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def find_roads_step(path, previous):
+    """The home's roads, found from the exact place in config.toml and written there (road_data.setup_roads), and the
+    lines that say what was found. No question, and the exit code never depends on it: a failure is a line."""
+    try:
+        res = road_data.setup_roads(path, previous, get=requests.get)
+    except Exception:  # the roads are an extra: they never stop setup
+        return ["Roads: couldn't get the road data; Home Air on this computer tries again at its next start, at most once a day."]
+    return res.lines
 
 
 def parsed_place(text):
@@ -684,7 +756,15 @@ def setup(args, env, root):
     outdoor = outdoor_source(place) if "outdoor" not in monitors else None
     path = root / "config.toml"
     old = path.read_text(encoding="utf-8") if path.exists() else None
-    text = config.set_monitor_keys(build_config(place, monitors, profiles, outdoor), kept_monitor_keys(old, monitors))
+    try:
+        previous = exact_place(tomllib.loads(old).get("place", {})) if old is not None else None
+    except tomllib.TOMLDecodeError:
+        previous = None   # an old file that doesn't read is replaced below, as before
+    if old is None or not _reads(old):
+        text = config.set_monitor_keys(build_config(place, monitors, profiles, outdoor), kept_monitor_keys(old, monitors))
+    else:   # a config.toml that reads: updated in place, so the owner's roads, limits, profiles and comments stay
+        text = update_config(old, place, monitors, profiles, outdoor, args.profiles is not None)
+        profiles = [k for k, v in (tomllib.loads(text).get("profiles") or {}).items() if v is True]
     cfg = load_config({"CONFIG_TOML": text}, root)
     if old != text:
         if old is not None:
@@ -692,6 +772,7 @@ def setup(args, env, root):
             print(f"Saved the previous config at {backup}")
         path.write_text(text, encoding="utf-8")
     print(f"Home: {place.name}, {place.lat}, {place.lon}; timezone {place.timezone}")
+    print("\n".join(find_roads_step(path, previous)))
     print(f"Who lives here: {', '.join(profiles) or 'none'}")
     print(f"Temperatures in °{cfg.temp_unit}" + (" (a US home)" if cfg.temp_unit == "F" else "") + ": change [home] temp_unit in config.toml to switch")
     if outdoor is not None:
@@ -746,6 +827,7 @@ def set_home(args, profiles, env, root):
     if place is not None:
         print(f"Home: {place.name}; timezone {place.timezone}. The exact location stays in config.toml on this computer; "
               "what is sent for weather and pollen, and what the page shows, is rounded to about 1 km.")
+        print("\n".join(find_roads_step(path, exact_place(current))))
     if args.profiles is not None:
         print(f"Who lives here: {', '.join(profiles) or 'none'}")
     print(f"Settings: {path}")
@@ -768,10 +850,15 @@ def railway(service, root):
     try:
         place = tomllib.loads(text).get("place", {})
     except tomllib.TOMLDecodeError:
-        place = {}   # sent as it is: the check on Railway says what's wrong
+        place = {}   # online_roads below refuses text that doesn't read: nothing is sent
     if "lat" in place and "lon" in place:   # the exact location stays on this computer: Home Air online gets it rounded
         text = config.set_keys(text, "place", {"lat": round(float(place["lat"]), PLACE_DECIMALS),
                                                "lon": round(float(place["lon"]), PLACE_DECIMALS)})
+    try:
+        text = config.online_roads(text)
+    except config.ConfigError as e:
+        raise SetupError(str(e)) from None
+    # the roads' arcs in degrees stay on this computer: Home Air online gets 8-point sectors
     values = {"CONFIG_TOML": text}
     values.update((name, env_key(name, keys)) for name in KEY_NAMES if env_key(name, keys))
     for name, value in values.items():

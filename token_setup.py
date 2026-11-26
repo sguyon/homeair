@@ -86,10 +86,14 @@ def writable_folder(path):
         return False
 
 
+def local_machine(env=os.environ):
+    """The environment half of local_entry, for checks with no request: not hosted, not in a Docker or Podman container."""
+    return not hosted(env) and not DOCKER_MARKER.exists() and not PODMAN_MARKER.exists()
+
+
 def local_entry(req, path):
     """Check the local environment before revealing whether a token already exists."""
-    return (local_request(req) and not forwarded(req) and local_host(req) and not hosted() and not DOCKER_MARKER.exists()
-            and not PODMAN_MARKER.exists() and writable_folder(path))
+    return local_request(req) and not forwarded(req) and local_host(req) and local_machine() and writable_folder(path)
 
 
 def allowed(req, path, token, mode):

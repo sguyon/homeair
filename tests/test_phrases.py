@@ -7,11 +7,13 @@ FULL_FACTS = {
     "rh": {"rh": 64, "rh_out": 80, "dry": False, "drier_out": False},
     "pm": {"pm": 25, "pm_now": 4, "peak_at": "7 PM", "cause": "BQE rush", "wind_dir": 135, "smoke": True},
     "pollen": {"pollen_index": 4, "pollen_type": "tree"},
+    "traffic": {"roads": [{"name": "the BQE", "band": "within 500 m", "side": "E"}], "why": "busy", "wind": "east"},
 }
 
 
 def numbers(text):
-    return {float(n) for n in re.findall(r"\d+(?:\.\d+)?", text.replace(",", ""))}
+    """The numbers in a sentence; "PM2.5" is a name, not a number."""
+    return {float(n) for n in re.findall(r"\d+(?:\.\d+)?", text.replace(",", "").replace("PM2.5", "PM"))}
 
 
 def numbers_in(facts):

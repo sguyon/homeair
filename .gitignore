@@ -59,3 +59,5 @@ PRODUCT.md
 # the phones that get alerts, and what was sent to them (alert_store.py)
 /alerts.sqlite*
 /local-addresses.json
+# the road data downloaded for this home (road_data.py)
+/road-data/

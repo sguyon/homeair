@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import summary
-from alert_rules import (BASELINE_ALL, Phone, Sent, action_key, clearly_better, due_at, in_quiet, notification_text, plan_sends, quiet_end,
+from alert_rules import (also_text, BASELINE_ALL, Phone, Sent, action_key, clearly_better, due_at, in_quiet, notification_text, plan_sends, quiet_end,
                          seed, take_baseline, update_sent, without_offline, OFFLINE_AFTER, QUIET_DEFAULT)
 from demo.moments import MOMENTS
 from test_demo import c, demo, read  # noqa: F401  (the demo app's fixtures)
@@ -53,6 +53,15 @@ def test_rush_moment_sends_pm_then_co2(c):
     assert len(later) == 1 and later[0].keys == ["co2"]
     assert later[0].title == "CO₂ is high inside"   # it is 11 AM: "after 11 AM" would read as not yet
     assert later[0].body == "Open a window for 10 min (1,250 ppm, over the 800 limit)."
+
+
+def test_a_road_action_alone_has_a_title_and_names_its_road():
+    """A road's exhaust with PM2.5 under its limit is an action with no reading: the alert names the road instead of
+    a number, and the checker doesn't fail on it."""
+    traffic = item("traffic", "Keep the south-east windows shut", "until 11 AM", label="Traffic", num=None, unit=None,
+                   ctx="the BQE")
+    assert notification_text(traffic) == ("Traffic exhaust outside", "Keep the south-east windows shut until 11 AM (the BQE).")
+    assert also_text(traffic) == "keep the south-east windows shut until 11 AM"
 
 
 def test_clear_moment_sends_nothing(c):

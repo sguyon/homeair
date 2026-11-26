@@ -29,6 +29,8 @@ RUN ln -s /config/config.toml /app/config.toml \
 # container and a new image.
 RUN mkdir /data && chown app:app /data
 ENV HISTORY_FILE=/data/history.sqlite
+# the road files downloaded at start (road_data.py): /app isn't writable by the app's user
+ENV ROAD_DATA_DIR=/data/road-data
 USER app
 
 EXPOSE 8000

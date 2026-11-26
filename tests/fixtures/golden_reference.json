@@ -307,6 +307,13 @@
        "peak_at": "7 PM",
        "pm": 25,
        "pm_now": 7,
+       "roads": [
+        {
+         "band": null,
+         "name": "BQE",
+         "side": "SE"
+        }
+       ],
        "smoke": false,
        "wind_dir": 135
       },
@@ -1019,7 +1026,14 @@
       "facts": {
        "airing_when": "when CO₂ is high",
        "pollen_index": 4,
-       "pollen_type": "tree"
+       "pollen_type": "tree",
+       "roads": [
+        {
+         "band": null,
+         "name": "BQE",
+         "side": "SE"
+        }
+       ]
       },
       "forecast": false,
       "id": "pollen",

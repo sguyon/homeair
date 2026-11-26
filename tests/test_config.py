@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -438,3 +439,102 @@ def test_a_home_without_a_place_is_valid_but_half_a_place_is_not(tmp_path):
     with pytest.raises(ConfigError) as e:
         load_config({"CONFIG_TOML": '[place]\nlat = 40.7\ntimezone = "UTC"\n'}, tmp_path)
     assert "place.name, place.lat and place.lon go together" in str(e.value)
+
+
+# ---- [[roads]] ---------------------------------------------------------------------------------------------
+
+import difflib
+import tomllib
+
+from config import online_roads, set_road_on, set_roads
+
+REFERENCE_TEXT = (REPO / "tests" / "fixtures" / "config_reference.toml").read_text(encoding="utf-8")
+BQE_ENTRY = {"name": "the BQE", "kind": "highway", "key": "bqe", "data": "nyc.json.gz", "country": "US",
+             "band": "within 500 m", "side": "E", "toward": [74, 162], "toward_calm": [55, 202],
+             "aadt": 119116, "trucks_pct": 11, "found": "auto", "on": True}
+FOURTH_AVE_OFF = {"name": "4th Avenue", "kind": "main road", "key": "4th-avenue", "data": "nyc.json.gz", "country": "US",
+                  "band": "within 200 m", "side": "SE", "toward": [100, 130], "toward_calm": [90, 140], "found": "auto", "on": False}
+
+
+def test_roads_round_trip_and_the_hand_set_road_is_untouched(tmp_path):
+    text = REFERENCE_TEXT   # the fixed reference home keeps the legacy hand-set [road]
+    out = set_roads(text, [BQE_ENTRY, FOURTH_AVE_OFF])
+    assert out.split("[[roads]]")[0].rstrip() == text.rstrip()   # [road] byte-for-byte
+    cfg = load_config({"CONFIG_TOML": out}, REPO)
+    assert [r.name for r in cfg.roads] == ["BQE", "the BQE", "4th Avenue"] and cfg.roads[2].on is False
+    assert cfg.roads[0].toward == cfg.road.toward   # the hand-set arc as before
+    assert cfg.roads[0].found is None and cfg.roads[0].on and cfg.roads[0].route == "static/bqe.json"
+    assert cfg.roads[0].toward_calm == cfg.road.toward and cfg.roads[0].side in roads_sectors()
+    assert cfg.roads[1].toward == (74, 162) and cfg.roads[1].aadt == 119116 and cfg.roads[1].key == "bqe"
+    again = set_road_on(out, "4th-avenue", True)
+    assert [l for l in difflib.ndiff(out.splitlines(), again.splitlines()) if l[0] in "+-"] == ["- on = false", "+ on = true"]
+    with pytest.raises(KeyError):
+        set_road_on(out, "nope", True)
+
+
+def roads_sectors():
+    from roads import SECTORS
+    return SECTORS
+
+
+def test_set_roads_replaces_every_block_and_keeps_the_rest():
+    once = set_roads(REFERENCE_TEXT, [BQE_ENTRY, FOURTH_AVE_OFF])
+    twice = set_roads(once, [BQE_ENTRY])
+    assert twice.count("[[roads]]") == 1 and "4th" not in twice
+    assert set_roads(twice, [BQE_ENTRY]) == twice   # same entries, same text
+    assert set_roads(REFERENCE_TEXT, []) == REFERENCE_TEXT
+    assert set_roads(once, []).rstrip() == REFERENCE_TEXT.rstrip()
+
+
+def test_online_roads_has_only_sectors():
+    out = online_roads(set_roads(REFERENCE_TEXT, [BQE_ENTRY]))
+    entry = tomllib.loads(out)["roads"][0]
+    assert entry["toward"] == ["E", "SE", "S"] and all(isinstance(s, str) for s in entry["toward_calm"])
+    assert load_config({"CONFIG_TOML": out}, REPO).roads[1].toward == ("E", "SE", "S")   # still reads
+    assert online_roads(REFERENCE_TEXT) == REFERENCE_TEXT
+
+
+@pytest.mark.parametrize("change,word", [
+    ({"toward": [74.5, 162]}, "toward"), ({"toward": [74]}, "toward"), ({"toward": ["E", "up"]}, "toward"),
+    ({"toward_calm": [10, 400]}, "toward_calm"), ({"band": "far"}, "band"), ({"side": "up"}, "side"),
+    ({"found": "hand"}, "found"), ({"on": "yes"}, "on"),
+])
+def test_a_bad_road_entry_names_the_entry(change, word):
+    out = set_roads(REFERENCE_TEXT, [{**BQE_ENTRY, **change}])
+    with pytest.raises(ConfigError, match=rf"the BQE.*{word}"):
+        load_config({"CONFIG_TOML": out}, REPO)
+
+
+def test_a_far_road_has_no_toward_and_sectors_are_kept():
+    far = {k: v for k, v in FOURTH_AVE_OFF.items() if k != "toward"} | {"toward_calm": ["N", "NE"]}
+    cfg = load_config({"CONFIG_TOML": set_roads(REFERENCE_TEXT, [far])}, REPO)
+    assert cfg.roads[1].toward is None and cfg.roads[1].toward_calm == ("N", "NE")
+
+
+def test_no_road_at_all_has_no_entries(tmp_path):
+    assert load_config({}, root_with(tmp_path)).roads == ()
+
+
+def test_set_roads_keeps_comments_and_blank_lines_after_a_block():
+    without_limits = re.sub(r"(?ms)^\[limits\]\n.*?(?=^\[|\Z)", "", REFERENCE_TEXT)
+    base = without_limits.rstrip() + ("\n\n[[roads]]\nname = \"old # [x\"\nkey = 'old'\non = true\ntoward = [\n  \"E\",  # a ] in a comment\n  \"SE\",\n]\n"
+                                 "\n# keep me\n\n[limits]\nco2 = 900\n")
+    out = set_roads(base, [BQE_ENTRY])
+    assert tomllib.loads(out)["roads"] == [BQE_ENTRY]
+    spread = REFERENCE_TEXT.rstrip() + "\n\n[[roads]]\nname = \"x\"\nkey = \"x\"\ntoward = [\n  74,\n  162,\n]\ntoward_calm = [55,\n 202]\n"
+    assert tomllib.loads(online_roads(spread))["roads"][0]["toward"] == ["E", "SE", "S"]
+    assert tomllib.loads(online_roads(spread))["roads"][0]["toward_calm"] == ["NE", "E", "SE", "S"]
+    assert "# keep me" in out and "[limits]\nco2 = 900\n" in out and 'name = "old"' not in out
+    assert [l for l in difflib.ndiff(base.splitlines(), set_road_on(base, "old", False).splitlines()) if l[0] in "+-"] == ["- on = true", "+ on = false"]
+
+
+def test_online_roads_fails_closed_on_an_arc_it_cannot_convert():
+    spread = REFERENCE_TEXT.rstrip() + "\n\n[[roads]]\nname = \"x\"\nkey = \"x\"\ntoward = [\n  74,  # note\n  162,\n]\n"
+    road = REFERENCE_TEXT.rstrip() + "\n\n[[roads]]\nname = \"x\"\nkey = \"x\"\n"
+    for text in (spread, road + "toward = 74\n", road + "toward_calm = [\"E\", 74]\n", road + "toward = [\"74-162\"]\n"):
+        with pytest.raises(ConfigError, match="toward = \\[74, 162\\]"):
+            online_roads(text)
+    with pytest.raises(ConfigError, match="can't be read"):
+        online_roads(road + "toward = [74, 162\n")   # not TOML: refused, never sent as it is
+    hand_set = REFERENCE_TEXT.replace('toward = [80, 200]', 'toward = [66, 207]')
+    assert "toward = [66, 207]" in hand_set and online_roads(hand_set) == hand_set   # a hand-set [road] keeps its arc in degrees

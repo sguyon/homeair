@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import roads as roads_mod
+
 ROOT = Path(__file__).resolve().parent   # the app's folder: config.toml, demo/ and relative road routes live here
 
 # Owner-only file mode: every saved dotenv contains credentials, including an existing file.
@@ -250,6 +252,157 @@ def set_keys(text: str, section: str, values: dict) -> str:
     return text
 
 
+def _bracket_depth(line: str, depth: int) -> int:
+    """The depth of open [ and { after a line, given the depth before it; brackets in quoted strings and comments don't count."""
+    quote = None
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c == "#":
+            break
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        i += 1
+    return max(depth, 0)
+
+
+def depth_at_start(lines: list[str], start: int, j: int) -> int:
+    """The bracket depth before line j, counted from line start (a continuation line may begin with [ )."""
+    depth = 0
+    for k in range(start + 1, j):
+        depth = _bracket_depth(lines[k], depth)
+    return depth
+
+
+ROADS_HEADER_RE = re.compile(r"\s*\[\[roads\]\]\s*(#.*)?")
+
+
+def _road_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    """(start, end) line ranges of the [[roads]] blocks: from the header to its last key line."""
+    blocks = []
+    for i, l in enumerate(lines):
+        if ROADS_HEADER_RE.fullmatch(l.rstrip("\r\n")):
+            stop = next((j for j in range(i + 1, len(lines)) if SECTION_RE.match(lines[j]) and depth_at_start(lines, i, j) == 0), len(lines))
+            last, depth = i, 0
+            for j in range(i + 1, stop):
+                opens = depth > 0   # a continuation line of an array or inline table
+                if opens or re.match(r"\s*[A-Za-z0-9_-]+\s*=", lines[j]):
+                    last = j
+                depth = _bracket_depth(lines[j], depth)
+            blocks.append((i, last + 1))   # comments and blank lines after the last key are not the block's
+    return blocks
+
+
+def set_roads(text: str, entries: list[dict]) -> str:
+    """config.toml text with every [[roads]] block removed and `entries` (dicts, as roads.entry makes them) written at the
+    end, one block each, in the dict's key order. Every other line stays as it is."""
+    lines = text.splitlines(keepends=True)
+    blocks = _road_blocks(lines)
+    for start, end in reversed(blocks):
+        del lines[start:end]
+    if not blocks and not entries:
+        return text
+    while lines and not lines[-1].strip():
+        lines.pop()
+    out = "".join(lines)
+    if out and not out.endswith("\n"):
+        out += "\n"
+    for e in entries:
+        out += ("\n" if out else "") + "[[roads]]\n" + "".join(f"{k} = {_toml_value(v)}\n" for k, v in e.items())
+    return out
+
+
+def _auto_block(block: str) -> bool:
+    """Whether a [[roads]] block's text was written by setup (found = "auto"); a block that can't be read is not."""
+    try:
+        listed = tomllib.loads(block).get("roads", [])
+    except tomllib.TOMLDecodeError:
+        return False
+    return len(listed) == 1 and isinstance(listed[0], dict) and listed[0].get("found") == ROAD_FOUND
+
+
+def set_auto_roads(text: str, entries: list[dict]) -> str:
+    """config.toml text with the [[roads]] blocks setup wrote (found = "auto") removed, each with the blank line before
+    it, and `entries` written at the end. A [[roads]] block written by hand stays as it is, in place, with its
+    comments; with no auto block and no entry the text is returned unchanged."""
+    lines = text.splitlines(keepends=True)
+    owned = [(start, end) for start, end in _road_blocks(lines) if _auto_block("".join(lines[start:end]))]
+    if not owned and not entries:
+        return text
+    for start, end in reversed(owned):
+        if start > 0 and not lines[start - 1].strip():
+            start -= 1
+        del lines[start:end]
+    if not entries:
+        return "".join(lines)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    out = "".join(lines)
+    if out and not out.endswith("\n"):
+        out += "\n"
+    for e in entries:
+        out += ("\n" if out else "") + "[[roads]]\n" + "".join(f"{k} = {_toml_value(v)}\n" for k, v in e.items())
+    return out
+
+
+def set_road_on(text: str, key: str, on: bool) -> str:
+    """config.toml text with the `on` line of the [[roads]] entry whose key is `key` set. KeyError when no entry has it."""
+    lines = text.splitlines(keepends=True)
+    for start, end in _road_blocks(lines):
+        if not any(re.fullmatch(rf"\s*key\s*=\s*(\"{re.escape(key)}\"|'{re.escape(key)}')\s*(#.*)?", l.rstrip("\r\n")) for l in lines[start:end]):
+            continue
+        value = _toml_value(bool(on))
+        at = next((i for i in range(start + 1, end) if re.match(r"\s*on\s*=", lines[i])), None)
+        if at is not None:
+            lines[at] = re.sub(r"^(\s*on\s*=\s*)(true|false)", rf"\g<1>{value}", lines[at], count=1)
+        else:
+            last = max((i for i in range(start + 1, end) if re.match(r"\s*[A-Za-z0-9_-]+\s*=", lines[i])), default=start)
+            if not lines[last].endswith("\n"):
+                lines[last] += "\n"
+            lines.insert(last + 1, f"on = {value}\n")
+        return "".join(lines)
+    raise KeyError(key)
+
+
+def online_roads(text: str) -> str:
+    """config.toml text for Home Air online: each [[roads]] `toward` and `toward_calm` in degrees becomes its sector list,
+    so the arcs never leave this computer. Every other line stays as it is."""
+    lines = text.splitlines(keepends=True)
+    for start, end in reversed(_road_blocks(lines)):   # the arrays may spread over several lines: work on the block's text
+        block = "".join(lines[start:end])
+        block = re.sub(r"(?m)^([ \t]*(?:toward|toward_calm)[ \t]*=[ \t]*)\[\s*(\d+)\s*,\s*(\d+)\s*,?\s*\]",
+                       lambda m: m[1] + _toml_value(roads_mod.sectors((int(m[2]), int(m[3])))), block)
+        lines[start:end] = block.splitlines(keepends=True)
+    out = "".join(lines)
+    only_sectors(out)
+    return out
+
+
+def only_sectors(text: str) -> None:
+    """ConfigError unless the text reads as TOML and every [[roads]] `toward` and `toward_calm` is a list of sector names:
+    what Home Air online gets must hold no arc in degrees. A hand-set [road] is not checked (its arc may stay in degrees)."""
+    try:
+        roads = tomllib.loads(_clean(text)).get("roads", [])
+    except tomllib.TOMLDecodeError:
+        raise ConfigError("config.toml can't be read, so nothing was sent to Home Air online. "
+                          "Run ./homeair check --config to see the problem, then run ./homeair railway again.") from None
+    def sectors_only(v):
+        return isinstance(v, list) and v and all(isinstance(x, str) and x in roads_mod.SECTORS for x in v)
+    if not isinstance(roads, list) or any(not isinstance(r, dict) or not all(sectors_only(r[k]) for k in ("toward", "toward_calm") if k in r)
+                                          for r in roads):
+        raise ConfigError("A road's arc in config.toml couldn't be converted for Home Air online, so nothing was sent. "
+                          "Write it as two whole degrees on one line, like toward = [74, 162], then run ./homeair railway again.")
+
+
 def config_path(cfg, env: Mapping[str, str] = os.environ, root: Path = ROOT) -> Path | None:
     """The file cfg was read from, for the app to write it back: CONFIG_FILE's or root/config.toml. None for the demo
     and CONFIG_TOML (a variable: the app can't change it)."""
@@ -280,6 +433,8 @@ def replace_text(path: Path, text: str):
 def _toml_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_value(v) for v in value) + "]"
     return str(value) if isinstance(value, (int, float)) else json.dumps(str(value))
 
 
@@ -319,6 +474,27 @@ class Road:
 
 
 @dataclass(frozen=True)
+class RoadEntry:
+    """One road the home follows or lists: a hand-set [road] (found None) or a [[roads]] entry written at setup (found "auto")."""
+    name: str
+    kind: str
+    key: str | None
+    data: str | None
+    country: str | None
+    band: str | None
+    side: str | None
+    toward: tuple[int, int] | tuple[str, ...] | None   # degrees (lo, hi), or sector names; None: no point within reach
+    toward_calm: tuple[int, int] | tuple[str, ...] | None
+    aadt: int | None
+    trucks_pct: int | None
+    found: str | None
+    on: bool
+    rush: tuple = ()
+    route: str | None = None
+    slow: tuple[tuple[int, int], ...] = ()   # weekday [from, to) hours measured slow from the road's speeds (road_timing.py)
+
+
+@dataclass(frozen=True)
 class Config:
     source: str
     demo: bool
@@ -331,6 +507,7 @@ class Config:
     appliances: tuple[str, ...] = DEFAULT_APPLIANCES
     outdoor_from: int | str | None = None   # without an outdoor monitor: a public monitor's id on AirGradient's map, "area" or "model"
     temp_unit: str = DEFAULT_TEMP_UNIT
+    roads: tuple[RoadEntry, ...] = ()   # the hand-set [road] first, then [[roads]] in file order
 
 
 def _clean(text: str) -> str:
@@ -520,6 +697,74 @@ def _monitor_name(p: dict, key: str) -> str | None:
     return name if name.strip() else None
 
 
+ROAD_BANDS = ("within 200 m", "within 500 m", "500 m to 1 km", "no main road within 1 km")   # the only distance phrases
+ROAD_FOUND = "auto"   # `found` of a [[roads]] entry written by setup
+
+
+def _road_toward(v, where: str, source: str):
+    """Two whole degrees (0 to 360), or a list of sector names, as a tuple."""
+    if isinstance(v, list) and len(v) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in v):
+        if not all(0 <= x <= 360 for x in v):
+            raise ConfigError(f"{source}: {where} degrees must be from 0 to 360")
+        return (v[0], v[1])
+    if isinstance(v, list) and v and all(isinstance(x, str) and x in roads_mod.SECTORS for x in v):
+        return tuple(v)
+    raise ConfigError(f"{source}: {where} must be two whole degrees, like [74, 162], or sector names, like [\"E\", \"SE\"]")
+
+
+def _road_slow(v, where: str, source: str) -> tuple[tuple[int, int], ...]:
+    """A list of [from, to) whole hours, 0 <= from < to <= 24, as a tuple of pairs."""
+    ok = isinstance(v, list) and all(isinstance(w, list) and len(w) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in w)
+                                     and 0 <= w[0] < w[1] <= 24 for w in v)
+    if not ok:
+        raise ConfigError(f"{source}: {where} must be a list of [from, to] hours from 0 to 24, like [[7, 21]]")
+    return tuple((w[0], w[1]) for w in v)
+
+
+def _opt_int(t: dict, k: str, where: str, source: str) -> int | None:
+    return _int(t[k], f"{where} {k}", source) if k in t else None
+
+
+def _road_entry(t, i: int, source: str) -> RoadEntry:
+    if not isinstance(t, dict):
+        raise ConfigError(f"{source}: [[roads]] number {i + 1} must be a table")
+    name = t.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ConfigError(f"{source}: [[roads]] number {i + 1} needs a name")
+    where = f"roads entry {name!r}"
+    def text(k):
+        v = t.get(k)
+        if v is not None and not isinstance(v, str):
+            raise ConfigError(f"{source}: {where} {k} must be text")
+        return v
+    band, side, found = text("band"), text("side"), text("found")
+    if band is not None and band not in ROAD_BANDS:
+        raise ConfigError(f"{source}: {where} band must be one of: " + "; ".join(ROAD_BANDS))
+    if side is not None and side not in roads_mod.SECTORS:
+        raise ConfigError(f"{source}: {where} side must be one of: " + ", ".join(roads_mod.SECTORS))
+    if found is not None and found != ROAD_FOUND:
+        raise ConfigError(f"{source}: {where} found must be \"{ROAD_FOUND}\" or left out")
+    toward = _road_toward(t["toward"], f"{where} toward", source) if "toward" in t else None
+    calm = _road_toward(t["toward_calm"], f"{where} toward_calm", source) if "toward_calm" in t else None
+    return RoadEntry(name=name, kind=(text("kind") or "highway").strip() or "highway", key=text("key"), data=text("data"),
+                     country=text("country"), band=band, side=side, toward=toward, toward_calm=calm,
+                     aadt=_opt_int(t, "aadt", where, source), trucks_pct=_opt_int(t, "trucks_pct", where, source), found=found,
+                     on=_flag(t.get("on", True), f"{where} on", source),
+                     slow=_road_slow(t["slow"], f"{where} slow", source) if "slow" in t else ())
+
+
+def _route_side(lat: float, lon: float, route: str, root: Path) -> str | None:
+    """The 8-point side of the route's nearest point from a place; None when the route can't be read."""
+    try:
+        points = json.loads(route_path(route, root).read_text(encoding="utf-8"))
+        to_xy = roads_mod.local_xy(lat, lon)
+        xy = [to_xy(p[0], p[1]) for p in points]
+        _, pt = min((roads_mod.seg_distance((0.0, 0.0), a, b) for a, b in zip(xy, xy[1:])), key=lambda r: r[0])
+        return roads_mod.side_name(roads_mod.bearing_deg(*pt))
+    except (OSError, ValueError, TypeError, IndexError):
+        return None
+
+
 def _parse(text: str, source: str, root: Path, demo: bool) -> Config:
     try:
         raw = tomllib.loads(_clean(text))
@@ -599,11 +844,20 @@ def _parse(text: str, source: str, root: Path, demo: bool) -> Config:
                 raise ConfigError(f"{source}: road.route {route} is not a list of [lon, lat] points") from e
         kind = str(r.get("kind", "highway")).strip() or "highway"
         road = Road(name, route, tuple(rush), toward, kind)
+    entries = []
+    if road:
+        side = _route_side(place.lat, place.lon, road.route, root) if place.lat is not None else None
+        entries.append(RoadEntry(road.name, road.kind, None, None, None, None, side, road.toward, road.toward, None, None, None,
+                                 True, road.rush, road.route))
+    listed = raw.get("roads", [])
+    if not isinstance(listed, list):
+        raise ConfigError(f"{source}: roads must be a list of [[roads]] blocks")
+    entries += [_road_entry(t, i, source) for i, t in enumerate(listed)]
     seasons = raw.get("pollen_seasons", [])
     if not isinstance(seasons, list):
         raise ConfigError(f"{source}: pollen_seasons must be a list of [[pollen_seasons]] blocks")
     return Config(source, demo, place, road, profiles, limits, tuple(seasons), sources, _appliances(home_t, source), outdoor_from,
-                  _temp_unit(home_t, source))
+                  _temp_unit(home_t, source), tuple(entries))
 
 
 def load_config(env: Mapping[str, str] = os.environ, root: Path = ROOT) -> Config | None:
@@ -687,6 +941,14 @@ def place_links(p: Place) -> dict:
     return links
 
 
+def _road_row(r: RoadEntry) -> dict:
+    """One road as the page reads it: names, bands and 8-point sides only (never an arc, a place or a file name)."""
+    arc = r.toward if not r.toward or isinstance(r.toward[0], str) else roads_mod.sectors(r.toward)
+    return {"name": r.name, "short": r.name.removeprefix("the "), "kind": r.kind, "band": r.band, "side": r.side,
+            "found": r.found, "on": r.on, "key": r.key, "aadt": r.aadt, "trucks_pct": r.trucks_pct,
+            "several": bool(arc) and len(set(arc)) == len(roads_mod.SECTORS)}   # the arc covers every side
+
+
 def public_view(cfg: Config, root: Path = ROOT) -> dict:
     """What the page may see (window.APP). Never env values."""
     p = cfg.place
@@ -698,6 +960,8 @@ def public_view(cfg: Config, root: Path = ROOT) -> dict:
         },
         "links": place_links(p),
         "road": None,
+        "roads": [_road_row(r) for r in cfg.roads],   # every road in Config.roads order (the hand-set [road], then [[roads]] in
+                                                      # file order), each with `on`: an index here is the route's ?i=
         "profiles": dict(cfg.profiles),
         "limits": dict(cfg.limits),
         "pollen_seasons": list(cfg.pollen_seasons),

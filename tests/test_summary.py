@@ -712,3 +712,249 @@ def test_pollen_makes_room_for_an_airing():
     items = [{"id": "co2", "action": {"text": "Run the purifier", "when": "now"}}, pollen()]
     with_airing(items)
     assert items[1]["action"] == shut and "airing_when" not in items[1]["facts"]
+
+
+# ── The traffic action: the roads written at setup ([[roads]]), timed by road_timing.py ──
+
+import pytest  # noqa: E402
+
+import air_read  # noqa: E402
+from config import load_config, set_roads  # noqa: E402
+
+NY = ZoneInfo("America/New_York")
+PLACE_TOML = '[place]\nname = "Williamsburg"\nlat = 40.71\nlon = -73.96\ntimezone = "America/New_York"\n'
+AUTO_BQE = {"name": "the BQE", "kind": "highway", "key": "bqe", "data": "nyc-2026-11.json.gz", "country": "US",
+            "band": "within 500 m", "side": "E", "toward": [74, 162], "toward_calm": [55, 202], "slow": [[7, 21]],
+            "found": "auto", "on": True}
+
+
+def tue(h, m=0):
+    return datetime(2026, 12, 1, h, m, tzinfo=NY)   # a Tuesday
+
+
+def auto_config(tmp_path, *entries):
+    return load_config({"CONFIG_TOML": set_roads(PLACE_TOML, list(entries))}, tmp_path)
+
+
+@pytest.fixture
+def auto_bqe(tmp_path):
+    return auto_config(tmp_path, AUTO_BQE)
+
+
+@pytest.fixture
+def auto_bqe_off(tmp_path):
+    return auto_config(tmp_path, {**AUTO_BQE, "on": False})
+
+
+def weather_at(now, wind, hourly=None, hourly_leaving_at=None):
+    """Open-Meteo's answer made from `wind` (from°, km/h): the same wind for the next 12 hours, turned away from the
+    roads from the hour `hourly_leaving_at`, or `hourly` rows (time, from°, km/h); sunrise at 7."""
+    d, kmh = wind
+    if hourly is None:
+        hours = [now.replace(minute=0) + timedelta(hours=k) for k in range(1, 13)]
+        hourly = [(t, d if hourly_leaving_at is None or t.hour < hourly_leaving_at else (d + 180) % 360, kmh) for t in hours]
+    return {"current": {"wind_direction_10m": d, "wind_speed_10m": kmh},
+            "hourly": {"time": [t.strftime("%Y-%m-%dT%H:00") for t, _, _ in hourly],
+                       "wind_direction_10m": [x for _, x, _ in hourly], "wind_speed_10m": [k for _, _, k in hourly]},
+            "daily": {"time": [now.date().isoformat()], "sunrise": [f"{now.date().isoformat()}T07:00"]}}
+
+
+def summary_at(cfg, now, wind, co2=600, hourly=None, hourly_leaving_at=None, cams=None):
+    """The summary at `now` for a home with cfg's roads in weather_at's weather. Outdoor PM2.5 stays clean unless
+    `cams` says otherwise, so only the roads and the CO₂ make items."""
+    weather = weather_at(now, wind, hourly, hourly_leaving_at)
+    rows = air_read.roads_now(now, weather, cfg.roads)
+    hw = weather["hourly"]
+    rows_h = [{"t": datetime.fromisoformat(t).replace(tzinfo=now.tzinfo), "wind_dir": d, "wind_kmh": k}
+              for t, d, k in zip(hw["time"], hw["wind_direction_10m"], hw["wind_speed_10m"])]
+    sun = [{"t": now.replace(hour=7, minute=0), "kind": "Sunrise"}]
+    return build_summary(r={"co2": co2, "rh": 45, "pm_now": 4}, cams=cams or [(now + timedelta(hours=h), 4) for h in range(13)],
+                         hourly=rows_h, co2_pts=[], rh_pts=[], pm_past=[], smoke=False, pollen_today=None,
+                         pollen_tomorrow=None, rush=[], sun=sun, now=now, roads=rows,
+                         roads_until=air_read.reaching_until(now, weather, rows), wind_now=weather["current"]["wind_direction_10m"],
+                         wind_kmh_now=weather["current"]["wind_speed_10m"])
+
+
+def item(s, item_id):
+    return next(i for i in s["items"] if i["id"] == item_id)
+
+
+def test_traffic_action_names_road_wind_and_until(auto_bqe):   # user path 3, Done when 8
+    s = summary_at(auto_bqe, tue(13), wind=(120, 9), hourly_leaving_at=16, co2=600)
+    t = item(s, "traffic")
+    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east windows shut", "until 4 PM")
+    assert t["facts"]["roads"] == [{"name": "the BQE", "band": "within 500 m", "side": "E"}]
+    assert "NO₂ and ultrafine particles don’t show" in t["why"]
+    # the windows by the road's side, the wind by its own direction (120° is south-east)
+    assert t["why"].startswith("The south-east wind carries the BQE’s exhaust here.")
+    assert item(summary_at(auto_bqe, tue(13), wind=(120, 9), hourly=[], co2=600), "traffic")["action"]["when"] == "until 9 PM"
+
+
+def test_co2_airing_wins_one_window_action(auto_bqe):   # Done when 13
+    s = summary_at(auto_bqe, tue(13), wind=(120, 9), hourly_leaving_at=16, co2=1400)
+    assert item(s, "traffic")["action"]["text"] == "Keep the east windows shut, except a short airing for CO₂"
+    assert sum(1 for i in s["items"] if "shut" in (i["action"]["text"] or "")) == 1
+
+
+def test_calm_traffic_action_before_sunrise(auto_bqe):
+    t = item(summary_at(auto_bqe, tue(6, 30), wind=(120, 4)), "traffic")
+    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east windows shut", "until 7 AM")
+    assert t["why"].startswith("Calm air holds the BQE’s exhaust close before sunrise.")
+    assert "traffic" not in {i["id"] for i in summary_at(auto_bqe, tue(7), wind=(120, 4))["items"]}
+
+
+def test_all_roads_off_no_traffic_action(auto_bqe_off):   # Done when 5
+    assert not any(i["id"] == "traffic" for i in summary_at(auto_bqe_off, tue(13), wind=(120, 9))["items"])
+
+
+def test_auto_road_times_the_run_and_names_the_pm_peak(auto_bqe):
+    """A road written at setup has no rush: the run waits for the end of its slow hours (weekdays) or its class's busy
+    hours (weekends), and a PM2.5 peak while it reaches is "the BQE's traffic". The PM2.5 action keeps the windows shut,
+    so there is no traffic action beside it: the PM2.5 item lists the road instead."""
+    no_rush = {"in_rush": False, "tomorrow": True}
+    home = air_read.home_name()
+    for now, why in ((tue(13), f"The BQE is slow until 9 PM, with the wind toward {home}."),
+                     (tue(13) + timedelta(days=4), f"The BQE’s traffic is busy until 10 PM, with the wind toward {home}.")):
+        rows = air_read.roads_now(now, weather_at(now, (120, 9)), auto_bqe.roads)
+        v = air_read.rule_run(4, False, no_rush, False, now.hour, air_read.run_road(rows, now))
+        assert (v["word"], v["why"]) == (f"After {why.split('until ')[1].split(',')[0]}", why)
+    s = summary_at(auto_bqe, tue(13), wind=(120, 9), cams=[(tue(13) + timedelta(hours=h), 25 if h == 2 else 4) for h in range(13)])
+    pm = item(s, "pm")
+    assert pm["facts"]["cause"] == "the BQE’s traffic" and pm["ctx"].startswith("Peak 3 PM, the BQE’s traffic")
+    assert pm["facts"]["roads"] == [{"name": "the BQE", "band": "within 500 m", "side": "E"}]
+    assert "traffic" not in {i["id"] for i in s["items"]}
+
+
+def test_until_waits_for_a_road_that_starts_reaching_later(tmp_path):
+    """"until" is the first hour with every road's flag off: when the wind turns at 4 PM from the BQE (east) to a road on
+    the west side, busy from 3 to 6 PM, the windows stay shut until 6 PM, and the action names both sides so it holds
+    until then. The why and the facts are about the road reaching now."""
+    west = {**AUTO_BQE, "name": "Kent Avenue", "key": "kent", "kind": "main road", "band": "within 200 m", "side": "W",
+            "toward": [250, 340], "toward_calm": [240, 350], "slow": [[15, 18]]}
+    t = item(summary_at(auto_config(tmp_path, west, AUTO_BQE), tue(13), wind=(120, 9), hourly_leaving_at=16), "traffic")
+    assert (t["action"]["text"], t["action"]["when"]) == ("Keep the east and west windows shut", "until 6 PM")
+    assert [r["name"] for r in t["facts"]["roads"]] == ["the BQE"]
+    assert t["why"].startswith("The south-east wind carries the BQE’s exhaust here.")
+
+
+def test_three_sides_shut_every_window(tmp_path):
+    """Roads reaching from three sides or more: the action names no side ("Keep the windows shut"); one or two are named."""
+    from summary import traffic_item
+    rows = [{"road": e, "reaching": True, "why": "slow"} for e in auto_config(tmp_path, AUTO_BQE, {**AUTO_BQE, "key": "w", "side": "W"},
+                                                                              {**AUTO_BQE, "key": "n", "side": "N"}).roads]
+    until = tue(16)
+    assert traffic_item(rows, until, 120, tue(13))["action"]["text"] == "Keep the windows shut"
+    assert traffic_item(rows[:2], until, 120, tue(13))["action"]["text"] == "Keep the east and west windows shut"
+    assert traffic_item(rows[1:], until, 120, tue(13))["action"]["text"] == "Keep the north and west windows shut"
+
+
+def test_next_sunrise_reaches_on_the_previous_evening(auto_bqe):
+    now = tue(22, 45)
+    sunrise = (now + timedelta(days=1)).replace(hour=0, minute=45)
+    weather = weather_at(now, (120, 4))
+    weather['daily'] = {'sunrise': [tue(0, 45).isoformat(), sunrise.isoformat()],
+                        'sunset': [tue(18).isoformat(), sunrise.replace(hour=18).isoformat()]}
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    assert rows[0]['reaching'] and rows[0]['why'] == 'calm'
+    assert air_read.reaching_until(now, weather, rows) == sunrise
+    sun = [{'kind': 'Sunrise', 't': t} for t in (tue(0, 45), sunrise)]
+    assert summary_mod._reaching_at(rows[0], now, [{'t': now, 'wind_dir': 120, 'wind_kmh': 4}], sun)
+
+
+@pytest.mark.parametrize('sunset', [tue(0), tue(0) + timedelta(days=1)])
+def test_polar_placeholder_is_not_a_calm_window(auto_bqe, sunset):
+    now = tue(0) - timedelta(minutes=30)
+    weather = weather_at(now, (120, 4))
+    weather['daily'] = {'sunrise': [tue(0).isoformat()], 'sunset': [sunset.isoformat()]}
+    _, sunrises = air_read._wind_hours(now, weather)
+    assert not sunrises  # No solar transit: neither midnight placeholder is a real sunrise.
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    assert not rows[0]['reaching']
+    sun = [{'kind': 'Sunrise', 't': tue(0)}, {'kind': 'Sunset', 't': sunset}]
+    assert not summary_mod._reaching_at(rows[0], now, [{'t': now, 'wind_dir': 120, 'wind_kmh': 4}], sun)
+
+
+def test_calm_until_ignores_later_wind_before_sunrise(auto_bqe):
+    from dataclasses import replace
+    now = tue(6, 30)
+    roads = [replace(r, slow=((6, 21),)) for r in auto_bqe.roads]
+    weather = weather_at(now, (120, 4), hourly=[(tue(7), 120, 9), (tue(8), 300, 9)])
+    weather['daily']['sunrise'] = [tue(6, 47).isoformat()]
+    rows = air_read.roads_now(now, weather, roads)
+    assert rows[0]['until'] == tue(6, 47)
+    assert air_read.reaching_until(now, weather, rows) == tue(6, 47)
+
+
+def test_calm_until_keeps_sunrise_without_hourly_forecast(auto_bqe):
+    now = tue(6, 30)
+    weather = weather_at(now, (120, 4), hourly=[])
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    assert rows[0]['until'] == tue(7)
+    assert air_read.reaching_until(now, weather, rows) == tue(7)
+
+
+@pytest.mark.parametrize("sunset", [tue(0), tue(0) + timedelta(days=1), None])
+def test_busy_road_reaches_without_a_real_sunrise(auto_bqe, sunset):
+    now = tue(13)
+    weather = weather_at(now, (120, 9), hourly=[(tue(14), 300, 9)])
+    weather["daily"] = {"sunrise": [tue(0).isoformat()] if sunset else [],
+                        "sunset": [sunset.isoformat()] if sunset else []}
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    assert rows[0]["reaching"] and rows[0]["why"] == "slow"
+    assert rows[0]["until"] == tue(14)
+    assert air_read.reaching_until(now, weather, rows) == tue(14)
+    sun = [{"kind": "Sunrise", "t": tue(0)}, {"kind": "Sunset", "t": sunset}] if sunset else []
+    assert summary_mod._reaching_at(rows[0], now, [{"t": now, "wind_dir": 120, "wind_kmh": 9}], sun)
+
+
+@pytest.mark.parametrize("hours", [[], [(tue(9), 120, 9)], [(tue(7), 120, 9), (tue(10), 120, 9)]])
+@pytest.mark.parametrize("east_end,west_end", [(8, 10), (10, 8)])
+def test_combined_action_covers_roads_starting_between_wind_rows(tmp_path, canned, monkeypatch, hours, east_end, west_end):
+    now = tue(6, 30)
+    east = {**AUTO_BQE, "slow": [[6, east_end]]}
+    west = {**AUTO_BQE, "key": "west", "name": "West Road", "side": "W", "slow": [[7, west_end]]}
+    # A road starting exactly at the end doesn't extend the action: its wind is away.
+    north = {**AUTO_BQE, "key": "north", "name": "North Road", "side": "N", "slow": [[10, 12]],
+             "toward": [250, 340]}
+    cfg = auto_config(tmp_path, east, west, north)
+    weather = weather_at(now, (120, 9), hourly=hours)
+    monkeypatch.setattr(air_read, "home_roads", lambda: cfg.roads)
+    monkeypatch.setattr(air_read.sources, "get_open_meteo_data", lambda: weather)
+    inputs = air_read.summary_inputs({}, 600, 45, 45, 21, 21, 4, [], [], now)
+    t = item(build_summary(**inputs), "traffic")
+    assert (t["action"]["text"], t["action"]["when"], t["action"]["when_end"]) == (
+        "Keep the east and west windows shut", "until 10 AM", tue(10).isoformat())
+    assert [r["name"] for r in t["facts"]["roads"]] == ["the BQE"]
+
+
+@pytest.mark.parametrize("sunset,reaching", [(tue(0), False), (tue(0) + timedelta(days=1), False),
+                                           (tue(18), True), (tue(0, 25) + timedelta(days=1), True)])
+def test_summary_solar_pairs_keep_the_date_when_a_sunrise_is_missing(auto_bqe, canned, monkeypatch, sunset, reaching):
+    now = tue(0) - timedelta(minutes=30)
+    weather = weather_at(now, (120, 4))
+    weather["daily"] = {"sunrise": [None, tue(0).isoformat()],
+                        "sunset": [(tue(18) - timedelta(days=1)).isoformat(), sunset.isoformat()]}
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    assert rows[0]["reaching"] is reaching
+    monkeypatch.setattr(air_read, "home_roads", lambda: auto_bqe.roads)
+    monkeypatch.setattr(air_read.sources, "get_open_meteo_data", lambda: weather)
+    inputs = air_read.summary_inputs({}, 600, 45, 45, 21, 21, 4, [], [], now)
+    assert summary_mod._reaching_at(rows[0], now, [{"t": now, "wind_dir": 120, "wind_kmh": 4}], inputs["sun"]) is reaching
+
+
+@pytest.mark.parametrize("path", ["live", "summary"])
+@pytest.mark.parametrize("sunset", [tue(0), tue(0) + timedelta(days=1)])
+def test_previous_days_cross_midnight_sunset_cannot_validate_polar_sunrise(auto_bqe, canned, monkeypatch, path, sunset):
+    now = tue(0) - timedelta(minutes=30)
+    weather = weather_at(now, (120, 4))
+    # The first slot's real sunset falls on the next slot's calendar date.
+    weather["daily"] = {"sunrise": [(tue(0, 45) - timedelta(days=1)).isoformat(), tue(0).isoformat()],
+                        "sunset": [tue(0, 25).isoformat(), sunset.isoformat()]}
+    rows = air_read.roads_now(now, weather, auto_bqe.roads)
+    if path == "live":
+        assert not rows[0]["reaching"]
+    else:
+        monkeypatch.setattr(air_read, "home_roads", lambda: auto_bqe.roads)
+        monkeypatch.setattr(air_read.sources, "get_open_meteo_data", lambda: weather)
+        inputs = air_read.summary_inputs({}, 600, 45, 45, 21, 21, 4, [], [], now)
+        assert not summary_mod._reaching_at(rows[0], now, [{"t": now, "wind_dir": 120, "wind_kmh": 4}], inputs["sun"])
