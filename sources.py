@@ -279,7 +279,16 @@ def choose_monitors(rows, indoor_id=None, outdoor_id=None, kinds=config.MONITOR_
     whose kind isn't set in AirGradient count only when given by id, or as the only candidate for neither kind.
     {kind: row}; MonitorChoice when it can't choose by itself, or chooses nothing. The same rule as setup's."""
     wanted_ids = {"indoor": indoor_id, "outdoor": outdoor_id}
-    rows = [r for r in rows if not _portable(r) or str(r.get("locationId")) in {str(i) for i in wanted_ids.values() if i is not None}]
+    wanted = {str(i) for i in wanted_ids.values() if i is not None}
+    portable = [r for r in rows if _portable(r) and str(r.get("locationId")) not in wanted]
+    rows = [r for r in rows if r not in portable]
+    for kind in kinds:   # a Go as the only monitor of a kind: name it and its flag, never "no monitors" or a silent skip
+        if wanted_ids[kind] is None and not any(r.get("locationType") == kind for r in rows):
+            go = next((r for r in portable if r.get("locationType") in (kind, None)), None)
+            if go is not None:
+                raise MonitorChoice(f"The only {kind} monitor is a portable AirGradient Go ({go.get('locationId')}: "
+                                    f"{publicmap.plain_text(go.get('locationName') or 'Unnamed monitor')}). Home Air "
+                                    f"uses a portable monitor only when chosen: pass --{kind}-id {go.get('locationId')}.")
     chosen = {}
     unknown = [r for r in rows if r.get("locationType") not in ("indoor", "outdoor")]
     for kind in kinds:
@@ -685,8 +694,10 @@ def place_rows(rows):
             out.append(row)
             continue
         kind = next((k for k, mid in selected.items() if mid is not None and mid == row.get("locationId")), None)
-        if kind is None and _portable(row):
-            continue
+        if kind is None and _portable(row) and (row.get("locationType") not in ("indoor", "outdoor") or any(
+                isinstance(r, dict) and not _portable(r) and r.get("locationType") == row.get("locationType") for r in rows)):
+            continue   # a Go next to the home's own monitor of that kind, or with no kind; a home whose only indoor or
+                       # outdoor monitor is a Go keeps it, as before
         kind = kind or row.get("locationType")
         if kind in ("indoor", "outdoor"):
             if kind not in selected or (selected[kind] is not None and selected[kind] != row.get("locationId")):

@@ -392,6 +392,13 @@ def test_a_portable_go_is_never_taken_as_the_home_monitor(monkeypatch):
     place = SimpleNamespace(indoor="Bedroom", outdoor="Porch", indoor_id=None, outdoor_id=None)
     monkeypatch.setattr(sources, "runtime", SimpleNamespace(CFG=SimpleNamespace(demo=False, place=place)))
     assert sources.place_rows([INDOOR, go, untyped_go, OUTDOOR]) == [INDOOR, OUTDOOR]
+    # an older home whose only indoor monitor is a Go keeps reading it, as before
+    assert sources.place_rows([go, OUTDOOR]) == [go, OUTDOOR]
+    # setup with a Go as the only indoor monitor names it and the flag to choose it, never "no monitors"
+    for rows in ([go], [go, OUTDOOR]):
+        with pytest.raises(sources.MonitorChoice, match="--indoor-id") as err:
+            sources.choose_monitors(rows)
+        assert "Go" in str(err.value) and "7009" in str(err.value)
 
 
 def test_non_integer_monitor_ids_are_invalid(root):
